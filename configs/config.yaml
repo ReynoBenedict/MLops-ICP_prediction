@@ -1,0 +1,69 @@
+
+project:
+  name: "ICP Forecasting (ARIMAX-LSTM Hybrid)"
+  version: "0.1.0"
+  stage: "LK-02"
+
+# DATA
+# INGESTION
+ingestion:
+  esdm_url: "https://migas.esdm.go.id/post/harga-minyak-mentah"
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  dataset_filename: "icp_dataset.csv"
+  download_delay: 1.0             # seconds between PDF downloads
+
+# DATA
+data:
+  raw_path: "data/processed/icp_dataset.csv"   # prefer real ingested data
+  processed_path: "data/processed/icp_processed.csv"
+  target_column: "icp_price"
+  date_column: "date"
+  feature_columns:
+    - "icp_price"                 # only ICP available from Kepmen PDFs
+  use_dummy_data: true            # set false after running run_ingestion.py
+  dummy_n_rows: 120               # ~10 years of monthly data
+
+# PREPROCESSING
+preprocessing:
+  fill_method: "ffill"            # forward-fill for missing values
+  normalize: true
+  normalize_method: "minmax"      # options: minmax | standard
+
+# FEATURE ENGINEERING
+features:
+  lag_periods: [1, 2, 3, 6, 12]  # months to lag
+  rolling_windows: [3, 6, 12]    # rolling average windows
+
+# ARIMAX
+arimax:
+  order: [1, 1, 1]               # (p, d, q)
+  seasonal_order: [0, 0, 0, 0]   # (P, D, Q, S) — disabled for now
+
+# LSTM
+lstm:
+  sequence_length: 12            # look-back window (months)
+  hidden_size: 64
+  num_layers: 2
+  dropout: 0.2
+  epochs: 50
+  batch_size: 16
+  learning_rate: 0.001
+  use_placeholder: true          # set false when PyTorch is available
+
+# HYBRID MODEL
+hybrid:
+  arimax_weight: 0.5
+  lstm_weight: 0.5
+
+# MODEL STORAGE
+models:
+  save_dir: "models/"
+  arimax_filename: "arimax_model.pkl"
+  lstm_filename: "lstm_model.pkl"
+  scaler_filename: "scaler.pkl"
+
+# EVALUATION
+evaluation:
+  metrics: ["rmse", "mape"]
+  test_split_ratio: 0.2
