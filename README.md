@@ -146,3 +146,6 @@ pytest tests/
 ```
 
 Jika seluruh pengujian berhasil dijalankan, terminal akan menampilkan status passed, yang menandakan bahwa fungsi-fungsi utama sistem berjalan dengan baik tanpa error.
+
+## Keterbatasan Saat Ini
+Pada tahap LK-02 ini proyek masih berada pada fase inisialisasi, sehingga beberapa komponen sistem belum sepenuhnya lengkap. Dataset ICP yang dihasilkan masih terbatas karena sebagian dokumen PDF bersifat *image-based* sehingga belum dapat diekstrak secara otomatis tanpa implementasi OCR. Selain itu, tahap pemodelan machine learning seperti implementasi model ARIMAX, LSTM, maupun model hybrid ARIMAX–LSTM belum diintegrasikan ke dalam pipeline. Pengembangan selanjutnya akan difokuskan pada penyempurnaan dataset, integrasi variabel eksternal (seperti harga Brent dan nilai tukar USD/IDR), serta pembangunan pipeline pelatihan dan evaluasi model secara penuh.
