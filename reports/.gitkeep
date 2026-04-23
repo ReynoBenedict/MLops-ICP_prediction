@@ -1,0 +1,2 @@
+# Direktori ini digunakan untuk menyimpan laporan CI (JUnit XML, coverage XML).
+# File ini memastikan direktori dilacak oleh git meskipun kosong.
