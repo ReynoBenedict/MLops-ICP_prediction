@@ -1,4 +1,4 @@
-# Preprocessing routines for time-series dataset.
+# Fungsi preprocessing untuk dataset time-series ICP
 from __future__ import annotations
 
 import logging
@@ -32,7 +32,7 @@ def handle_missing_values(
     elif method == "interpolate":
         df[numeric_cols] = df[numeric_cols].interpolate(method="linear").ffill().bfill()
     else:
-        raise ValueError(f"Unknown method: '{method}'. Use ffill, bfill, or interpolate.")
+        raise ValueError(f"Metode tidak dikenal: '{method}'. Gunakan ffill, bfill, atau interpolate.")
     return df
 
 
@@ -76,5 +76,5 @@ def train_test_split_timeseries(
     split_idx = int(len(df) * (1 - test_ratio))
     train = df.iloc[:split_idx].reset_index(drop=True)
     test = df.iloc[split_idx:].reset_index(drop=True)
-    logger.info("Split: %d train / %d test rows.", len(train), len(test))
+    logger.info("Split: %d data latih / %d data uji.", len(train), len(test))
     return train, test

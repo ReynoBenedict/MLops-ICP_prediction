@@ -1,4 +1,4 @@
-# Load dataset or generate dummy data.
+# Muat dataset atau buat data dummy jika file tidak ada
 from __future__ import annotations
 
 import logging
@@ -34,13 +34,13 @@ def load_icp_dataset(csv_path: Optional[str] = None) -> pd.DataFrame:
     if path.exists():
         try:
             df = pd.read_csv(path)
-            logger.info("Loaded %d rows from %s", len(df), path)
+            logger.info("Dimuat %d baris dari %s", len(df), path)
             df["date"] = pd.to_datetime(df["date"], errors="coerce")
             return df
         except Exception as exc:
-            logger.warning("Failed to read %s: %s", path, exc)
+            logger.warning("Gagal membaca %s: %s", path, exc)
 
-    logger.warning("Dataset not found — using dummy data.")
+    logger.warning("Dataset tidak ditemukan — menggunakan data dummy.")
     return _generate_dummy_data()
 
 

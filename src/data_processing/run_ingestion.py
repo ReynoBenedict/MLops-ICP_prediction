@@ -1,29 +1,22 @@
 # run_ingestion.py
-# ETL Pipeline untuk mengunduh laporan ICP dari ESDM ke data/raw/
+# Pipeline ETL: unduh laporan ICP dari ESDM ke data/raw/
 # Cara pakai: python src/data_processing/run_ingestion.py
 
 from __future__ import annotations
 
 import logging
 import re
-import shutil
 import sys
 import time
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urljoin, urlparse, unquote
 
-# ---------------------------------------------------------------------------
-# PATH SETUP
-# ---------------------------------------------------------------------------
 _SRC_DIR = Path(__file__).resolve().parents[1]
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(_SRC_DIR) not in sys.path:
     sys.path.insert(0, str(_SRC_DIR))
 
-# ---------------------------------------------------------------------------
-# LOGGING
-# ---------------------------------------------------------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s  %(message)s",
@@ -31,16 +24,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger("run_ingestion")
 
-# ---------------------------------------------------------------------------
-# CONSTANTS
-# ---------------------------------------------------------------------------
-SOURCE_URL   = "https://migas.esdm.go.id/post/harga-minyak-mentah"
-RAW_PDF_DIR  = _PROJECT_ROOT / "data" / "raw"
-# Hapus RAW_LEGACY_DIR karena sudah digabung ke data/raw/
+SOURCE_URL    = "https://migas.esdm.go.id/post/harga-minyak-mentah"
+RAW_PDF_DIR   = _PROJECT_ROOT / "data" / "raw"
 PROCESSED_DIR = _PROJECT_ROOT / "data" / "processed"
-DATASET_CSV  = PROCESSED_DIR / "icp_dataset.csv"
+DATASET_CSV   = RAW_PDF_DIR / "dataset.csv"
 
-DOWNLOAD_DELAY = 1.0  # seconds between requests
+TARGET_YEAR    = 2019
+DOWNLOAD_DELAY = 1.0
 
 HEADERS = {
     "User-Agent": (
@@ -60,22 +50,28 @@ MONTH_MAP_ID: dict[str, int] = {
 _MONTH_NAMES = set(MONTH_MAP_ID.keys())
 _MONTH_RE_STR = "|".join(MONTH_MAP_ID.keys())
 
-# Patterns for extracting year-month from URL or filename
+MONTH_MAP_EN: dict[str, int] = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4,
+    "mei": 5, "mei": 5, "jun": 6, "jul": 7, "ags": 8, "aug": 8,
+    "sep": 9, "sept": 9, "oct": 10, "okto": 10, "nov": 11, "dec": 12,
+    "january": 1, "february": 2, "march": 3, "may": 5,
+    "june": 6, "july": 7, "august": 8, "september": 9,
+    "october": 10, "november": 11, "december": 12,
+}
+_MONTH_MAP_ALL = {**MONTH_MAP_ID, **MONTH_MAP_EN}
+_MONTH_RE_ALL = "|".join(sorted(_MONTH_MAP_ALL.keys(), key=len, reverse=True))
+
 _PAT_URL_MONTH_YEAR = re.compile(
-    r"(?P<month>" + _MONTH_RE_STR + r")[_\s%-](?P<year>20\d{2})",
+    r"(?P<month>" + _MONTH_RE_ALL + r")[_\s%-]+(?P<year>20\d{2})",
     re.IGNORECASE,
 )
 _PAT_URL_YEAR_MONTH = re.compile(
     r"(?P<year>20\d{2})[/_-](?:0?(?P<month_num>\d{1,2})(?:[/_-]|$)|"
-    r"(?P<month>" + _MONTH_RE_STR + r"))",
+    r"(?P<month>" + _MONTH_RE_ALL + r"))",
     re.IGNORECASE,
 )
 _PAT_FILENAME_DATE = re.compile(r"(\d{4})[_-](\d{2})", re.IGNORECASE)
 
-
-# ---------------------------------------------------------------------------
-# HELPERS
-# ---------------------------------------------------------------------------
 
 def _get_session():
     try:
@@ -96,50 +92,42 @@ def _parse_html(html: str):
 
 
 def _infer_filename(pdf_url: str, link_text: str, column_year: Optional[int]) -> Optional[str]:
-    # Menebak nama file icp_YYYY_MM.pdf dari URL PDF atau teks link.
     decoded_url = unquote(pdf_url)
     url_path    = urlparse(decoded_url).path
 
-    # --- Try: year & month-name in URL path (most common) ---
     m = _PAT_URL_MONTH_YEAR.search(url_path)
     if m:
-        month_num = MONTH_MAP_ID.get(m.group("month").lower())
+        month_num = _MONTH_MAP_ALL.get(m.group("month").lower())
         year      = m.group("year")
         if month_num:
             return f"icp_{year}_{month_num:02d}.pdf"
 
-    # --- Try: YYYY/MM numeric pattern in URL ---
     m2 = _PAT_FILENAME_DATE.search(url_path)
     if m2:
         year, month = m2.group(1), m2.group(2).zfill(2)
         if 1 <= int(month) <= 12:
             return f"icp_{year}_{month}.pdf"
 
-    # --- Try: link text = month name + known column year ---
     clean_text = link_text.strip().lower()
-    if clean_text in _MONTH_NAMES and column_year:
-        month_num = MONTH_MAP_ID[clean_text]
-        return f"icp_{column_year}_{month_num:02d}.pdf"
+    year_m = re.search(r"20\d{2}", url_path)
+    inferred_year = int(year_m.group()) if year_m else column_year
 
-    # --- Try: month name in URL with numeric year ---
-    for month_name, month_num in MONTH_MAP_ID.items():
-        if month_name in url_path.lower():
-            year_m = re.search(r"20\d{2}", url_path)
-            if year_m:
-                return f"icp_{year_m.group()}_{month_num:02d}.pdf"
+    month_num = _MONTH_MAP_ALL.get(clean_text)
+    if month_num and inferred_year:
+        return f"icp_{inferred_year}_{month_num:02d}.pdf"
 
-    logger.debug("Cannot determine filename from URL: %s  text: %s", pdf_url, link_text)
+    for token, mnum in sorted(_MONTH_MAP_ALL.items(), key=lambda x: len(x[0]), reverse=True):
+        if token in url_path.lower():
+            if inferred_year:
+                return f"icp_{inferred_year}_{mnum:02d}.pdf"
+
+    logger.debug("Tidak bisa tentukan nama file dari URL: %s  teks: %s", pdf_url, link_text)
     return None
 
 
-# ---------------------------------------------------------------------------
-# STEP 1 — EXTRACT: crawl webpage and collect PDF links
-# ---------------------------------------------------------------------------
-
-def collect_pdf_links(source_url: str, session) -> list[dict]:
-    # Mengambil daftar link PDF dari halaman ESDM.
+def collect_pdf_links(source_url: str, session, target_year: int = None) -> list[dict]:
     logger.info("=" * 60)
-    logger.info("[EXTRACT] Crawling: %s", source_url)
+    logger.info("[EXTRACT] Crawling: %s  (target year: %d)", source_url, target_year)
     logger.info("=" * 60)
 
     resp = session.get(source_url, timeout=30)
@@ -149,30 +137,23 @@ def collect_pdf_links(source_url: str, session) -> list[dict]:
     pdf_entries: list[dict] = []
     seen_urls: set[str] = set()
 
-    # ---- Strategy 1: parse the year-column table -------------------------
-    # The page contains a <table> whose <th> cells are year numbers and
-    # whose <td> cells hold month-name links pointing directly to PDFs.
     for table in soup.find_all("table"):
         headers: list[Optional[int]] = []
-
-        # Collect column years from the header row
         header_row = table.find("tr")
         if header_row:
             for th in header_row.find_all(["th", "td"]):
                 text = th.get_text(strip=True)
-                if re.fullmatch(r"20\d{2}", text):
-                    headers.append(int(text))
-                else:
-                    headers.append(None)
+                headers.append(int(text) if re.fullmatch(r"20\d{2}", text) else None)
 
         if not any(h for h in headers):
-            continue  # this table has no year columns — skip
+            continue
 
-        # Iterate data rows
         for row in table.find_all("tr")[1:]:
             cells = row.find_all("td")
             for col_idx, cell in enumerate(cells):
                 col_year = headers[col_idx] if col_idx < len(headers) else None
+                if col_year != target_year:
+                    continue
                 for a_tag in cell.find_all("a", href=True):
                     href = a_tag["href"].strip()
                     if not href.lower().endswith(".pdf"):
@@ -185,41 +166,42 @@ def collect_pdf_links(source_url: str, session) -> list[dict]:
                     filename  = _infer_filename(full_url, link_text, col_year)
                     month_num = MONTH_MAP_ID.get(link_text.strip().lower())
                     pdf_entries.append({
-                        "url":      full_url,
-                        "filename": filename,
-                        "year":     col_year,
-                        "month":    month_num,
+                        "url":       full_url,
+                        "filename":  filename,
+                        "year":      col_year,
+                        "month":     month_num,
                         "link_text": link_text,
                     })
 
-    # ---- Strategy 2: fallback — any .pdf link on the page ---------------
     if not pdf_entries:
-        logger.warning("Table strategy found nothing — falling back to all-link scan.")
+        logger.warning("Strategi tabel kosong — fallback ke semua link PDF di halaman.")
         for a_tag in soup.find_all("a", href=True):
             href = a_tag["href"].strip()
             if not href.lower().endswith(".pdf"):
+                continue
+            decoded_href = unquote(href)
+            m_year = re.search(r"20\d{2}", decoded_href)
+            inferred_year = int(m_year.group()) if m_year else None
+            if inferred_year != target_year:
                 continue
             full_url = urljoin(source_url, href)
             if full_url in seen_urls:
                 continue
             seen_urls.add(full_url)
             link_text = a_tag.get_text(strip=True)
-            filename  = _infer_filename(full_url, link_text, None)
+            month_num = _MONTH_MAP_ALL.get(link_text.strip().lower())
+            filename  = _infer_filename(full_url, link_text, inferred_year)
             pdf_entries.append({
-                "url":      full_url,
-                "filename": filename,
-                "year":     None,
-                "month":    None,
+                "url":       full_url,
+                "filename":  filename,
+                "year":      inferred_year,
+                "month":     month_num,
                 "link_text": link_text,
             })
 
-    logger.info("[EXTRACT] Found %d PDF links.", len(pdf_entries))
+    logger.info("[EXTRACT] Ditemukan %d link PDF untuk tahun %d.", len(pdf_entries), target_year)
     return pdf_entries
 
-
-# ---------------------------------------------------------------------------
-# STEP 2 — EXTRACT continued: download PDFs
-# ---------------------------------------------------------------------------
 
 def download_pdfs(
     pdf_entries: list[dict],
@@ -227,7 +209,7 @@ def download_pdfs(
     session,
     delay: float = DOWNLOAD_DELAY,
 ) -> list[Path]:
-    # Mengunduh setiap PDF ke folder tujuan.
+    # Mengunduh setiap PDF ke folder tujuan
     dest_dir.mkdir(parents=True, exist_ok=True)
     downloaded: list[Path] = []
     total = len(pdf_entries)
@@ -237,17 +219,16 @@ def download_pdfs(
         filename = entry.get("filename")
 
         if not filename:
-            # Use the raw basename from the URL as a last resort
             raw_name = Path(urlparse(pdf_url).path).name
             filename = raw_name if raw_name.endswith(".pdf") else None
 
         if not filename:
-            logger.warning("[%d/%d] Cannot determine filename — skipping: %s", idx, total, pdf_url)
+            logger.warning("[%d/%d] Tidak bisa tentukan nama file — dilewati: %s", idx, total, pdf_url)
             continue
 
         dest_path = dest_dir / filename
 
-        logger.info("[%d/%d] Downloading → %s", idx, total, filename)
+        logger.info("[%d/%d] Mengunduh → %s", idx, total, filename)
         try:
             with session.get(pdf_url, stream=True, timeout=60) as resp:
                 resp.raise_for_status()
@@ -255,10 +236,10 @@ def download_pdfs(
                     for chunk in resp.iter_content(chunk_size=8192):
                         fh.write(chunk)
             size_kb = dest_path.stat().st_size // 1024
-            logger.info("          Saved  %s  (%d KB)", dest_path.name, size_kb)
+            logger.info("          Tersimpan  %s  (%d KB)", dest_path.name, size_kb)
             downloaded.append(dest_path)
         except Exception as exc:
-            logger.error("          FAILED: %s — %s", pdf_url, exc)
+            logger.error("          GAGAL: %s — %s", pdf_url, exc)
             if dest_path.exists():
                 dest_path.unlink()
 
@@ -268,12 +249,8 @@ def download_pdfs(
     return downloaded
 
 
-# ---------------------------------------------------------------------------
-# STEP 3 — TRANSFORM: extract text from PDFs
-# ---------------------------------------------------------------------------
-
 def _words_to_text(words: list) -> str:
-    # Mengonversi kata dari pdfplumber menjadi teks baris.
+    # Mengonversi kata dari pdfplumber menjadi teks baris
     if not words:
         return ""
     words_sorted = sorted(words, key=lambda w: (round(w["top"]), w["x0"]))
@@ -294,12 +271,41 @@ def _words_to_text(words: list) -> str:
     return "\n".join(" ".join(line) for line in lines)
 
 
+def _ocr_pdf(pdf_path: Path) -> str:
+    try:
+        import cv2
+        import numpy as np
+        import pytesseract
+        import fitz
+    except ImportError:
+        logger.warning("OCR libraries not available (pytesseract, opencv-python, pymupdf).")
+        return ""
+    pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+    texts: list[str] = []
+    try:
+        doc = fitz.open(str(pdf_path))
+        for page in doc:
+            pix = page.get_pixmap(dpi=200)
+            img_np = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
+            if pix.n == 4:
+                import cv2 as _cv2
+                img_np = _cv2.cvtColor(img_np, cv2.COLOR_RGBA2RGB)
+            gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
+            denoised = cv2.fastNlMeansDenoising(gray, h=10)
+            _, thresh = cv2.threshold(denoised, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+            resized = cv2.resize(thresh, None, fx=2, fy=2, interpolation=cv2.INTER_LINEAR)
+            texts.append(pytesseract.image_to_string(resized, lang="ind+eng"))
+        doc.close()
+    except Exception as exc:
+        logger.warning("OCR gagal pada '%s': %s", pdf_path.name, exc)
+    return "\n".join(texts)
+
+
 def extract_text_from_pdfs(
     pdf_dir: Path,
     output_dir: Path,
     extra_dirs: list[Path] | None = None,
 ) -> list[dict]:
-    # Ekstrak teks dari PDF menggunakan pdfplumber dengan strategi baris & karakter.
     try:
         import pdfplumber
     except ImportError:
@@ -307,26 +313,25 @@ def extract_text_from_pdfs(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Collect PDFs from all specified directories (de-duplicate by filename)
     all_dirs = [pdf_dir] + (extra_dirs or [])
     seen: dict[str, Path] = {}
     for d in all_dirs:
         if d.exists():
             for p in sorted(d.glob("*.pdf")):
-                seen[p.name] = p   # later dirs win on name collision
+                seen[p.name] = p
     pdf_files = sorted(seen.values(), key=lambda p: p.name)
 
     if not pdf_files:
-        logger.warning("[TRANSFORM] No PDFs found in %s", [str(d) for d in all_dirs])
+        logger.warning("[TRANSFORM] Tidak ada PDF ditemukan di %s", [str(d) for d in all_dirs])
         return []
 
     logger.info("=" * 60)
-    logger.info("[TRANSFORM] Extracting text from %d PDFs ...", len(pdf_files))
+    logger.info("[TRANSFORM] Ekstrak teks dari %d PDF ...", len(pdf_files))
     logger.info("=" * 60)
 
     results: list[dict] = []
     for pdf_path in pdf_files:
-        logger.info("[TRANSFORM] Processing: %s", pdf_path.name)
+        logger.info("[TRANSFORM] Memproses: %s", pdf_path.name)
         page_texts: list[str] = []
         try:
             with pdfplumber.open(pdf_path) as pdf:
@@ -340,17 +345,21 @@ def extract_text_from_pdfs(
                             text = ""
                     page_texts.append(text)
         except Exception as exc:
-            logger.warning("          pdfplumber error on '%s': %s", pdf_path.name, exc)
+            logger.warning("          pdfplumber error pada '%s': %s", pdf_path.name, exc)
 
         text = "\n".join(page_texts).strip()
 
         if not text:
-            logger.info("          (image-only or empty PDF — no text extracted)")
+            logger.info("          Teks kosong — mencoba OCR ...")
+            text = _ocr_pdf(pdf_path)
+            if text.strip():
+                logger.info("          OCR berhasil.")
+            else:
+                logger.info("          OCR juga kosong.")
 
-        # Save raw text
         txt_path = output_dir / (pdf_path.stem + ".txt")
         txt_path.write_text(text, encoding="utf-8")
-        logger.info("          Text saved → %s", txt_path.name)
+        logger.info("          → %s", txt_path.name)
 
         results.append({
             "pdf_name": pdf_path.name,
@@ -360,183 +369,197 @@ def extract_text_from_pdfs(
             "has_text": bool(text),
         })
 
-    logger.info("[TRANSFORM] Done. %d files processed.", len(results))
+    logger.info("[TRANSFORM] Selesai. %d file diproses.", len(results))
     return results
 
 
-# ---------------------------------------------------------------------------
-# STEP 4 — LOAD: build structured CSV dataset
-# ---------------------------------------------------------------------------
+_FNAME_MONTH_MAP: dict[str, int] = {
+    "jan": 1, "feb": 2, "mar": 3, "apr": 4,
+    "mei": 5, "jun": 6, "juli": 7, "jul": 7,
+    "ags": 8, "aug": 8, "sep": 9, "sept": 9,
+    "okto": 10, "oct": 10, "nov": 11, "dec": 12, "des": 12,
+}
 
-def build_csv_dataset(extraction_results: list[dict], csv_path: Path) -> None:
-    # Membuat atau memperbarui CSV dataset dari hasil ekstraksi.
+
+def _parse_date_from_any_filename(filename: str) -> Optional[str]:
+    stem = Path(filename).stem.lower()
+    year_m = re.search(r"20(\d{2})", stem)
+    if not year_m:
+        return None
+    year = year_m.group(0)
+    for token in sorted(_FNAME_MONTH_MAP.keys(), key=len, reverse=True):
+        if token in stem:
+            month_num = _FNAME_MONTH_MAP[token]
+            return f"{year}-{month_num:02d}"
+    return None
+
+
+def build_csv_dataset(
+    extraction_results: list[dict],
+    csv_path: Path,
+    target_year: int = None,
+) -> None:
     try:
         import pandas as pd
     except ImportError:
         raise ImportError("Run: pip install pandas")
 
-    try:
-        from data_processing.rebuild_dataset import _parse_price, _extract_text as _rb_extract
-    except ImportError:
-        _rb_extract = None
-
-    # Import price-parsing utilities
     sys.path.insert(0, str(_SRC_DIR))
-    from utils.text_parsing import parse_icp_price, parse_date_from_filename
+    from utils.text_parsing import parse_icp_price
 
     logger.info("=" * 60)
-    logger.info("[LOAD] Building dataset CSV ...")
+    logger.info("[LOAD] Membangun dataset CSV (target %d) ...", target_year)
     logger.info("=" * 60)
 
     csv_path.parent.mkdir(parents=True, exist_ok=True)
     records: list[dict] = []
-    skipped_empty: list[str] = []
-    skipped_no_price: list[str] = []
 
     for item in extraction_results:
         pdf_name = item["pdf_name"]
         text     = item.get("text", "")
 
-        if not text.strip():
-            logger.info("  SKIP (no text): %s", pdf_name)
-            skipped_empty.append(pdf_name)
+        price_date = None
+        if text.strip():
+            price_date = parse_icp_price(text)
+
+        if price_date:
+            date_str, price = price_date
+        else:
+            date_str = _parse_date_from_any_filename(pdf_name)
+            price    = None
+
+        if not date_str:
+            logger.warning("  SKIP (tidak bisa tentukan tanggal): %s", pdf_name)
             continue
 
-        result = parse_icp_price(text)
-        if not result:
-            # Fallback: use date from filename
-            date_str = parse_date_from_filename(pdf_name)
-            if not date_str:
-                logger.warning("  SKIP (price not found): %s", pdf_name)
-                skipped_no_price.append(pdf_name)
-                continue
-            logger.info("  Partial (date from filename only): %s → %s", pdf_name, date_str)
-            records.append({"date": date_str, "icp_price": None, "source_pdf": pdf_name})
+        year_val = int(date_str[:4])
+        if year_val not in [2019, 2020]:
             continue
 
-        date_str, price = result
-        logger.info("  OK  %s → %s  US$ %.2f", pdf_name, date_str, price)
-        records.append({"date": date_str, "icp_price": price, "source_pdf": pdf_name})
+        month_val = int(date_str[5:7])
+        logger.info("  %s -> month=%d  price=%s", pdf_name, month_val, price)
+        records.append({"month": month_val, "year": year_val, "icp_price": price})
 
-    if not records:
-        logger.warning("[LOAD] No records extracted — CSV not written.")
-        return
+    df = pd.DataFrame(records, columns=["month", "year", "icp_price"])
+    df = df.drop_duplicates(subset=["year", "month"], keep="first")
 
-    df = pd.DataFrame(records, columns=["date", "icp_price", "source_pdf"])
-    df = df.drop_duplicates(subset="date", keep="first")
-    df = df.sort_values("date").reset_index(drop=True)
+    df = df.sort_values(["year", "month"]).reset_index(drop=True)
+    df["icp_price"] = pd.to_numeric(df["icp_price"], errors="coerce")
+    df["icp_price"] = df["icp_price"].interpolate(method="linear").ffill().bfill()
+    df["icp_price"] = df["icp_price"].round(2)
+    df = df.sort_values(["year", "month"]).reset_index(drop=True)
+
     df.to_csv(csv_path, index=False)
 
     logger.info("=" * 60)
-    logger.info("[LOAD] Dataset saved: %d records → %s", len(df), csv_path)
-    if skipped_empty:
-        logger.info("       Skipped (image-only): %d", len(skipped_empty))
-    if skipped_no_price:
-        logger.info("       Skipped (price not found): %d", len(skipped_no_price))
-        for f in skipped_no_price:
-            logger.info("         - %s", f)
+    logger.info("[LOAD] Dataset tersimpan: %d record -> %s", len(df), csv_path)
     logger.info("=" * 60)
 
-    # Print preview
     print("\n" + "=" * 60)
-    print(f"DATASET PREVIEW — {len(df)} records")
+    print("DATASET ({}) -- {} record".format(target_year, len(df)))
     print("=" * 60)
     print(df.to_string(index=False))
     print("=" * 60)
+    print("=" * 60)
 
 
-# ---------------------------------------------------------------------------
-# MAIN ETL ORCHESTRATOR
-# ---------------------------------------------------------------------------
+def run_local(
+    raw_pdf_dir:  Path = RAW_PDF_DIR,
+    processed_dir: Path = PROCESSED_DIR,
+    target_year:  int   = TARGET_YEAR,
+) -> None:
+    raw_pdf_dir   = Path(raw_pdf_dir)
+    processed_dir = Path(processed_dir)
+    csv_path      = raw_pdf_dir / "dataset.csv"
+
+    raw_pdf_dir.mkdir(parents=True, exist_ok=True)
+    processed_dir.mkdir(parents=True, exist_ok=True)
+
+    logger.info("=" * 60)
+    logger.info("[LOCAL] Ekstrak dari PDF yang sudah ada di %s", raw_pdf_dir)
+    logger.info("=" * 60)
+
+    extraction_results = extract_text_from_pdfs(raw_pdf_dir, processed_dir)
+
+    if not extraction_results:
+        logger.error("[LOCAL] Tidak ada PDF yang berhasil diekstrak.")
+        return
+
+    build_csv_dataset(extraction_results, csv_path, target_year=target_year)
+
+    logger.info("[LOCAL] Selesai.")
+    logger.info("  PDF mentah  : %s", raw_pdf_dir)
+    logger.info("  Dataset CSV : %s", csv_path)
+
 
 def run_ingestion(
-    source_url: str  = SOURCE_URL,
-    raw_pdf_dir: Path = RAW_PDF_DIR,
+    source_url:   str   = SOURCE_URL,
+    raw_pdf_dir:  Path  = RAW_PDF_DIR,
     processed_dir: Path = PROCESSED_DIR,
-    delay: float      = DOWNLOAD_DELAY,
+    delay:        float = DOWNLOAD_DELAY,
+    target_year:  int   = TARGET_YEAR,
 ) -> None:
-    # Pipeline ETL lengkap: crawl web, unduh PDF ke data/raw/, dan simpan ke CSV.
-    raw_pdf_dir  = Path(raw_pdf_dir)
+    raw_pdf_dir   = Path(raw_pdf_dir)
     processed_dir = Path(processed_dir)
-    csv_path      = processed_dir / "icp_dataset.csv"
+    csv_path      = raw_pdf_dir / "dataset.csv"
 
-    # ------------------------------------------------------------------
-    # STEP 0 — Clear existing PDFs
-    # ------------------------------------------------------------------
-    logger.info("=" * 60)
-    logger.info("[INIT] Clearing existing PDFs in %s ...", raw_pdf_dir)
-    logger.info("=" * 60)
-    if raw_pdf_dir.exists():
-        shutil.rmtree(raw_pdf_dir)
-        logger.info("[INIT] Removed directory: %s", raw_pdf_dir)
     raw_pdf_dir.mkdir(parents=True, exist_ok=True)
-    logger.info("[INIT] Created fresh directory: %s", raw_pdf_dir)
+    processed_dir.mkdir(parents=True, exist_ok=True)
 
     session = _get_session()
 
-    # ------------------------------------------------------------------
-    # STEP 1 — Collect PDF links
-    # ------------------------------------------------------------------
-    pdf_entries = collect_pdf_links(source_url, session)
+    pdf_entries = collect_pdf_links(source_url, session, target_year=target_year)
 
     if not pdf_entries:
-        logger.error("[EXTRACT] No PDF links found. Aborting.")
+        logger.error("[EXTRACT] Tidak ada link PDF ditemukan untuk tahun %d.", target_year)
         return
 
-    # ------------------------------------------------------------------
-    # STEP 2 — Download PDFs
-    # ------------------------------------------------------------------
     logger.info("=" * 60)
-    logger.info("[EXTRACT] Downloading %d PDFs ...", len(pdf_entries))
+    logger.info("[EXTRACT] Mengunduh %d PDF (tahun %d) ...", len(pdf_entries), target_year)
     logger.info("=" * 60)
     downloaded = download_pdfs(pdf_entries, raw_pdf_dir, session, delay)
-    logger.info("[EXTRACT] %d PDFs downloaded successfully.", len(downloaded))
+    logger.info("[EXTRACT] %d PDF berhasil diunduh.", len(downloaded))
 
     if not downloaded:
-        logger.error("[EXTRACT] No PDFs downloaded. Aborting.")
+        logger.error("[EXTRACT] Tidak ada PDF yang diunduh.")
         return
 
-    # ------------------------------------------------------------------
-    # STEP 3 — Extract text
-    # ------------------------------------------------------------------
-    extraction_results = extract_text_from_pdfs(
-        raw_pdf_dir,
-        processed_dir
-    )
+    extraction_results = extract_text_from_pdfs(raw_pdf_dir, processed_dir)
+    build_csv_dataset(extraction_results, csv_path, target_year=target_year)
 
-    # ------------------------------------------------------------------
-    # STEP 4 — Build dataset CSV
-    # ------------------------------------------------------------------
-    build_csv_dataset(extraction_results, csv_path)
+    logger.info("Pipeline selesai.")
+    logger.info("  PDF mentah  : %s", raw_pdf_dir)
+    logger.info("  Dataset CSV : %s", csv_path)
 
-    logger.info("Pipeline completed successfully.")
-    logger.info("  Raw PDFs   : %s", raw_pdf_dir)
-    logger.info("  Processed  : %s", processed_dir)
-    logger.info("  Dataset CSV: %s", csv_path)
-
-
-# ---------------------------------------------------------------------------
-# ENTRY POINT
-# ---------------------------------------------------------------------------
 
 def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="ICP ETL Pipeline — unduh & ekstrak laporan harga minyak mentah ESDM."
+        description="ICP ETL Pipeline -- unduh & ekstrak laporan harga minyak mentah ESDM."
     )
-    parser.add_argument("--url",     default=SOURCE_URL,        help="URL halaman sumber ESDM")
-    parser.add_argument("--raw-dir", default=str(RAW_PDF_DIR),  help="Direktori simpan PDF")
-    parser.add_argument("--out-dir", default=str(PROCESSED_DIR), help="Direktori output processed")
-    parser.add_argument("--delay",   type=float, default=DOWNLOAD_DELAY, help="Jeda antar-unduhan (detik)")
+    parser.add_argument("--url",         default=SOURCE_URL,         help="URL halaman sumber ESDM")
+    parser.add_argument("--raw-dir",     default=str(RAW_PDF_DIR),   help="Direktori simpan PDF")
+    parser.add_argument("--out-dir",     default=str(PROCESSED_DIR), help="Direktori output processed")
+    parser.add_argument("--delay",       type=float, default=DOWNLOAD_DELAY, help="Jeda antar-unduhan (detik)")
+    parser.add_argument("--year",        type=int,   default=TARGET_YEAR,    help="Tahun target")
+    parser.add_argument("--local",       action="store_true",                help="Gunakan PDF lokal, skip download")
     args = parser.parse_args()
 
-    run_ingestion(
-        source_url    = args.url,
-        raw_pdf_dir   = Path(args.raw_dir),
-        processed_dir = Path(args.out_dir),
-        delay         = args.delay,
-    )
+    if args.local:
+        run_local(
+            raw_pdf_dir   = Path(args.raw_dir),
+            processed_dir = Path(args.out_dir),
+            target_year   = args.year,
+        )
+    else:
+        run_ingestion(
+            source_url    = args.url,
+            raw_pdf_dir   = Path(args.raw_dir),
+            processed_dir = Path(args.out_dir),
+            delay         = args.delay,
+            target_year   = args.year,
+        )
 
 
 if __name__ == "__main__":

@@ -1,4 +1,4 @@
-# text_parsing.py — extract ICP price and date from Kepmen PDF text
+# text_parsing.py — Ekstraksi harga dan tanggal ICP dari teks PDF Kepmen
 
 from __future__ import annotations
 
@@ -13,23 +13,19 @@ MONTH_MAP: dict[str, int] = {
 
 _MONTH_RE = "|".join(MONTH_MAP.keys())
 
-# ---------------------------------------------------------------------------
-# Regex patterns
-# ---------------------------------------------------------------------------
-
-# Anchor: "ditetapkan sebesar US$ <price>"
+# Pola: "ditetapkan sebesar US$ <harga>"
 _PAT_ANCHOR = re.compile(
     r"(?:ditetapkan\s+sebesar|sebesar)\s+US\$\s*(?P<price>\d+[.,]\d+)",
     re.IGNORECASE,
 )
 
-# Month + year in text
+# Pola: bulan + tahun dalam teks
 _PAT_MONTH_YEAR = re.compile(
     r"(?:untuk\s+)?(?:bulan\s+)?(?P<month>" + _MONTH_RE + r")\s+(?P<year>20\d{2})",
     re.IGNORECASE,
 )
 
-# Broad scan: month + year → price within 300 chars
+# Pola luas: bulan + tahun → harga dalam 300 karakter
 _PAT_BROAD = re.compile(
     r"(?P<month>" + _MONTH_RE + r")\s+(?P<year>20\d{2})"
     r"(?:.{0,300}?)"
@@ -37,7 +33,7 @@ _PAT_BROAD = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-# Alternative: "ICP ... <month> <year> ... USD <price>"  (some newer reports)
+# Variasi: "USD <harga>" (beberapa laporan terbaru)
 _PAT_ICP_USD = re.compile(
     r"(?P<month>" + _MONTH_RE + r")\s+(?P<year>20\d{2})"
     r"(?:.{0,400}?)"
@@ -45,7 +41,7 @@ _PAT_ICP_USD = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-# "Harga Minyak Mentah Indonesia ... <price> US$/bbl" pattern
+# Pola: "<harga> US$/bbl"
 _PAT_BBL = re.compile(
     r"(?P<month>" + _MONTH_RE + r")\s+(?P<year>20\d{2})"
     r"(?:.{0,400}?)"
@@ -53,7 +49,7 @@ _PAT_BBL = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
-# Tabular pattern: price followed by "/bbl" or similar near a month-year
+# Pola tabular: harga diikuti "/bbl" atau sejenisnya
 _PAT_TABULAR = re.compile(
     r"(?P<price>\d{2,3}[.,]\d{1,2})\s*(?:US\$)?/(?:bbl|barrel)",
     re.IGNORECASE,
@@ -65,7 +61,7 @@ def month_name_to_number(name: str) -> Optional[int]:
 
 
 def _flatten(text: str) -> str:
-    # Menghapus line break agar pencocokan harga tidak terputus di tengah kalimat.
+    # Hapus line break agar pencocokan harga tidak terputus di tengah kalimat
     return re.sub(r"[ \t]*\n[ \t]*", " ", text)
 
 
@@ -80,8 +76,7 @@ def _valid_price(p: float) -> bool:
 def parse_icp_price(text: str) -> Optional[Tuple[str, float]]:
     flat = _flatten(text)
 
-    # Strategy 1: anchor phrase "ditetapkan sebesar US$ <price>"
-    # Look back 400 chars for month+year
+    # Strategi 1: frasa anchor "ditetapkan sebesar US$ <harga>", cari bulan+tahun 400 karakter sebelumnya
     for anchor in _PAT_ANCHOR.finditer(flat):
         try:
             price = _to_price(anchor.group("price"))
@@ -98,7 +93,7 @@ def parse_icp_price(text: str) -> Optional[Tuple[str, float]]:
             if month_num:
                 return f"{best.group('year')}-{month_num:02d}", price
 
-    # Strategy 2: broad scan — month + year followed by US$ price
+    # Strategi 2: scan luas — bulan + tahun diikuti harga US$
     for m in _PAT_BROAD.finditer(flat):
         month_num = month_name_to_number(m.group("month"))
         if not month_num:
@@ -110,7 +105,7 @@ def parse_icp_price(text: str) -> Optional[Tuple[str, float]]:
         if _valid_price(price):
             return f"{m.group('year')}-{month_num:02d}", price
 
-    # Strategy 3: "USD <price>" variant (some annual summary pages)
+    # Strategi 3: variasi "USD <harga>"
     for m in _PAT_ICP_USD.finditer(flat):
         month_num = month_name_to_number(m.group("month"))
         if not month_num:
@@ -122,7 +117,7 @@ def parse_icp_price(text: str) -> Optional[Tuple[str, float]]:
         if _valid_price(price):
             return f"{m.group('year')}-{month_num:02d}", price
 
-    # Strategy 4: "<price> US$/bbl" pattern
+    # Strategi 4: "<harga> US$/bbl"
     for m in _PAT_BBL.finditer(flat):
         month_num = month_name_to_number(m.group("month"))
         if not month_num:
