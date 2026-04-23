@@ -1,0 +1,3 @@
+[tool.ruff]
+# Exclude Jupyter notebooks — cell-level import ordering (E402) is intentional
+exclude = ["notebooks"]

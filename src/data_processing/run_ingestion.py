@@ -52,7 +52,7 @@ _MONTH_RE_STR = "|".join(MONTH_MAP_ID.keys())
 
 MONTH_MAP_EN: dict[str, int] = {
     "jan": 1, "feb": 2, "mar": 3, "apr": 4,
-    "mei": 5, "mei": 5, "jun": 6, "jul": 7, "ags": 8, "aug": 8,
+    "mei": 5, "jun": 6, "jul": 7, "ags": 8, "aug": 8,
     "sep": 9, "sept": 9, "oct": 10, "okto": 10, "nov": 11, "dec": 12,
     "january": 1, "february": 2, "march": 3, "may": 5,
     "june": 6, "july": 7, "august": 8, "september": 9,
