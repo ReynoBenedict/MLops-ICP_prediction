@@ -1,5 +1,4 @@
-# test_data_loader.py — unit tests for src/data_loader.py
-
+# Unit test untuk src/data_loader.py
 import sys
 from pathlib import Path
 
@@ -51,7 +50,6 @@ class TestLoadIcpDataset:
         assert isinstance(df, pd.DataFrame)
 
     def test_required_columns_present(self):
-        # When a real CSV exists it has date + icp_price; dummy data has all four columns
         df = load_icp_dataset()
         assert "date" in df.columns
         assert "icp_price" in df.columns

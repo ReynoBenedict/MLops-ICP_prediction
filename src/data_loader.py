@@ -11,20 +11,20 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
-_DEFAULT_CSV = _PROJECT_ROOT / "data" / "processed" / "icp_dataset.csv"
+_DEFAULT_CSV  = _PROJECT_ROOT / "data" / "processed" / "icp_dataset.csv"
 
 
 def _generate_dummy_data(n_rows: int = 120, seed: int = 42) -> pd.DataFrame:
-    rng = np.random.default_rng(seed)
+    rng   = np.random.default_rng(seed)
     dates = pd.date_range(start="2014-01-01", periods=n_rows, freq="MS")
     brent = np.clip(70.0 + rng.normal(0, 2.5, n_rows).cumsum(), 20, 150)
-    icp = np.clip(brent + rng.normal(-2, 1.0, n_rows), 15, 145)
+    icp   = np.clip(brent + rng.normal(-2, 1.0, n_rows), 15, 145)
     usd_idr = np.clip(14000.0 + rng.normal(0, 150, n_rows).cumsum(), 10000, 20000)
     return pd.DataFrame({
-        "date": dates,
-        "icp_price": np.round(icp, 2),
+        "date":        dates,
+        "icp_price":   np.round(icp, 2),
         "brent_price": np.round(brent, 2),
-        "usd_idr": np.round(usd_idr, 0),
+        "usd_idr":     np.round(usd_idr, 0),
     })
 
 

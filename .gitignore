@@ -203,3 +203,14 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# MLflow experiment artifacts (local tracking server)
+mlruns/
+mlartifacts/
+mlflow.db
+
+# Generated processed data (reproducible via prepare_data.py)
+data/processed/clean_data.csv
+
+# Plot prediksi yang di-generate oleh train.py (reproducible)
+reports/pred_*.png

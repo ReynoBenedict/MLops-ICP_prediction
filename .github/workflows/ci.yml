@@ -8,9 +8,9 @@ name: CI Pipeline
 
 on:
   push:
-    branches: ["**"]          # trigger on every branch push
+    branches: ["**"]          # trigger branch push
   pull_request:
-    branches: ["**"]          # trigger on every PR target
+    branches: ["**"]          # trigger target PR
 
 # ── Global defaults ──────────────────────────────────────────
 env:
@@ -40,9 +40,7 @@ jobs:
       - name: Run ruff linter
         run: ruff check src/ tests/ --output-format=github
 
-  # ─────────────────────────────────────────────────────────
   # JOB 2 · test  — dependency install + pytest
-  # ─────────────────────────────────────────────────────────
   test:
     name: Unit Tests (pytest)
     runs-on: ubuntu-latest
