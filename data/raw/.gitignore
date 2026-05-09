@@ -1,1 +1,2 @@
-/dataset.csv
+# dataset.csv is intentionally tracked by Git (303 bytes, CI-safe).
+# DVC pointer (dataset.csv.dvc) is kept for local DVC compatibility.
