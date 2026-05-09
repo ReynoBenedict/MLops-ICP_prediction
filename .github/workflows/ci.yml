@@ -1,10 +1,11 @@
 # =============================================================
-# CI Pipeline — MLOps ICP Prediction
-# Stage: Code Quality & Unit Testing (pre-MLflow)
+# CI + MLOps Automation Pipeline — LK-8 ICP Prediction
+# Stage 1: lint → test → validate-dvc → ci-summary
+# Stage 2: retrain → evaluate → register (MLOps LK-8)
 # Trigger: push / pull_request on any branch
 # =============================================================
 
-name: CI Pipeline
+name: CI + MLOps Automation Pipeline
 
 on:
   push:
@@ -137,3 +138,99 @@ jobs:
             echo "  validate-dvc: ${{ needs.validate-dvc.result }}"
             exit 1
           fi
+
+  # ─────────────────────────────────────────────────────────
+  # JOB 5 · retrain  — run train.py and export metrics.json
+  # ─────────────────────────────────────────────────────────
+  retrain:
+    name: Retrain Model
+    runs-on: ubuntu-latest
+    needs: ci-summary
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Prepare data
+        run: python prepare_data.py
+
+      - name: Retrain model
+        run: python train.py
+
+      - name: Upload metrics.json
+        uses: actions/upload-artifact@v4
+        with:
+          name: metrics
+          path: metrics.json
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────
+  # JOB 6 · evaluate  — validate RMSE against threshold
+  # ─────────────────────────────────────────────────────────
+  evaluate:
+    name: Evaluate RMSE Threshold
+    runs-on: ubuntu-latest
+    needs: retrain
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download metrics artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: metrics
+
+      - name: Run evaluate.py
+        run: python evaluate.py
+
+  # ─────────────────────────────────────────────────────────
+  # JOB 7 · register  — lightweight MLflow registry simulation
+  # ─────────────────────────────────────────────────────────
+  register:
+    name: Register Model (Staging Simulation)
+    runs-on: ubuntu-latest
+    needs: evaluate
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download metrics artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: metrics
+
+      - name: Run register_model_ci.py
+        run: python register_model_ci.py
+
+      - name: Upload registry log
+        uses: actions/upload-artifact@v4
+        with:
+          name: registry-log
+          path: reports/registry_log.json
+          retention-days: 14
+
+      - name: Pipeline success
+        run: echo "✅ MLOps pipeline complete — model promoted to Staging."

@@ -1,0 +1,44 @@
+# MLflow Model Registry — ICP Price Model
+# Konfigurasi ini mencatat versi model aktif beserta metadata deployment-nya.
+
+model_name: ICP_Price_Model
+experiment_name: icp-price-prediction
+tracking_uri: sqlite:///mlflow.db
+inference_script: infer.py
+
+# Versi aktif saat ini
+production_version: 4
+staging_version: 3
+
+versions:
+  - version: 3
+    stage: Staging
+    description: >
+      RandomForest n_estimators=50. Model kandidat dengan performa terbaik
+      berdasarkan RMSE. Dilogging dengan model signature (input/output schema).
+    parameters:
+      model_type: RandomForest
+      n_estimators: 50
+      random_state: 42
+    metrics:
+      rmse: 7.1417
+      mae: 6.8954
+    tags:
+      model_type: RandomForest
+      feature: lag_1
+
+  - version: 4
+    stage: Production
+    description: >
+      RandomForest n_estimators=100. Model yang digunakan secara aktif untuk
+      inferensi produksi. Dilogging dengan model signature (input/output schema).
+    parameters:
+      model_type: RandomForest
+      n_estimators: 100
+      random_state: 42
+    metrics:
+      rmse: 7.7813
+      mae: 7.5049
+    tags:
+      model_type: RandomForest
+      feature: lag_1

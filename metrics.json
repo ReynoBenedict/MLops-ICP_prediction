@@ -1,0 +1,5 @@
+{
+  "best_model": "RandomForest_n50",
+  "rmse": 7.14169,
+  "mae": 6.8954
+}

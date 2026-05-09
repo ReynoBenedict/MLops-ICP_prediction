@@ -10,13 +10,13 @@ ingestion:
   esdm_url: "https://migas.esdm.go.id/post/harga-minyak-mentah"
   raw_dir: "data/raw"
   processed_dir: "data/processed"
-  dataset_filename: "icp_dataset.csv"
+  dataset_filename: "dataset.csv"
   download_delay: 1.0             # seconds between PDF downloads
 
 # DATA
 data:
-  raw_path: "data/processed/icp_dataset.csv"   # prefer real ingested data
-  processed_path: "data/processed/icp_processed.csv"
+  raw_path: "data/raw/dataset.csv"              # output of run_ingestion.py
+  processed_path: "data/processed/clean_data.csv" # output of prepare_data.py
   target_column: "icp_price"
   date_column: "date"
   feature_columns:

@@ -257,3 +257,113 @@ Pendekatan ini memungkinkan:
 - Pengelolaan dataset secara efisien
 - Pelacakan perubahan data secara transparan
 - Mendukung prinsip reproducibility dalam MLOps
+
+---
+
+## 4. Manajemen Eksperimen dan Pelacakan Metrik dengan MLflow (LK-06)
+
+Pada tahap ini dilakukan integrasi **MLflow** ke dalam proses pelatihan model untuk mencatat, melacak, dan membandingkan eksperimen secara sistematis.
+
+---
+
+### 4.1 Variasi Eksperimen
+
+Eksperimen dilakukan dengan beberapa variasi model sebagai berikut:
+
+- **Linear Regression** — model baseline tanpa hyperparameter tambahan
+- **Random Forest** dengan variasi `n_estimators`:
+  - `n_estimators = 10`
+  - `n_estimators = 50`
+  - `n_estimators = 100`
+
+Setiap run MLflow mencatat:
+
+- **Parameter**: `model_type`, `n_estimators`
+- **Metrik evaluasi**: RMSE (*Root Mean Squared Error*) dan MAE (*Mean Absolute Error*)
+- **Artefak**: visualisasi perbandingan nilai aktual dan prediksi dalam format PNG
+
+---
+
+### 4.2 Hasil Eksperimen
+
+Berikut adalah rangkuman hasil evaluasi dari seluruh eksperimen:
+
+| Model | RMSE | MAE |
+|---|---|---|
+| LinearRegression | 18.54 | 17.61 |
+| RandomForest (n=10) | 8.72 | 8.24 |
+| **RandomForest (n=50)** | **7.14** | **6.90** |
+| RandomForest (n=100) | 7.78 | 7.50 |
+
+Berdasarkan hasil di atas, **Random Forest dengan `n_estimators = 50`** memberikan performa terbaik. Penambahan estimator hingga 100 tidak menghasilkan peningkatan yang signifikan, sementara Linear Regression menunjukkan performa terendah.
+
+Nilai error yang relatif tinggi dipengaruhi oleh beberapa faktor, antara lain:
+
+- Jumlah data yang terbatas
+- Fluktuasi harga yang ekstrem pada periode tertentu
+- Penggunaan fitur yang masih sederhana (hanya `lag_1`)
+
+---
+
+### 4.3 Model Terpilih
+
+Model yang dipilih pada tahap ini adalah **Random Forest (`n_estimators = 50`)** karena memberikan hasil paling optimal berdasarkan evaluasi kuantitatif.
+
+Penggunaan model yang lebih kompleks seperti ARIMAX dan LSTM belum dilakukan pada tahap ini karena keterbatasan jumlah data yang dapat menyebabkan *overfitting* dan hasil yang tidak stabil. Model tersebut direncanakan untuk diimplementasikan pada tahap selanjutnya ketika data yang tersedia lebih memadai.
+
+---
+
+### 4.4 Cara Menjalankan Pipeline
+
+#### a. Persiapan Data
+
+```bash
+python prepare_data.py
+```
+
+#### b. Menjalankan Training dan Pencatatan Eksperimen
+
+```bash
+python train.py
+```
+
+#### c. Membuka MLflow UI
+
+```bash
+mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000 --workers 1
+```
+
+Lalu buka browser dan akses: `http://127.0.0.1:5000`
+
+---
+
+### 4.5 Kesimpulan
+
+Integrasi MLflow berhasil mendukung proses pelacakan eksperimen secara sistematis. Setiap run tercatat dengan lengkap beserta parameter, metrik, dan artefak visualisasi, sehingga memudahkan perbandingan antar model.
+
+Pendekatan ini memungkinkan:
+
+- Pelacakan eksperimen secara transparan dan reproducible
+- Perbandingan model yang terstruktur berdasarkan metrik kuantitatif
+- Fondasi yang kuat untuk pengembangan model lebih lanjut dalam pipeline MLOps
+
+---
+
+## 5. Model Registry and Inference (LK-07)
+
+Model **ICP_Price_Model** versi 4 (*n_estimators = 100*) saat ini berada pada stage **Production** di MLflow Model Registry. Meskipun versi 3 (*n_estimators = 50*) menghasilkan RMSE yang lebih rendah (7.14 vs 7.78), versi 4 dipromosikan ke Production untuk mensimulasikan alur *lifecycle* model secara penuh dalam MLflow—mencakup proses registrasi, versioning bertahap, dan stage transition (*None → Staging → Production*). Versi 3 dipertahankan pada stage **Staging** sebagai kandidat model.
+
+| Version | `n_estimators` | Stage | RMSE |
+|---------|---------------|-------|------|
+| v3 | 50 | Staging | 7.14 |
+| **v4** | **100** | **Production** | **7.78** |
+
+Proses inferensi dijalankan melalui perintah:
+
+```bash
+python infer.py
+```
+
+Model dimuat secara langsung dari MLflow Model Registry menggunakan URI `models:/ICP_Price_Model/Production` melalui fungsi `mlflow.pyfunc.load_model`, tanpa bergantung pada file model lokal. Pendekatan ini memastikan sistem inferensi selalu menggunakan versi model yang aktif di Production secara otomatis.
+
+Penggunaan model berbasis *time series* seperti ARIMAX atau LSTM belum diterapkan pada tahap ini mengingat keterbatasan jumlah data (±18 bulan), yang berpotensi mengakibatkan *overfitting* pada model temporal yang lebih kompleks.

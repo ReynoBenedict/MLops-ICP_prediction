@@ -1,0 +1,35 @@
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+env/
+venv/
+build/
+dist/
+*.egg-info/
+
+# Testing
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# DVC
+.dvc/
+.dvcignore
+
+# Project specific
+notebooks/
+reports/
+docs/
+*.log
+*.pdf
+*.csv
+# mlruns/      # Keep if you want local history inside container, but usually ignored
+# mlflow.db    # Keep if needed for local inference demonstration

@@ -1,6 +1,7 @@
 # Pipeline pelatihan model ICP dengan MLflow tracking
 from __future__ import annotations
 
+import json
 import math
 import sys
 import warnings
@@ -19,6 +20,7 @@ logging.getLogger("mlflow").setLevel(logging.ERROR)
 import mlflow
 import mlflow.sklearn
 import pandas as pd
+from mlflow.models.signature import infer_signature
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error
@@ -144,7 +146,14 @@ def run_experiment(
         mlflow.log_metric("rmse", rmse)
         mlflow.log_metric("mae",  mae)
 
-        mlflow.sklearn.log_model(model, name="model")
+        signature = infer_signature(X_test, y_pred)
+
+        mlflow.sklearn.log_model(
+            sk_model=model,
+            name="model",
+            signature=signature,
+            input_example=X_test.iloc[:1],
+        )
 
         plot_path = save_pred_plot(y_test, y_pred, model_type)
         mlflow.log_artifact(str(plot_path))
@@ -216,6 +225,17 @@ def main() -> None:
     print(f"       mlflow ui --backend-store-uri {MLFLOW_TRACKING_URI}")
     print("       Lalu buka: http://127.0.0.1:5000")
     print(f"[INFO] Database MLflow : {MLFLOW_DB}")
+
+    # ── Export metrics for CI evaluation handoff ──────────────
+    metrics_path = PROJECT_ROOT / "metrics.json"
+    metrics_data = {
+        "best_model": best_name,
+        "rmse": round(best_rmse, 6),
+        "mae": round(best_mae, 6),
+    }
+    with open(metrics_path, "w") as f:
+        json.dump(metrics_data, f, indent=2)
+    print(f"[INFO] metrics.json saved → {metrics_path}")
 
 
 if __name__ == "__main__":
