@@ -1,5 +1,5 @@
 {
-  "best_model": "RandomForest_n50",
-  "rmse": 7.14169,
-  "mae": 6.8954
+  "best_model": "LinearRegression",
+  "rmse": 7.902345,
+  "mae": 6.888528
 }

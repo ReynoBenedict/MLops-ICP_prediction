@@ -51,6 +51,11 @@ def prepare(raw_path: Path = RAW_CSV, out_path: Path = OUT_CSV) -> Path:
 
     # Buat fitur lag_1 lalu hapus baris NA hasil shift
     df = df.copy()
+
+    # pastikan urutan kronologis sebelum membuat fitur lag
+    if "year" in df.columns and "month" in df.columns:
+        df = df.sort_values(["year", "month"]).reset_index(drop=True)
+
     df["lag_1"] = df[target_col].shift(1)
 
     before = len(df)

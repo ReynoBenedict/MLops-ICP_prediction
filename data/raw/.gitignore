@@ -1,2 +1,7 @@
-# dataset.csv is intentionally tracked by Git (303 bytes, CI-safe).
+# Raw PDF reports — large binary files, managed locally only.
+# Keep on disk for duplicate checking and future ingestion.
+# DO NOT track in Git (no size limit bypass needed).
+*.pdf
+
+# dataset.csv is intentionally tracked by Git (CI-safe, small size).
 # DVC pointer (dataset.csv.dvc) is kept for local DVC compatibility.

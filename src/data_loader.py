@@ -35,7 +35,17 @@ def load_icp_dataset(csv_path: Optional[str] = None) -> pd.DataFrame:
         try:
             df = pd.read_csv(path)
             logger.info("Dimuat %d baris dari %s", len(df), path)
-            df["date"] = pd.to_datetime(df["date"], errors="coerce")
+
+            # dataset.csv menggunakan kolom 'month' dan 'year', bukan 'date'
+            if "date" not in df.columns and "year" in df.columns and "month" in df.columns:
+                df = df.sort_values(["year", "month"]).reset_index(drop=True)
+                df["date"] = pd.to_datetime(
+                    df["year"].astype(str) + "-" + df["month"].astype(str).str.zfill(2),
+                    format="%Y-%m",
+                )
+            else:
+                df["date"] = pd.to_datetime(df["date"], errors="coerce")
+
             return df
         except Exception as exc:
             logger.warning("Gagal membaca %s: %s", path, exc)

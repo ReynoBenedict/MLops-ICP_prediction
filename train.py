@@ -235,7 +235,7 @@ def main() -> None:
     }
     with open(metrics_path, "w") as f:
         json.dump(metrics_data, f, indent=2)
-    print(f"[INFO] metrics.json saved → {metrics_path}")
+    print(f"[INFO] metrics.json saved -> {metrics_path}")
 
 
 if __name__ == "__main__":

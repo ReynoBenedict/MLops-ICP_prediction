@@ -29,7 +29,8 @@ RAW_PDF_DIR   = _PROJECT_ROOT / "data" / "raw"
 PROCESSED_DIR = _PROJECT_ROOT / "data" / "processed"
 DATASET_CSV   = RAW_PDF_DIR / "dataset.csv"
 
-TARGET_YEAR    = 2019
+# target_year=None berarti proses semua tahun yang tersedia
+TARGET_YEAR    = None
 DOWNLOAD_DELAY = 1.0
 
 HEADERS = {
@@ -127,7 +128,8 @@ def _infer_filename(pdf_url: str, link_text: str, column_year: Optional[int]) ->
 
 def collect_pdf_links(source_url: str, session, target_year: int = None) -> list[dict]:
     logger.info("=" * 60)
-    logger.info("[EXTRACT] Crawling: %s  (target year: %d)", source_url, target_year)
+    # gunakan %s agar tidak crash saat target_year=None
+    logger.info("[EXTRACT] Crawling: %s  (target year: %s)", source_url, target_year)
     logger.info("=" * 60)
 
     resp = session.get(source_url, timeout=30)
@@ -199,7 +201,7 @@ def collect_pdf_links(source_url: str, session, target_year: int = None) -> list
                 "link_text": link_text,
             })
 
-    logger.info("[EXTRACT] Ditemukan %d link PDF untuk tahun %d.", len(pdf_entries), target_year)
+    logger.info("[EXTRACT] Ditemukan %d link PDF untuk tahun %s.", len(pdf_entries), target_year)
     return pdf_entries
 
 
@@ -408,7 +410,8 @@ def build_csv_dataset(
     from utils.text_parsing import parse_icp_price
 
     logger.info("=" * 60)
-    logger.info("[LOAD] Membangun dataset CSV (target %d) ...", target_year)
+    # gunakan %s agar tidak crash saat target_year=None
+    logger.info("[LOAD] Membangun dataset CSV (target %s) ...", target_year)
     logger.info("=" * 60)
 
     csv_path.parent.mkdir(parents=True, exist_ok=True)
@@ -433,7 +436,8 @@ def build_csv_dataset(
             continue
 
         year_val = int(date_str[:4])
-        if year_val not in [2019, 2020]:
+        # filter tahun jika target_year diberikan, jika None ambil semua tahun
+        if target_year is not None and year_val != target_year:
             continue
 
         month_val = int(date_str[5:7])
@@ -466,7 +470,7 @@ def build_csv_dataset(
 def run_local(
     raw_pdf_dir:  Path = RAW_PDF_DIR,
     processed_dir: Path = PROCESSED_DIR,
-    target_year:  int   = TARGET_YEAR,
+    target_year:  int   = TARGET_YEAR,  # None = semua tahun
 ) -> None:
     raw_pdf_dir   = Path(raw_pdf_dir)
     processed_dir = Path(processed_dir)
@@ -497,7 +501,7 @@ def run_ingestion(
     raw_pdf_dir:  Path  = RAW_PDF_DIR,
     processed_dir: Path = PROCESSED_DIR,
     delay:        float = DOWNLOAD_DELAY,
-    target_year:  int   = TARGET_YEAR,
+    target_year:  int   = TARGET_YEAR,  # None = semua tahun
 ) -> None:
     raw_pdf_dir   = Path(raw_pdf_dir)
     processed_dir = Path(processed_dir)
@@ -511,11 +515,11 @@ def run_ingestion(
     pdf_entries = collect_pdf_links(source_url, session, target_year=target_year)
 
     if not pdf_entries:
-        logger.error("[EXTRACT] Tidak ada link PDF ditemukan untuk tahun %d.", target_year)
+        logger.error("[EXTRACT] Tidak ada link PDF ditemukan untuk tahun %s.", target_year)
         return
 
     logger.info("=" * 60)
-    logger.info("[EXTRACT] Mengunduh %d PDF (tahun %d) ...", len(pdf_entries), target_year)
+    logger.info("[EXTRACT] Mengunduh %d PDF (tahun %s) ...", len(pdf_entries), target_year)
     logger.info("=" * 60)
     downloaded = download_pdfs(pdf_entries, raw_pdf_dir, session, delay)
     logger.info("[EXTRACT] %d PDF berhasil diunduh.", len(downloaded))
@@ -542,7 +546,7 @@ def main():
     parser.add_argument("--raw-dir",     default=str(RAW_PDF_DIR),   help="Direktori simpan PDF")
     parser.add_argument("--out-dir",     default=str(PROCESSED_DIR), help="Direktori output processed")
     parser.add_argument("--delay",       type=float, default=DOWNLOAD_DELAY, help="Jeda antar-unduhan (detik)")
-    parser.add_argument("--year",        type=int,   default=TARGET_YEAR,    help="Tahun target")
+    parser.add_argument("--year",        type=int,   default=TARGET_YEAR,    help="Tahun target (kosongkan = semua tahun)")
     parser.add_argument("--local",       action="store_true",                help="Gunakan PDF lokal, skip download")
     args = parser.parse_args()
 
