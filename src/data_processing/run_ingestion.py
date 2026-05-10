@@ -9,7 +9,7 @@ import re
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from urllib.parse import urljoin, urlparse, unquote
 
 _SRC_DIR = Path(__file__).resolve().parents[1]
@@ -166,7 +166,7 @@ def detect_latest_month(csv_path: Path = DATASET_CSV) -> Optional[tuple[int, int
     return (latest_year, latest_month)
 
 
-def _report_missing_months(df_sorted: "pd.DataFrame") -> None:
+def _report_missing_months(df_sorted: Any) -> None:
     """
     Cetak peringatan untuk setiap bulan yang hilang dalam urutan kronologis.
     df_sorted harus sudah diurutkan berdasarkan [year, month].
