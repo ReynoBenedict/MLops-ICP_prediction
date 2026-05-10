@@ -74,6 +74,138 @@ _PAT_URL_YEAR_MONTH = re.compile(
 _PAT_FILENAME_DATE = re.compile(r"(\d{4})[_-](\d{2})", re.IGNORECASE)
 
 
+# ---------------------------------------------------------------------------
+# Deteksi titik lanjut: bulan/tahun terakhir yang sudah ada di dataset.csv
+# ---------------------------------------------------------------------------
+
+def detect_latest_month(csv_path: Path = DATASET_CSV) -> Optional[tuple[int, int]]:
+    """
+    Baca dataset.csv dan kembalikan (year, month) dari baris terakhir secara kronologis.
+
+    Return:
+        (year, month) jika file ditemukan dan valid, atau None jika kosong/tidak ada.
+
+    Log tags yang digunakan:
+        [LATEST]  — titik lanjut terdeteksi
+        [WARNING] — masalah data (duplikat, urutan salah, baris rusak)
+    """
+    try:
+        import pandas as pd
+    except ImportError:
+        raise ImportError("Run: pip install pandas")
+
+    # File belum ada → mulai dari awal (wajar untuk setup pertama kali)
+    if not csv_path.exists():
+        logger.warning("[WARNING] dataset.csv tidak ditemukan di %s — akan mulai dari awal.", csv_path)
+        return None
+
+    try:
+        df = pd.read_csv(csv_path)
+    except Exception as exc:
+        logger.warning("[WARNING] Gagal membaca dataset.csv: %s — akan mulai dari awal.", exc)
+        return None
+
+    # Validasi kolom wajib
+    required = {"year", "month"}
+    if not required.issubset(df.columns):
+        logger.warning(
+            "[WARNING] dataset.csv tidak punya kolom %s (ada: %s) — dilewati.",
+            required, list(df.columns),
+        )
+        return None
+
+    # Buang baris yang kolom year/month-nya tidak bisa dikonversi ke integer
+    before = len(df)
+    df["year"]  = pd.to_numeric(df["year"],  errors="coerce")
+    df["month"] = pd.to_numeric(df["month"], errors="coerce")
+    df = df.dropna(subset=["year", "month"])
+    df["year"]  = df["year"].astype(int)
+    df["month"] = df["month"].astype(int)
+    removed = before - len(df)
+    if removed:
+        logger.warning("[WARNING] %d baris dengan year/month tidak valid dibuang.", removed)
+
+    if df.empty:
+        logger.warning("[WARNING] dataset.csv kosong setelah validasi — akan mulai dari awal.")
+        return None
+
+    # Validasi nilai bulan (1–12)
+    bad_month = df[(df["month"] < 1) | (df["month"] > 12)]
+    if not bad_month.empty:
+        logger.warning("[WARNING] Ditemukan %d baris dengan bulan di luar 1–12:", len(bad_month))
+        for _, row in bad_month.iterrows():
+            logger.warning("          year=%s month=%s", row["year"], row["month"])
+
+    # Deteksi duplikat (year, month)
+    dupes = df[df.duplicated(subset=["year", "month"], keep=False)]
+    if not dupes.empty:
+        logger.warning(
+            "[WARNING] Ditemukan %d baris duplikat pada pasangan (year, month):",
+            len(dupes),
+        )
+        for _, row in dupes.drop_duplicates(subset=["year", "month"]).iterrows():
+            logger.warning("          [WARNING] duplikat: year=%d month=%d", row["year"], row["month"])
+
+    # Urutkan kronologis dan periksa apakah dataset sudah terurut
+    df_sorted = df.sort_values(["year", "month"]).reset_index(drop=True)
+    if not df.reset_index(drop=True)[["year", "month"]].equals(df_sorted[["year", "month"]]):
+        logger.warning("[WARNING] dataset.csv tidak terurut kronologis — akan diurutkan sementara untuk deteksi.")
+
+    # Deteksi bulan yang hilang dalam urutan kronologis
+    _report_missing_months(df_sorted)
+
+    # Ambil titik terakhir
+    last = df_sorted.iloc[-1]
+    latest_year  = int(last["year"])
+    latest_month = int(last["month"])
+
+    logger.info(
+        "[LATEST] Titik data terakhir terdeteksi: %04d-%02d (baris=%d)",
+        latest_year, latest_month, len(df_sorted),
+    )
+    return (latest_year, latest_month)
+
+
+def _report_missing_months(df_sorted: "pd.DataFrame") -> None:
+    """
+    Cetak peringatan untuk setiap bulan yang hilang dalam urutan kronologis.
+    df_sorted harus sudah diurutkan berdasarkan [year, month].
+    """
+    try:
+        import pandas as pd
+    except ImportError:
+        return
+
+    if df_sorted.empty:
+        return
+
+    # Buat rangkaian bulan lengkap dari awal hingga akhir dataset
+    first = df_sorted.iloc[0]
+    last  = df_sorted.iloc[-1]
+
+    start = pd.Period(f"{int(first['year'])}-{int(first['month']):02d}", freq="M")
+    end   = pd.Period(f"{int(last['year'])}-{int(last['month']):02d}",   freq="M")
+
+    full_range = pd.period_range(start=start, end=end, freq="M")
+
+    # Set bulan yang benar-benar ada
+    existing = set(
+        zip(df_sorted["year"].tolist(), df_sorted["month"].tolist())
+    )
+
+    missing = [
+        p for p in full_range
+        if (p.year, p.month) not in existing
+    ]
+
+    if missing:
+        logger.warning("[WARNING] Ditemukan %d bulan yang hilang dalam dataset:", len(missing))
+        for p in missing:
+            logger.warning("          [WARNING] bulan hilang: %04d-%02d", p.year, p.month)
+    else:
+        logger.info("[LATEST] Tidak ada bulan yang hilang — urutan kronologis lengkap.")
+
+
 def _get_session():
     try:
         import requests
@@ -211,7 +343,7 @@ def download_pdfs(
     session,
     delay: float = DOWNLOAD_DELAY,
 ) -> list[Path]:
-    # Mengunduh setiap PDF ke folder tujuan
+    # Mengunduh setiap PDF ke folder tujuan; lewati jika sudah ada di lokal
     dest_dir.mkdir(parents=True, exist_ok=True)
     downloaded: list[Path] = []
     total = len(pdf_entries)
@@ -230,7 +362,17 @@ def download_pdfs(
 
         dest_path = dest_dir / filename
 
-        logger.info("[%d/%d] Mengunduh → %s", idx, total, filename)
+        # [SKIP] Jangan unduh ulang jika PDF sudah ada di disk
+        if dest_path.exists():
+            size_kb = dest_path.stat().st_size // 1024
+            logger.info(
+                "[EXISTS] [%d/%d] PDF sudah ada, dilewati: %s (%d KB)",
+                idx, total, filename, size_kb,
+            )
+            downloaded.append(dest_path)
+            continue
+
+        logger.info("[DOWNLOAD] [%d/%d] Mengunduh → %s", idx, total, filename)
         try:
             with session.get(pdf_url, stream=True, timeout=60) as resp:
                 resp.raise_for_status()
@@ -307,7 +449,16 @@ def extract_text_from_pdfs(
     pdf_dir: Path,
     output_dir: Path,
     extra_dirs: list[Path] | None = None,
+    latest_month: Optional[tuple[int, int]] = None,
 ) -> list[dict]:
+    """
+    Ekstrak teks dari semua PDF di pdf_dir.
+
+    Perilaku inkremental:
+    - [OCR SKIP] Jika file .txt sudah ada → langsung baca dari disk, skip ekstraksi
+    - [NEW]      Jika (year, month) file > latest_month → proses sebagai data baru
+    - [SKIP]     Jika (year, month) file <= latest_month DAN .txt sudah ada → lewati
+    """
     try:
         import pdfplumber
     except ImportError:
@@ -328,12 +479,62 @@ def extract_text_from_pdfs(
         return []
 
     logger.info("=" * 60)
-    logger.info("[TRANSFORM] Ekstrak teks dari %d PDF ...", len(pdf_files))
+    logger.info(
+        "[TRANSFORM] %d PDF ditemukan. Titik lanjut: %s",
+        len(pdf_files),
+        "%04d-%02d" % latest_month if latest_month else "(mulai dari awal)",
+    )
     logger.info("=" * 60)
 
     results: list[dict] = []
+    skipped_old = 0
+
     for pdf_path in pdf_files:
-        logger.info("[TRANSFORM] Memproses: %s", pdf_path.name)
+        txt_path = output_dir / (pdf_path.stem + ".txt")
+
+        # Tentukan (year, month) dari nama file untuk keputusan inkremental
+        file_date_str = _parse_date_from_any_filename(pdf_path.name)
+        file_ym: Optional[tuple[int, int]] = None
+        if file_date_str:
+            try:
+                fy, fm = int(file_date_str[:4]), int(file_date_str[5:7])
+                file_ym = (fy, fm)
+            except (ValueError, IndexError):
+                pass
+
+        # [OCR SKIP] TXT sudah ada → baca langsung dari disk, tidak perlu ekstraksi ulang
+        if txt_path.exists():
+            text = txt_path.read_text(encoding="utf-8", errors="replace")
+
+            # Jika data sudah di-cover oleh dataset sebelumnya, catat sebagai skip
+            if latest_month and file_ym and file_ym <= latest_month:
+                logger.debug(
+                    "[SKIP] %s sudah ada di dataset (%04d-%02d <= %04d-%02d)",
+                    pdf_path.name, file_ym[0], file_ym[1],
+                    latest_month[0], latest_month[1],
+                )
+                skipped_old += 1
+            else:
+                logger.info("[OCR SKIP] TXT sudah ada, baca dari disk: %s", txt_path.name)
+
+            results.append({
+                "pdf_name": pdf_path.name,
+                "pdf_path": str(pdf_path),
+                "txt_path": str(txt_path),
+                "text":     text,
+                "has_text": bool(text.strip()),
+            })
+            continue
+
+        # [NEW] File belum pernah diekstrak → proses sekarang
+        if file_ym:
+            logger.info(
+                "[NEW] Bulan baru terdeteksi: %04d-%02d — memproses %s",
+                file_ym[0], file_ym[1], pdf_path.name,
+            )
+        else:
+            logger.info("[TRANSFORM] Memproses: %s", pdf_path.name)
+
         page_texts: list[str] = []
         try:
             with pdfplumber.open(pdf_path) as pdf:
@@ -359,7 +560,6 @@ def extract_text_from_pdfs(
             else:
                 logger.info("          OCR juga kosong.")
 
-        txt_path = output_dir / (pdf_path.stem + ".txt")
         txt_path.write_text(text, encoding="utf-8")
         logger.info("          → %s", txt_path.name)
 
@@ -371,6 +571,8 @@ def extract_text_from_pdfs(
             "has_text": bool(text),
         })
 
+    if skipped_old:
+        logger.info("[SKIP] %d file lama dilewati (sudah ada di dataset).", skipped_old)
     logger.info("[TRANSFORM] Selesai. %d file diproses.", len(results))
     return results
 
@@ -401,6 +603,14 @@ def build_csv_dataset(
     csv_path: Path,
     target_year: int = None,
 ) -> None:
+    """
+    Bangun atau perbarui dataset.csv secara inkremental.
+
+    Perilaku:
+    - Jika dataset.csv sudah ada → muat, gabungkan dengan data baru, dedup
+    - Jika belum ada → buat baru dari nol
+    - TIDAK pernah menghapus baris lama yang sudah valid
+    """
     try:
         import pandas as pd
     except ImportError:
@@ -410,12 +620,11 @@ def build_csv_dataset(
     from utils.text_parsing import parse_icp_price
 
     logger.info("=" * 60)
-    # gunakan %s agar tidak crash saat target_year=None
     logger.info("[LOAD] Membangun dataset CSV (target %s) ...", target_year)
     logger.info("=" * 60)
 
     csv_path.parent.mkdir(parents=True, exist_ok=True)
-    records: list[dict] = []
+    new_records: list[dict] = []
 
     for item in extraction_results:
         pdf_name = item["pdf_name"]
@@ -436,33 +645,56 @@ def build_csv_dataset(
             continue
 
         year_val = int(date_str[:4])
-        # filter tahun jika target_year diberikan, jika None ambil semua tahun
         if target_year is not None and year_val != target_year:
             continue
 
         month_val = int(date_str[5:7])
         logger.info("  %s -> month=%d  price=%s", pdf_name, month_val, price)
-        records.append({"month": month_val, "year": year_val, "icp_price": price})
+        new_records.append({"month": month_val, "year": year_val, "icp_price": price})
 
-    df = pd.DataFrame(records, columns=["month", "year", "icp_price"])
-    df = df.drop_duplicates(subset=["year", "month"], keep="first")
+    df_new = pd.DataFrame(new_records, columns=["month", "year", "icp_price"])
 
-    df = df.sort_values(["year", "month"]).reset_index(drop=True)
-    df["icp_price"] = pd.to_numeric(df["icp_price"], errors="coerce")
-    df["icp_price"] = df["icp_price"].interpolate(method="linear").ffill().bfill()
-    df["icp_price"] = df["icp_price"].round(2)
-    df = df.sort_values(["year", "month"]).reset_index(drop=True)
+    # Muat dataset lama jika sudah ada, lalu gabungkan — jaga data historis
+    if csv_path.exists():
+        try:
+            df_old = pd.read_csv(csv_path)
+            rows_before = len(df_old)
+            df_combined = pd.concat([df_old, df_new], ignore_index=True)
+            logger.info("[LOAD] Menggabungkan %d baris lama + %d baris baru.", rows_before, len(df_new))
+        except Exception as exc:
+            logger.warning("[WARNING] Gagal membaca CSV lama (%s) — hanya pakai data baru.", exc)
+            df_combined = df_new
+    else:
+        logger.info("[LOAD] Dataset baru dibuat dari nol.")
+        df_combined = df_new
 
-    df.to_csv(csv_path, index=False)
+    # Dedup: pertahankan baris dengan icp_price yang tidak null jika ada pilihan
+    df_combined["icp_price"] = pd.to_numeric(df_combined["icp_price"], errors="coerce")
+    df_combined = df_combined.sort_values(
+        ["year", "month", "icp_price"], na_position="last"
+    )
+    df_combined = df_combined.drop_duplicates(subset=["year", "month"], keep="first")
+    df_combined = df_combined.sort_values(["year", "month"]).reset_index(drop=True)
+
+    # Interpolasi harga yang masih kosong
+    df_combined["icp_price"] = (
+        df_combined["icp_price"]
+        .interpolate(method="linear")
+        .ffill()
+        .bfill()
+        .round(2)
+    )
+
+    df_combined.to_csv(csv_path, index=False)
 
     logger.info("=" * 60)
-    logger.info("[LOAD] Dataset tersimpan: %d record -> %s", len(df), csv_path)
+    logger.info("[LOAD] Dataset tersimpan: %d record -> %s", len(df_combined), csv_path)
     logger.info("=" * 60)
 
     print("\n" + "=" * 60)
-    print("DATASET ({}) -- {} record".format(target_year, len(df)))
+    print("DATASET ({}) -- {} record".format(target_year, len(df_combined)))
     print("=" * 60)
-    print(df.to_string(index=False))
+    print(df_combined.to_string(index=False))
     print("=" * 60)
     print("=" * 60)
 
@@ -479,11 +711,16 @@ def run_local(
     raw_pdf_dir.mkdir(parents=True, exist_ok=True)
     processed_dir.mkdir(parents=True, exist_ok=True)
 
+    # Deteksi titik lanjut agar PDF/TXT lama tidak diproses ulang
+    latest_month = detect_latest_month(csv_path)
+
     logger.info("=" * 60)
     logger.info("[LOCAL] Ekstrak dari PDF yang sudah ada di %s", raw_pdf_dir)
     logger.info("=" * 60)
 
-    extraction_results = extract_text_from_pdfs(raw_pdf_dir, processed_dir)
+    extraction_results = extract_text_from_pdfs(
+        raw_pdf_dir, processed_dir, latest_month=latest_month
+    )
 
     if not extraction_results:
         logger.error("[LOCAL] Tidak ada PDF yang berhasil diekstrak.")
@@ -510,6 +747,9 @@ def run_ingestion(
     raw_pdf_dir.mkdir(parents=True, exist_ok=True)
     processed_dir.mkdir(parents=True, exist_ok=True)
 
+    # Deteksi titik lanjut sebelum mulai unduh — hindari kerja ulang
+    latest_month = detect_latest_month(csv_path)
+
     session = _get_session()
 
     pdf_entries = collect_pdf_links(source_url, session, target_year=target_year)
@@ -528,7 +768,9 @@ def run_ingestion(
         logger.error("[EXTRACT] Tidak ada PDF yang diunduh.")
         return
 
-    extraction_results = extract_text_from_pdfs(raw_pdf_dir, processed_dir)
+    extraction_results = extract_text_from_pdfs(
+        raw_pdf_dir, processed_dir, latest_month=latest_month
+    )
     build_csv_dataset(extraction_results, csv_path, target_year=target_year)
 
     logger.info("Pipeline selesai.")
