@@ -1,4 +1,4 @@
-# Membuat fitur lag_1 dari dataset mentah dan menyimpan ke data/processed/clean_data.csv
+# Membuat fitur temporal (lag_1, lag_3, lag_6, rolling_mean_3) dan menyimpan ke data/processed/clean_data.csv
 from __future__ import annotations
 
 import sys
@@ -49,14 +49,18 @@ def prepare(raw_path: Path = RAW_CSV, out_path: Path = OUT_CSV) -> Path:
 
     print(f"[INFO] Kolom target yang digunakan: '{target_col}'")
 
-    # Buat fitur lag_1 lalu hapus baris NA hasil shift
+    # Pastikan urutan kronologis sebelum membuat fitur temporal
     df = df.copy()
-
-    # pastikan urutan kronologis sebelum membuat fitur lag
     if "year" in df.columns and "month" in df.columns:
         df = df.sort_values(["year", "month"]).reset_index(drop=True)
 
+    # Buat fitur lag — hanya menggunakan data masa lalu (tidak ada data leakage)
     df["lag_1"] = df[target_col].shift(1)
+    df["lag_3"] = df[target_col].shift(3)
+    df["lag_6"] = df[target_col].shift(6)
+
+    # Rolling mean 3 bulan — geser dulu agar hanya pakai data masa lalu
+    df["rolling_mean_3"] = df[target_col].shift(1).rolling(window=3, min_periods=1).mean()
 
     before = len(df)
     df = df.dropna().reset_index(drop=True)

@@ -45,7 +45,7 @@ def detect_target_column(df: pd.DataFrame) -> str:
         if col in df.columns:
             return col
     # Fallback: kolom numerik pertama yang bukan waktu atau lag
-    skip = {"month", "year", "bulan", "tahun", "lag_1"}
+    skip = {"month", "year", "bulan", "tahun", "lag_1", "lag_3", "lag_6", "rolling_mean_3"}
     candidates = [c for c in df.select_dtypes("number").columns if c.lower() not in skip]
     if candidates:
         return candidates[0]
@@ -75,13 +75,16 @@ def load_data(
         print(f"[ERROR] {exc}")
         sys.exit(1)
 
-    if "lag_1" not in df.columns:
-        print("[ERROR] Kolom 'lag_1' tidak ada. Jalankan kembali prepare_data.py.")
+    # Pilih semua kolom lag_* dan rolling_* sebagai fitur secara otomatis
+    feature_cols = [c for c in df.columns if c.startswith("lag_") or c.startswith("rolling_")]
+
+    if not feature_cols:
+        print("[ERROR] Tidak ada kolom fitur (lag_*/rolling_*). Jalankan kembali prepare_data.py.")
         sys.exit(1)
 
-    print(f"[INFO] Kolom target: '{target_col}'  |  Fitur: ['lag_1']")
+    print(f"[INFO] Kolom target: '{target_col}'  |  Fitur: {feature_cols}")
 
-    X = df[["lag_1"]]
+    X = df[feature_cols]
     y = df[target_col]
 
     # Split time-series tanpa shuffle agar urutan terjaga
