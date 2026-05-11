@@ -1,5 +1,5 @@
 {
   "best_model": "LinearRegression",
-  "rmse": 9.132113,
-  "mae": 5.201587
+  "rmse": 3.616376,
+  "mae": 1.915534
 }
