@@ -1,4 +1,4 @@
-# Membuat fitur temporal (lag_1, lag_3, lag_6, rolling_mean_3) dan menyimpan ke data/processed/clean_data.csv
+# Membuat fitur temporal ICP + WTI dan menyimpan ke data/processed/clean_data.csv
 from __future__ import annotations
 
 import sys
@@ -7,8 +7,9 @@ from pathlib import Path
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-RAW_CSV = PROJECT_ROOT / "data" / "raw" / "dataset.csv"
-OUT_CSV = PROJECT_ROOT / "data" / "processed" / "clean_data.csv"
+RAW_CSV     = PROJECT_ROOT / "data" / "raw" / "dataset.csv"
+WTI_CSV     = PROJECT_ROOT / "data" / "raw" / "wti.csv"
+OUT_CSV     = PROJECT_ROOT / "data" / "processed" / "clean_data.csv"
 
 CANDIDATE_TARGET_COLS = ["icp_price", "icp", "price", "harga"]
 
@@ -26,7 +27,33 @@ def detect_target_column(df: pd.DataFrame) -> str:
     raise ValueError(f"Kolom target tidak ditemukan. Kolom tersedia: {list(df.columns)}")
 
 
-def prepare(raw_path: Path = RAW_CSV, out_path: Path = OUT_CSV) -> Path:
+def _load_wti(wti_path: Path, icp_min: str, icp_max: str) -> pd.DataFrame:
+    """Load wti.csv and crop to ICP date range. Returns df with col 'date' (YYYY-MM)."""
+    if not wti_path.exists():
+        print(f"[WARNING] wti.csv not found at {wti_path} — skipping WTI merge.")
+        return pd.DataFrame()
+
+    wti = pd.read_csv(wti_path)
+    wti["date"] = wti["date"].astype(str).str.strip()
+
+    # Crop to ICP range — removes historical data before 2019 and future leakage
+    wti = wti[(wti["date"] >= icp_min) & (wti["date"] <= icp_max)].copy()
+    wti = wti.sort_values("date").reset_index(drop=True)
+
+    # Lightweight validation
+    dupes = wti.duplicated("date").sum()
+    if dupes:
+        print(f"[WARNING] WTI has {dupes} duplicate dates — keeping first.")
+        wti = wti.drop_duplicates("date", keep="first")
+    nulls = wti["wti_price"].isna().sum()
+    if nulls:
+        print(f"[WARNING] WTI has {nulls} NULL prices after crop.")
+
+    print(f"[INFO] WTI cropped to {len(wti)} rows ({icp_min} → {icp_max})")
+    return wti
+
+
+def prepare(raw_path: Path = RAW_CSV, wti_path: Path = WTI_CSV, out_path: Path = OUT_CSV) -> Path:
     if not raw_path.exists():
         print(f"[ERROR] File dataset tidak ditemukan: {raw_path}")
         print("        Pastikan pipeline ingestion sudah dijalankan terlebih dahulu.")
@@ -53,6 +80,30 @@ def prepare(raw_path: Path = RAW_CSV, out_path: Path = OUT_CSV) -> Path:
     df = df.copy()
     if "year" in df.columns and "month" in df.columns:
         df = df.sort_values(["year", "month"]).reset_index(drop=True)
+
+    # Build YYYY-MM merge key from ICP year/month columns
+    df["date"] = df["year"].astype(str) + "-" + df["month"].astype(str).str.zfill(2)
+
+    # Merge WTI if available
+    icp_min, icp_max = df["date"].min(), df["date"].max()
+    wti = _load_wti(wti_path, icp_min, icp_max)
+
+    if not wti.empty:
+        before = len(df)
+        df = df.merge(wti[["date", "wti_price"]], on="date", how="inner")
+        after = len(df)
+        if before != after:
+            print(f"[WARNING] Inner join dropped {before - after} ICP rows with no WTI match.")
+        print(f"[INFO] Merged ICP + WTI: {after} rows")
+
+        # WTI features — shift(1) ensures no leakage (only past data used)
+        df["wti_lag_1"]          = df["wti_price"].shift(1)
+        df["wti_rolling_mean_3"] = df["wti_price"].shift(1).rolling(window=3, min_periods=1).mean()
+    else:
+        print("[INFO] Running without WTI features.")
+
+    # Drop the date helper column — not needed downstream
+    df = df.drop(columns=["date"], errors="ignore")
 
     # Buat fitur lag — hanya menggunakan data masa lalu (tidak ada data leakage)
     df["lag_1"] = df[target_col].shift(1)

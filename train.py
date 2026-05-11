@@ -75,8 +75,11 @@ def load_data(
         print(f"[ERROR] {exc}")
         sys.exit(1)
 
-    # Pilih semua kolom lag_* dan rolling_* sebagai fitur secara otomatis
-    feature_cols = [c for c in df.columns if c.startswith("lag_") or c.startswith("rolling_")]
+    # Pilih semua kolom lag_*, rolling_*, dan wti_* sebagai fitur secara otomatis
+    feature_cols = [
+        c for c in df.columns
+        if c.startswith("lag_") or c.startswith("rolling_") or c.startswith("wti_")
+    ]
 
     if not feature_cols:
         print("[ERROR] Tidak ada kolom fitur (lag_*/rolling_*). Jalankan kembali prepare_data.py.")
