@@ -1,17 +1,18 @@
-﻿# LK-07: Inferensi menggunakan model Production dari MLflow Model Registry
+# LK-07: Inferensi menggunakan model Production dari MLflow Model Registry
 from __future__ import annotations
 
+import logging
 import warnings
+from pathlib import Path
+
+import mlflow.pyfunc
+import pandas as pd
+from mlflow import MlflowClient
+
 warnings.filterwarnings("ignore", category=FutureWarning, module="mlflow")
 warnings.filterwarnings("ignore", category=UserWarning, module="mlflow")
 
-import logging
 logging.getLogger("mlflow").setLevel(logging.ERROR)
-
-from pathlib import Path
-import pandas as pd
-import mlflow.pyfunc
-from mlflow import MlflowClient
 
 PROJECT_ROOT        = Path(__file__).resolve().parents[2]
 MLFLOW_DB           = PROJECT_ROOT / "mlflow.db"
@@ -43,7 +44,7 @@ def main() -> None:
     print("=" * 50)
     print(f"  Model     : {MODEL_NAME}")
     print(f"  Version   : v{prod_version}")
-    print(f"  Stage     : Production")
+    print("  Stage     : Production")
     print(f"  URI       : {MODEL_URI}")
     print("-" * 50)
 

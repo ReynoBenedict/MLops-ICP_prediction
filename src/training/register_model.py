@@ -1,27 +1,27 @@
-﻿# LK-07: Registrasi model ke MLflow Model Registry
+# LK-07: Registrasi model ke MLflow Model Registry
 from __future__ import annotations
 
-import warnings
-warnings.filterwarnings("ignore", category=FutureWarning, module="mlflow")
-warnings.filterwarnings("ignore", category=UserWarning, module="mlflow")
-warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
-
 import logging
-logging.getLogger("mlflow").setLevel(logging.ERROR)
-logging.getLogger("mlflow.sklearn").setLevel(logging.ERROR)
-
 import math
 import sys
+import warnings
 from pathlib import Path
 from typing import Any
 
 import mlflow
 import mlflow.sklearn
 import pandas as pd
+from mlflow import MlflowClient
 from mlflow.models.signature import infer_signature
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-from mlflow import MlflowClient
+
+warnings.filterwarnings("ignore", category=FutureWarning, module="mlflow")
+warnings.filterwarnings("ignore", category=UserWarning, module="mlflow")
+warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
+
+logging.getLogger("mlflow").setLevel(logging.ERROR)
+logging.getLogger("mlflow.sklearn").setLevel(logging.ERROR)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CLEAN_CSV    = PROJECT_ROOT / "data" / "processed" / "clean_data.csv"
