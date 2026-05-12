@@ -2,16 +2,19 @@
 # Setiap kali ada push atau pull request, GitHub akan menjalankan pipeline ini secara otomatis
 #
 # Alur pipeline terbagi dua tahap:
-#   Tahap 1: lint -> test -> validate-dvc -> ci-summary (pengecekan kode)
-#   Tahap 2: retrain -> evaluate -> register (pipeline MLOps)
+#   Tahap 1: lint -> test -> validate-dvc -> streamlit-smoke-test -> ci-summary
+#             (validasi kualitas kode + validasi frontend Streamlit)
+#
+#   Tahap 2: retrain -> evaluate -> register
+#             (pipeline otomatis MLOps dan registry model)
 
 name: CI + MLOps Automation Pipeline
 
 on:
   push:
-    branches: ["**"]       # berjalan di semua branch, bukan hanya main
+    branches: ["**"]       # berjalan di semua branch
   pull_request:
-    branches: ["**"]       # berjalan juga saat membuat pull request
+    branches: ["**"]       # berjalan saat pull request dibuat
 
 # Agar folder src/ dapat diimpor langsung saat pytest berjalan
 env:
@@ -19,25 +22,49 @@ env:
 
 jobs:
 
-  # Job 1: cek gaya penulisan kode menggunakan ruff
-  # Job ini paling cepat karena tidak perlu install banyak library
+  # ════════════════════════════════════════════════════════════
+  # JOB 1 — LINT & STYLE CHECK
+  # ════════════════════════════════════════════════════════════
+  #
+  # Job ini bertugas mengecek kualitas penulisan kode.
+  # Ruff akan mendeteksi:
+  # - unused import
+  # - formatting issue
+  # - syntax issue ringan
+  # - bad practices Python
+  #
+  # Tujuan:
+  # memastikan repository tetap rapi dan maintainable.
+  #
   lint:
     name: Lint and Style Check
     runs-on: ubuntu-latest
 
     steps:
+      # Clone repository ke runner GitHub Actions
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Setup environment Python
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # Install Ruff linter
       - name: Install ruff
         run: pip install ruff
 
-      # ruff akan mendeteksi jika ada gaya penulisan kode yang tidak sesuai standar
+      # Jalankan Ruff ke seluruh layer project
+      #
+      # Layer yang dicek:
+      # - src/            -> backend ML pipeline
+      # - tests/          -> unit tests
+      # - pages/          -> Streamlit pages
+      # - components/     -> reusable UI components
+      # - services/       -> prediction & insight service
+      # - utils/          -> helper utilities
+      #
       - name: Run ruff linter
         run: |
           ruff check \
@@ -49,9 +76,19 @@ jobs:
             utils/ \
             --output-format=github
 
-  # Job 2: jalankan semua unit test menggunakan pytest
-  # Job ini baru berjalan jika lint sudah lulus
-  # Pengujian dilakukan di Python 3.10 dan 3.11 sekaligus
+  # ════════════════════════════════════════════════════════════
+  # JOB 2 — UNIT TESTING
+  # ════════════════════════════════════════════════════════════
+  #
+  # Job ini menjalankan semua unit test menggunakan pytest.
+  #
+  # Testing dilakukan di:
+  # - Python 3.10
+  # - Python 3.11
+  #
+  # Tujuan:
+  # memastikan pipeline tetap kompatibel lintas versi Python.
+  #
   test:
     name: Unit Tests (pytest)
     runs-on: ubuntu-latest
@@ -62,21 +99,33 @@ jobs:
         python-version: ["3.10", "3.11"]
 
     steps:
+      # Clone repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Setup Python runtime
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
 
+      # Install semua dependency project
       - name: Install project dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Tambahan validasi syntax untuk Streamlit pages dan service layer
+      # Validasi syntax seluruh aplikasi Streamlit
+      #
+      # py_compile memastikan:
+      # - syntax valid
+      # - import valid
+      # - file Python dapat di-compile
+      #
+      # Tujuan:
+      # mendeteksi error frontend sebelum deployment.
+      #
       - name: Validate Streamlit application
         run: |
           python -m py_compile app.py
@@ -88,7 +137,12 @@ jobs:
 
           echo "Semua file Streamlit berhasil divalidasi."
 
-      # Jalankan semua test sekaligus hasilkan laporan coverage
+      # Jalankan pytest + coverage report
+      #
+      # Output:
+      # - junit.xml
+      # - coverage.xml
+      #
       - name: Run pytest with coverage report
         run: |
           pytest tests/ \
@@ -100,7 +154,12 @@ jobs:
             --cov-report=term-missing \
             --cov-report=xml:reports/coverage.xml
 
-      # Laporan tetap disimpan meski ada test yang gagal
+      # Upload artifact report agar dapat dilihat di GitHub Actions
+      #
+      # Artifact:
+      # - coverage.xml
+      # - junit.xml
+      #
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -109,87 +168,208 @@ jobs:
           path: reports/
           retention-days: 14
 
-  # Job 3: pastikan file pointer DVC masih valid dan konsisten
-  # Tidak perlu menarik data dari remote, cukup cek statusnya saja
+  # ════════════════════════════════════════════════════════════
+  # JOB 3 — VALIDASI DVC
+  # ════════════════════════════════════════════════════════════
+  #
+  # Job ini memvalidasi metadata DVC.
+  #
+  # Tujuan:
+  # memastikan pointer dataset dan pipeline DVC tetap konsisten.
+  #
   validate-dvc:
     name: Validate DVC Metadata
     runs-on: ubuntu-latest
     needs: lint
 
     steps:
+      # Clone repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Setup Python
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # Install DVC
       - name: Install DVC
         run: pip install dvc
 
-      # || true agar pipeline tidak langsung berhenti jika ada peringatan dari DVC
+      # Jalankan validasi status DVC
+      #
+      # --no-updates:
+      # mencegah pengecekan remote storage
+      #
       - name: Check DVC status
         run: |
           dvc status --no-updates 2>&1 || true
           echo "Pengecekan DVC selesai."
 
-  # Job 4: gerbang penutup tahap 1
-  # Jika ada salah satu job di atas yang gagal, pipeline berhenti di sini
-  # Tahap MLOps baru akan berjalan jika job ini lulus
+  # ════════════════════════════════════════════════════════════
+  # JOB 4 — STREAMLIT SMOKE TEST
+  # ════════════════════════════════════════════════════════════
+  #
+  # Job ini melakukan runtime validation untuk frontend Streamlit.
+  #
+  # Tujuan:
+  # memastikan aplikasi Streamlit dapat dijalankan
+  # di environment Linux GitHub Actions.
+  #
+  # Validasi yang dilakukan:
+  # - compile Python pages
+  # - launch Streamlit headless
+  # - health endpoint check
+  # - capture Streamlit logs
+  #
+  streamlit-smoke-test:
+    name: Streamlit Smoke Test
+    runs-on: ubuntu-latest
+    needs: lint
+
+    steps:
+      # Clone repository
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Setup Python
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Install dependency project
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Compile seluruh page Streamlit
+      #
+      # Tujuan:
+      # memastikan tidak ada syntax error frontend.
+      #
+      - name: Validate Streamlit Pages
+        run: |
+          python -m py_compile app.py
+          python -m py_compile pages/1_Dashboard.py
+          python -m py_compile pages/2_Forecasting.py
+          python -m py_compile pages/3_ICP_vs_WTI.py
+          python -m py_compile pages/4_Market_Trends.py
+          python -m py_compile pages/5_Predict_Price.py
+          python -m py_compile pages/6_MLOps_Center.py
+
+      # Jalankan Streamlit secara headless
+      #
+      # nohup digunakan agar process tetap hidup
+      # selama GitHub Actions berjalan.
+      #
+      - name: Launch Streamlit App
+        run: |
+          nohup streamlit run app.py --server.headless true > streamlit.log 2>&1 &
+          sleep 25
+
+      # Health check endpoint Streamlit
+      #
+      # Endpoint:
+      # /_stcore/health
+      #
+      # Jika endpoint gagal:
+      # job akan FAIL.
+      #
+      - name: Check Streamlit Health
+        run: |
+          curl --fail http://localhost:8501/_stcore/health
+
+      # Tampilkan log Streamlit
+      #
+      # Berguna untuk debugging jika app gagal boot.
+      #
+      - name: Show Streamlit Logs
+        if: always()
+        run: |
+          cat streamlit.log
+
+  # ════════════════════════════════════════════════════════════
+  # JOB 5 — CI GATE
+  # ════════════════════════════════════════════════════════════
+  #
+  # Job ini bertindak sebagai gerbang validasi utama.
+  #
+  # Pipeline MLOps hanya akan lanjut jika:
+  # - lint sukses
+  # - pytest sukses
+  # - DVC valid
+  # - Streamlit smoke test sukses
+  #
   ci-summary:
     name: CI Gate
     runs-on: ubuntu-latest
-    needs: [lint, test, validate-dvc]
+    needs: [lint, test, validate-dvc, streamlit-smoke-test]
     if: always()
 
     steps:
       - name: Periksa hasil semua job tahap 1
         run: |
-          if [[ "${{ needs.lint.result }}"         == "success" &&
-                "${{ needs.test.result }}"         == "success" &&
-                "${{ needs.validate-dvc.result }}" == "success" ]]; then
-            echo "Semua job tahap 1 lulus, pipeline MLOps dapat dilanjutkan."
+          if [[ "${{ needs.lint.result }}" == "success" &&
+                "${{ needs.test.result }}" == "success" &&
+                "${{ needs.validate-dvc.result }}" == "success" &&
+                "${{ needs.streamlit-smoke-test.result }}" == "success" ]]; then
+
+            echo "Semua validasi berhasil."
+
           else
-            echo "Terdapat job yang gagal, pipeline dihentikan."
-            echo "  lint:         ${{ needs.lint.result }}"
-            echo "  test:         ${{ needs.test.result }}"
-            echo "  validate-dvc: ${{ needs.validate-dvc.result }}"
+
+            echo "Terdapat job yang gagal."
             exit 1
+
           fi
 
-  # Job 5: latih ulang model prediksi ICP
-  # prepare_data.py membuat fitur lag terlebih dahulu,
-  # lalu train.py melatih model dan menghasilkan metrics.json
+  # ════════════════════════════════════════════════════════════
+  # JOB 6 — RETRAIN MODEL
+  # ════════════════════════════════════════════════════════════
+  #
+  # Job ini menjalankan:
+  # - preprocessing
+  # - feature engineering
+  # - model retraining
+  #
   retrain:
     name: Retrain Model
     runs-on: ubuntu-latest
     needs: ci-summary
 
     steps:
+      # Clone repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Setup Python
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
+      # Install dependency
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Baca dataset.csv, buat kolom lag_1, simpan ke data/processed/clean_data.csv
+      # Generate processed dataset
       - name: Prepare data
         run: python -m src.data_processing.prepare_data
 
-      # Latih model menggunakan data yang sudah dibersihkan, hasilkan metrics.json
+      # Train model
       - name: Retrain model
         run: python -m src.training.train
 
-      # Upload metrics.json agar dapat digunakan oleh job evaluate dan register
+      # Upload metrics.json
+      #
+      # Artifact ini digunakan oleh job evaluate.
+      #
       - name: Upload metrics.json
         uses: actions/upload-artifact@v4
         with:
@@ -197,58 +377,85 @@ jobs:
           path: metrics.json
           retention-days: 7
 
-  # Job 6: evaluasi performa model hasil pelatihan
-  # Periksa apakah nilai RMSE masih di bawah batas yang ditentukan
-  # Jika RMSE melebihi batas, pipeline gagal dan model tidak didaftarkan
+  # ════════════════════════════════════════════════════════════
+  # JOB 7 — EVALUATE MODEL
+  # ════════════════════════════════════════════════════════════
+  #
+  # Mengecek apakah RMSE model masih memenuhi threshold.
+  #
   evaluate:
     name: Evaluate RMSE Threshold
     runs-on: ubuntu-latest
     needs: retrain
 
     steps:
+      # Clone repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Setup Python
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # Ambil metrics.json yang sudah diunggah oleh job retrain
+      # Download metrics.json
       - name: Download metrics artifact
         uses: actions/download-artifact@v4
         with:
           name: metrics
 
+      # Jalankan evaluate.py
+      #
+      # Jika RMSE terlalu tinggi:
+      # pipeline FAIL.
+      #
       - name: Run evaluate.py
         run: python -m src.training.evaluate
 
-  # Job 7: daftarkan model ke registry (simulasi staging MLflow)
-  # Langkah terakhir — jika RMSE memenuhi syarat, model resmi dicatat di registry
+  # ════════════════════════════════════════════════════════════
+  # JOB 8 — REGISTER MODEL
+  # ════════════════════════════════════════════════════════════
+  #
+  # Tahap akhir pipeline MLOps.
+  #
+  # Jika model lolos evaluasi:
+  # model akan didaftarkan ke registry staging.
+  #
   register:
     name: Register Model (Staging Simulation)
     runs-on: ubuntu-latest
     needs: evaluate
 
     steps:
+      # Clone repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # Setup Python
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # Ambil metrics.json agar register_model_ci.py dapat membaca hasilnya
+      # Download metrics.json
       - name: Download metrics artifact
         uses: actions/download-artifact@v4
         with:
           name: metrics
 
+      # Register model ke registry
+      #
+      # Simulasi staging deployment.
+      #
       - name: Daftarkan model ke registry
         run: python -m src.training.register_model_ci
 
-      # Simpan log registry agar dapat diperiksa di tab Artifacts GitHub
+      # Upload registry log
+      #
+      # Artifact:
+      # reports/registry_log.json
+      #
       - name: Upload registry log
         uses: actions/upload-artifact@v4
         with:
@@ -256,5 +463,6 @@ jobs:
           path: reports/registry_log.json
           retention-days: 14
 
+      # Final success message
       - name: Pipeline selesai
         run: echo "Pipeline MLOps selesai. Model berhasil didaftarkan ke Staging."
