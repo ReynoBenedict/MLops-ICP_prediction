@@ -1,4 +1,4 @@
-# Membuat fitur temporal ICP + WTI dan menyimpan ke data/processed/clean_data.csv
+﻿# Membuat fitur temporal ICP + WTI dan menyimpan ke data/processed/clean_data.csv
 from __future__ import annotations
 
 import sys
@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pandas as pd
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RAW_CSV     = PROJECT_ROOT / "data" / "raw" / "dataset.csv"
 WTI_CSV     = PROJECT_ROOT / "data" / "raw" / "wti.csv"
 OUT_CSV     = PROJECT_ROOT / "data" / "processed" / "clean_data.csv"
@@ -49,7 +49,7 @@ def _load_wti(wti_path: Path, icp_min: str, icp_max: str) -> pd.DataFrame:
     if nulls:
         print(f"[WARNING] WTI has {nulls} NULL prices after crop.")
 
-    print(f"[INFO] WTI cropped to {len(wti)} rows ({icp_min} → {icp_max})")
+    print(f"[INFO] WTI cropped to {len(wti)} rows ({icp_min} -> {icp_max})")
     return wti
 
 

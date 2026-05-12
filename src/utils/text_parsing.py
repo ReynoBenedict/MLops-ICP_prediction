@@ -1,4 +1,4 @@
-# text_parsing.py — Ekstraksi harga dan tanggal ICP dari teks PDF Kepmen
+﻿# text_parsing.py — Ekstraksi harga dan tanggal ICP dari teks PDF Kepmen
 
 from __future__ import annotations
 

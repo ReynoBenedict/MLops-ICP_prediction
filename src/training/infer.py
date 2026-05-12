@@ -1,4 +1,4 @@
-# LK-07: Inferensi menggunakan model Production dari MLflow Model Registry
+﻿# LK-07: Inferensi menggunakan model Production dari MLflow Model Registry
 from __future__ import annotations
 
 import warnings
@@ -13,7 +13,7 @@ import pandas as pd
 import mlflow.pyfunc
 from mlflow import MlflowClient
 
-PROJECT_ROOT        = Path(__file__).resolve().parent
+PROJECT_ROOT        = Path(__file__).resolve().parents[2]
 MLFLOW_DB           = PROJECT_ROOT / "mlflow.db"
 MLFLOW_TRACKING_URI = f"sqlite:///{MLFLOW_DB.as_posix()}"
 MODEL_NAME          = "ICP_Price_Model"

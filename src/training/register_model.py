@@ -1,4 +1,4 @@
-# LK-07: Registrasi model ke MLflow Model Registry
+﻿# LK-07: Registrasi model ke MLflow Model Registry
 from __future__ import annotations
 
 import warnings
@@ -23,7 +23,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from mlflow import MlflowClient
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CLEAN_CSV    = PROJECT_ROOT / "data" / "processed" / "clean_data.csv"
 MLFLOW_DB           = PROJECT_ROOT / "mlflow.db"
 MLFLOW_TRACKING_URI = f"sqlite:///{MLFLOW_DB.as_posix()}"

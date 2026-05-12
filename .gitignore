@@ -222,3 +222,6 @@ data/raw/*.pdf
 
 # Plot prediksi yang di-generate oleh train.py (reproducible)
 reports/pred_*.png
+
+# Metrics output
+metrics.json

@@ -6,7 +6,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from data_loader import _generate_dummy_data, load_icp_dataset
+from data_processing.data_loader import _generate_dummy_data, load_icp_dataset
 
 
 class TestGenerateDummyData:

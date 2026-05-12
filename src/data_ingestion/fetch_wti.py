@@ -1,4 +1,4 @@
-# fetch_wti.py
+﻿# fetch_wti.py
 # Download WTI crude oil monthly average prices.
 # Source (series): FRED DCOILWTICO — https://fred.stlouisfed.org/series/DCOILWTICO
 #
@@ -6,7 +6,7 @@
 #   1. GitHub raw CDN  — fast globally, no API key, same FRED data
 #   2. FRED graph CSV  — direct endpoint, lighter than download page
 #
-# Data is daily → aggregated to monthly average here.
+# Data is daily -> aggregated to monthly average here.
 # Output: data/raw/wti.csv
 # Schema: date (YYYY-MM), wti_price
 
@@ -113,7 +113,7 @@ def _parse_fred_csv(text: str) -> pd.DataFrame:
 
     df = df.rename(columns={"DATE": "date", "DCOILWTICO": "wti_price"})
     df["date"]      = pd.to_datetime(df["date"], errors="coerce")
-    df["wti_price"] = pd.to_numeric(df["wti_price"], errors="coerce")  # '.' → NaN
+    df["wti_price"] = pd.to_numeric(df["wti_price"], errors="coerce")  # '.' -> NaN
 
     before = len(df)
     df = df.dropna(subset=["date", "wti_price"])
@@ -150,7 +150,7 @@ def _aggregate_to_monthly(df: pd.DataFrame) -> pd.DataFrame:
         .round(2)
     )
     monthly = monthly.rename(columns={"year_month": "date"})
-    monthly["date"] = monthly["date"].astype(str)  # → "YYYY-MM"
+    monthly["date"] = monthly["date"].astype(str)  # -> "YYYY-MM"
     monthly = monthly.sort_values("date").reset_index(drop=True)
 
     return monthly[["date", "wti_price"]]
@@ -236,7 +236,7 @@ def fetch_wti_monthly(out_csv: Path = WTI_OUT_CSV) -> pd.DataFrame:
     _validate(monthly_df)
 
     monthly_df.to_csv(out_csv, index=False)
-    logger.info("[WTI] Saved %d rows → %s", len(monthly_df), out_csv)
+    logger.info("[WTI] Saved %d rows -> %s", len(monthly_df), out_csv)
 
     return monthly_df
 
@@ -251,7 +251,7 @@ def validate_wti(df: pd.DataFrame) -> None:
     print("WTI VALIDATION REPORT")
     print("=" * 50)
     print(f"Total rows        : {len(df)}")
-    print(f"Date range        : {df['date'].min()} → {df['date'].max()}")
+    print(f"Date range        : {df['date'].min()} -> {df['date'].max()}")
     print(f"Min price         : ${df['wti_price'].min():.2f}/bbl")
     print(f"Max price         : ${df['wti_price'].max():.2f}/bbl")
     print(f"Mean price        : ${df['wti_price'].mean():.2f}/bbl")

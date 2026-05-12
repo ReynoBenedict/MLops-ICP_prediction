@@ -1,9 +1,9 @@
-"""evaluate.py — LK-8 RMSE threshold validation for CI pipeline."""
+﻿"""evaluate.py — LK-8 RMSE threshold validation for CI pipeline."""
 import json
 import sys
 from pathlib import Path
 
-METRICS_PATH = Path(__file__).resolve().parent / "metrics.json"
+METRICS_PATH = Path(__file__).resolve().parents[2] / "metrics.json"
 RMSE_THRESHOLD = 20.0  # adjust to your dataset's realistic range
 
 if not METRICS_PATH.exists():

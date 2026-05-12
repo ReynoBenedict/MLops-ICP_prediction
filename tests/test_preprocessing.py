@@ -8,8 +8,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from data_loader import _generate_dummy_data
-from preprocessing import (
+from data_processing.data_loader import _generate_dummy_data
+from data_processing.preprocessing import (
     handle_missing_values,
     normalize_features,
     preprocess,

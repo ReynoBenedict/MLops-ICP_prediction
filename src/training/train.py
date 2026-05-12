@@ -1,4 +1,4 @@
-# Pipeline pelatihan model ICP dengan MLflow tracking
+﻿# Pipeline pelatihan model ICP dengan MLflow tracking
 from __future__ import annotations
 
 import json
@@ -28,7 +28,7 @@ import matplotlib
 matplotlib.use("Agg")  # backend non-interaktif agar aman di semua OS
 import matplotlib.pyplot as plt
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CLEAN_CSV    = PROJECT_ROOT / "data" / "processed" / "clean_data.csv"
 
 # SQLite backend — aman di Windows, direkomendasikan MLflow 3.x

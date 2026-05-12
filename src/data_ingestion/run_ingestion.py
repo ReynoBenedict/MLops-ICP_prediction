@@ -1,4 +1,4 @@
-# run_ingestion.py
+﻿# run_ingestion.py
 # Pipeline ETL: unduh laporan ICP dari ESDM ke data/raw/
 # Cara pakai: python src/data_processing/run_ingestion.py
 
@@ -94,7 +94,7 @@ def detect_latest_month(csv_path: Path = DATASET_CSV) -> Optional[tuple[int, int
     except ImportError:
         raise ImportError("Run: pip install pandas")
 
-    # File belum ada → mulai dari awal (wajar untuk setup pertama kali)
+    # File belum ada -> mulai dari awal (wajar untuk setup pertama kali)
     if not csv_path.exists():
         logger.warning("[WARNING] dataset.csv tidak ditemukan di %s — akan mulai dari awal.", csv_path)
         return None
@@ -372,7 +372,7 @@ def download_pdfs(
             downloaded.append(dest_path)
             continue
 
-        logger.info("[DOWNLOAD] [%d/%d] Mengunduh → %s", idx, total, filename)
+        logger.info("[DOWNLOAD] [%d/%d] Mengunduh -> %s", idx, total, filename)
         try:
             with session.get(pdf_url, stream=True, timeout=60) as resp:
                 resp.raise_for_status()
@@ -455,9 +455,9 @@ def extract_text_from_pdfs(
     Ekstrak teks dari semua PDF di pdf_dir.
 
     Perilaku inkremental:
-    - [OCR SKIP] Jika file .txt sudah ada → langsung baca dari disk, skip ekstraksi
-    - [NEW]      Jika (year, month) file > latest_month → proses sebagai data baru
-    - [SKIP]     Jika (year, month) file <= latest_month DAN .txt sudah ada → lewati
+    - [OCR SKIP] Jika file .txt sudah ada -> langsung baca dari disk, skip ekstraksi
+    - [NEW]      Jika (year, month) file > latest_month -> proses sebagai data baru
+    - [SKIP]     Jika (year, month) file <= latest_month DAN .txt sudah ada -> lewati
     """
     try:
         import pdfplumber
@@ -502,7 +502,7 @@ def extract_text_from_pdfs(
             except (ValueError, IndexError):
                 pass
 
-        # [OCR SKIP] TXT sudah ada → baca langsung dari disk, tidak perlu ekstraksi ulang
+        # [OCR SKIP] TXT sudah ada -> baca langsung dari disk, tidak perlu ekstraksi ulang
         if txt_path.exists():
             text = txt_path.read_text(encoding="utf-8", errors="replace")
 
@@ -526,7 +526,7 @@ def extract_text_from_pdfs(
             })
             continue
 
-        # [NEW] File belum pernah diekstrak → proses sekarang
+        # [NEW] File belum pernah diekstrak -> proses sekarang
         if file_ym:
             logger.info(
                 "[NEW] Bulan baru terdeteksi: %04d-%02d — memproses %s",
@@ -561,7 +561,7 @@ def extract_text_from_pdfs(
                 logger.info("          OCR juga kosong.")
 
         txt_path.write_text(text, encoding="utf-8")
-        logger.info("          → %s", txt_path.name)
+        logger.info("          -> %s", txt_path.name)
 
         results.append({
             "pdf_name": pdf_path.name,
@@ -607,8 +607,8 @@ def build_csv_dataset(
     Bangun atau perbarui dataset.csv secara inkremental.
 
     Perilaku:
-    - Jika dataset.csv sudah ada → muat, gabungkan dengan data baru, dedup
-    - Jika belum ada → buat baru dari nol
+    - Jika dataset.csv sudah ada -> muat, gabungkan dengan data baru, dedup
+    - Jika belum ada -> buat baru dari nol
     - TIDAK pernah menghapus baris lama yang sudah valid
     """
     try:

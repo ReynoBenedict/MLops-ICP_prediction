@@ -163,11 +163,11 @@ jobs:
 
       # Baca dataset.csv, buat kolom lag_1, simpan ke data/processed/clean_data.csv
       - name: Prepare data
-        run: python prepare_data.py
+        run: python -m src.data_processing.prepare_data
 
       # Latih model menggunakan data yang sudah dibersihkan, hasilkan metrics.json
       - name: Retrain model
-        run: python train.py
+        run: python -m src.training.train
 
       # Upload metrics.json agar dapat digunakan oleh job evaluate dan register
       - name: Upload metrics.json
@@ -201,7 +201,7 @@ jobs:
           name: metrics
 
       - name: Run evaluate.py
-        run: python evaluate.py
+        run: python -m src.training.evaluate
 
   # Job 7: daftarkan model ke registry (simulasi staging MLflow)
   # Langkah terakhir — jika RMSE memenuhi syarat, model resmi dicatat di registry
@@ -226,7 +226,7 @@ jobs:
           name: metrics
 
       - name: Daftarkan model ke registry
-        run: python register_model_ci.py
+        run: python -m src.training.register_model_ci
 
       # Simpan log registry agar dapat diperiksa di tab Artifacts GitHub
       - name: Upload registry log

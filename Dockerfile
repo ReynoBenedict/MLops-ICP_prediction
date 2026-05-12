@@ -37,12 +37,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy source code 
 # File-file yang dikecualikan diatur di .dockerignore
-COPY prepare_data.py train.py register_model.py infer.py model_registry.yaml ./
-COPY data/   ./data/
-COPY configs/ ./configs/
+COPY src/ ./src/
+COPY model_registry.yaml ./
 
 # Buat direktori runtime 
-RUN mkdir -p /app/mlruns /app/reports /app/models
+RUN mkdir -p /app/mlruns /app/reports /app/models /app/data /app/configs
 
 # Entry point 
-CMD ["python", "infer.py"]
+CMD ["python", "-m", "src.training.infer"]

@@ -1,4 +1,4 @@
-"""register_model_ci.py — Lightweight MLflow registry simulation for CI.
+﻿"""register_model_ci.py — Lightweight MLflow registry simulation for CI.
 
 Real MLflow SQLite registry is not accessible in GitHub Actions (no mlflow.db).
 This script simulates the Staging registration by writing a structured log file,
@@ -9,8 +9,8 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-METRICS_PATH = Path(__file__).resolve().parent / "metrics.json"
-REGISTRY_LOG = Path(__file__).resolve().parent / "reports" / "registry_log.json"
+METRICS_PATH = Path(__file__).resolve().parents[2] / "metrics.json"
+REGISTRY_LOG = Path(__file__).resolve().parents[2] / "reports" / "registry_log.json"
 
 if not METRICS_PATH.exists():
     print("[ERROR] metrics.json not found. Cannot register.")
@@ -38,5 +38,5 @@ with open(REGISTRY_LOG, "w") as f:
 print("[REGISTER] Model registration record:")
 for k, v in entry.items():
     print(f"           {k}: {v}")
-print(f"[REGISTER] Registry log saved → {REGISTRY_LOG}")
-print("[REGISTER] ✅ ICP_Price_Model promoted to Staging (simulated).")
+print(f"[REGISTER] Registry log saved -> {REGISTRY_LOG}")
+print("[REGISTER] [OK] ICP_Price_Model promoted to Staging (simulated).")

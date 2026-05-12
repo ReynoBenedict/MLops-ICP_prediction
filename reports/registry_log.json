@@ -1,9 +1,9 @@
 {
-  "timestamp": "2026-05-09T09:20:08.333657+00:00",
+  "timestamp": "2026-05-12T03:48:44.903516+00:00",
   "model_name": "ICP_Price_Model",
-  "best_model_type": "RandomForest_n50",
-  "rmse": 7.14169,
-  "mae": 6.8954,
+  "best_model_type": "LinearRegression",
+  "rmse": 3.616376,
+  "mae": 1.915534,
   "stage": "Staging",
   "registered_by": "mlops-automation-ci",
   "status": "REGISTERED"
