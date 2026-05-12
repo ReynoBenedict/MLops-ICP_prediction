@@ -1,22 +1,15 @@
-﻿# Pipeline pelatihan model ICP dengan MLflow tracking
+# Pipeline pelatihan model ICP dengan MLflow tracking
 from __future__ import annotations
 
 import json
+import logging
 import math
 import sys
 import warnings
 from pathlib import Path
 from typing import Any
 
-# Sembunyikan warning dari mlflow dan sklearn sebelum import
-warnings.filterwarnings("ignore", category=FutureWarning, module="mlflow")
-warnings.filterwarnings("ignore", category=UserWarning, module="mlflow")
-warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
-
-import logging
-logging.getLogger("mlflow.sklearn").setLevel(logging.ERROR)
-logging.getLogger("mlflow").setLevel(logging.ERROR)
-
+import matplotlib
 import mlflow
 import mlflow.sklearn
 import pandas as pd
@@ -24,9 +17,19 @@ from mlflow.models.signature import infer_signature
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error
-import matplotlib
+
+# Configure Matplotlib backend
 matplotlib.use("Agg")  # backend non-interaktif agar aman di semua OS
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # noqa: E402
+
+# Filter warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="mlflow")
+warnings.filterwarnings("ignore", category=UserWarning, module="mlflow")
+warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
+
+# Configure logging
+logging.getLogger("mlflow.sklearn").setLevel(logging.ERROR)
+logging.getLogger("mlflow").setLevel(logging.ERROR)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CLEAN_CSV    = PROJECT_ROOT / "data" / "processed" / "clean_data.csv"
