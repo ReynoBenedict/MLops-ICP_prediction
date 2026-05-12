@@ -1,5 +1,4 @@
 import streamlit as st
-from pathlib import Path
 
 from services.prediction_service import get_prediction_service
 

@@ -1,213 +1,373 @@
 import streamlit as st
 import plotly.graph_objects as go
 
-from config.settings import PAGE_ICON
 from utils.data_loader import load_processed_data
 from components.layouts import render_footer
 from components.styles import apply_custom_styles
 from services.insight_service import InsightService
+
 
 # ── Page Config ───────────────────────────────────────────────────────────────
 apply_custom_styles()
 
 df = load_processed_data()
 
-# ── Pre-compute derived series (no logic change) ──────────────────────────────
-df['ma3'] = df['icp_price'].rolling(window=3).mean()
-df['vol'] = df['icp_price'].rolling(window=3).std()
+# ── Derived Metrics ───────────────────────────────────────────────────────────
+df["ma3"] = df["icp_price"].rolling(window=3).mean()
+df["vol"] = df["icp_price"].rolling(window=3).std()
 
 # ── Page Header ───────────────────────────────────────────────────────────────
 st.title("Market Trends")
-st.caption("Perilaku harga historis, sinyal momentum, dan risiko pasar")
 
-# ── Helper: section label ─────────────────────────────────────────────────────
-def section_label(text):
-    st.subheader(text)
+st.caption(
+    "Ringkasan kondisi pasar minyak, arah pergerakan harga, dan tingkat risiko pasar."
+)
 
-# ── Helper: interpretation card ───────────────────────────────────────────────
-def insight_card(bullets: list, accent: str = "#002b5c"):
-    for bullet in bullets:
-        st.markdown(f"- {bullet}")
+# ── Empty Guard ───────────────────────────────────────────────────────────────
+if df.empty:
+    st.error("Data tidak tersedia.")
+    render_footer()
+    st.stop()
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 1 — ICP & WTI Price History
+# SECTION 1 — MARKET OVERVIEW
 # ═══════════════════════════════════════════════════════════════════════════════
-section_label("Price History")
+st.markdown("### Market Overview")
 
+st.info(
+    """
+Halaman ini digunakan untuk membaca kondisi pasar minyak secara umum, 
+mulai dari arah tren harga, perubahan momentum, hingga tingkat risiko pasar 
+berdasarkan volatilitas historis ICP dan WTI.
+"""
+)
+
+# ── Main History Chart ────────────────────────────────────────────────────────
 fig_history = go.Figure()
-fig_history.add_trace(go.Scatter(
-    x=df['date'], y=df['icp_price'],
-    name="ICP Price",
-    line=dict(color='#002b5c', width=2.5),
-    mode='lines',
-    hovertemplate="ICP: $%{y:.2f}<extra></extra>",
-))
-fig_history.add_trace(go.Scatter(
-    x=df['date'], y=df['wti_price'],
-    name="WTI Price",
-    line=dict(color='#b38b59', width=2, dash='dot'),
-    mode='lines',
-    hovertemplate="WTI: $%{y:.2f}<extra></extra>",
-))
+
+fig_history.add_trace(
+    go.Scatter(
+        x=df["date"],
+        y=df["icp_price"],
+        name="ICP Price",
+        line=dict(
+            color="#002b5c",
+            width=2.8,
+        ),
+        mode="lines",
+        hovertemplate="ICP: $%{y:.2f}<extra></extra>",
+    )
+)
+
+fig_history.add_trace(
+    go.Scatter(
+        x=df["date"],
+        y=df["wti_price"],
+        name="WTI Benchmark",
+        line=dict(
+            color="#c7a96b",
+            width=2,
+            dash="dot",
+        ),
+        mode="lines",
+        hovertemplate="WTI: $%{y:.2f}<extra></extra>",
+    )
+)
+
 fig_history.update_layout(
     template="plotly_white",
     hovermode="x unified",
     margin=dict(l=10, r=10, t=10, b=10),
-    height=320,
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-    xaxis=dict(showgrid=False, title=None),
-    yaxis=dict(title="USD / BBL", showgrid=True, gridcolor="#f0f0f0"),
+    height=380,
+    legend=dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.02,
+        xanchor="right",
+        x=1,
+    ),
+    xaxis=dict(
+        showgrid=False,
+        title=None,
+    ),
+    yaxis=dict(
+        title="USD / BBL",
+        showgrid=True,
+        gridcolor="#f0f0f0",
+    ),
 )
-st.plotly_chart(fig_history, use_container_width=True)
 
-insight_card([
-    "ICP (navy) melacak harga domestik | WTI (emas putus-putus) adalah benchmark global | Keduanya bergerak bersama",
-    "Celah lebar antara garis menandakan divergensi harga | Pantau untuk eksposur kontrak",
-    "Penurunan tajam (2020, mid-2022) mencerminkan guncangan makro | Pemulihan menunjukkan ketahanan pasar",
-])
+st.plotly_chart(
+    fig_history,
+    use_container_width=True,
+)
+
+# ── Context Explanation ───────────────────────────────────────────────────────
+exp1, exp2, exp3 = st.columns(3, gap="medium")
+
+with exp1:
+    st.success(
+        """
+ICP dan WTI masih bergerak cukup searah. 
+Kenaikan WTI global biasanya ikut mendorong penyesuaian ICP domestik.
+"""
+    )
+
+with exp2:
+    st.warning(
+        """
+Perbedaan jarak antar garis menunjukkan adanya tekanan pasar, 
+lag penyesuaian harga, atau perubahan kondisi global.
+"""
+    )
+
+with exp3:
+    st.info(
+        """
+Lonjakan besar seperti 2020 dan 2022 mencerminkan periode 
+ketidakpastian pasar dan tekanan makro global.
+"""
+    )
+
+st.divider()
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 2 — Short-Term Price Direction  |  Market Risk Temperature
+# SECTION 2 — MOMENTUM & MARKET RISK
 # ═══════════════════════════════════════════════════════════════════════════════
-section_label("Momentum & Risk")
+st.markdown("### Momentum & Risk Analysis")
 
-col1, col2 = st.columns([1, 1], gap="medium")
+st.caption(
+    "Membaca arah tren jangka pendek dan tingkat ketidakpastian pasar."
+)
 
+col1, col2 = st.columns([1, 1], gap="large")
+
+# ──────────────────────────────────────────────────────────────────────────────
+# LEFT — MOMENTUM
+# ──────────────────────────────────────────────────────────────────────────────
 with col1:
-    st.caption("**Price Direction**")
-    st.caption("Tren 3 bulan yang diratakan | Menyaring noise untuk menunjukkan arah mendasar")
-    
+
+    st.markdown("#### Price Momentum")
+
+    st.caption(
+        "Garis biru tua menunjukkan tren rata-rata 3 bulan untuk menyaring noise jangka pendek."
+    )
+
     fig_ma = go.Figure()
-    fig_ma.add_trace(go.Scatter(
-        x=df['date'], y=df['icp_price'],
-        name="ICP Price",
-        line=dict(color='#dce0e8', width=1.5),
-        mode='lines',
-        hovertemplate="ICP: $%{y:.2f}<extra></extra>",
-    ))
-    fig_ma.add_trace(go.Scatter(
-        x=df['date'], y=df['ma3'],
-        name="3-Month Trend",
-        line=dict(color='#002b5c', width=2.5),
-        mode='lines',
-        hovertemplate="Trend: $%{y:.2f}<extra></extra>",
-    ))
+
+    fig_ma.add_trace(
+        go.Scatter(
+            x=df["date"],
+            y=df["icp_price"],
+            name="ICP Price",
+            line=dict(
+                color="#d5dbe5",
+                width=1.5,
+            ),
+            mode="lines",
+            hovertemplate="ICP: $%{y:.2f}<extra></extra>",
+        )
+    )
+
+    fig_ma.add_trace(
+        go.Scatter(
+            x=df["date"],
+            y=df["ma3"],
+            name="3-Month Trend",
+            line=dict(
+                color="#002b5c",
+                width=2.8,
+            ),
+            mode="lines",
+            hovertemplate="Trend: $%{y:.2f}<extra></extra>",
+        )
+    )
+
     fig_ma.update_layout(
         template="plotly_white",
         hovermode="x unified",
         margin=dict(l=10, r=10, t=10, b=10),
-        height=260,
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        xaxis=dict(showgrid=False, title=None),
-        yaxis=dict(title="USD / BBL", showgrid=True, gridcolor="#f0f0f0"),
+        height=300,
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="right",
+            x=1,
+        ),
+        xaxis=dict(
+            showgrid=False,
+            title=None,
+        ),
+        yaxis=dict(
+            title="USD / BBL",
+            showgrid=True,
+            gridcolor="#f0f0f0",
+        ),
     )
-    st.plotly_chart(fig_ma, use_container_width=True)
-    insight_card([
-        "When the trend line rises, prices are in an upward cycle — favourable for sellers.",
-        "A flattening or falling trend line signals a cooling market — review contract terms.",
-        "The grey line (raw price) vs. navy line (trend) shows how much short-term noise exists.",
-    ], accent="#002b5c")
 
+    st.plotly_chart(
+        fig_ma,
+        use_container_width=True,
+    )
+
+    st.info(
+        """
+Jika garis tren terus naik, pasar sedang berada dalam fase penguatan harga. 
+Sebaliknya, tren yang mulai datar atau turun biasanya menandakan pelemahan momentum pasar.
+"""
+    )
+
+# ──────────────────────────────────────────────────────────────────────────────
+# RIGHT — VOLATILITY
+# ──────────────────────────────────────────────────────────────────────────────
 with col2:
-    st.caption("**Market Risk**")
-    st.caption("Variabilitas harga 3 bulan | Lebih tinggi = lebih banyak ketidakpastian")
-    
+
+    st.markdown("#### Market Risk")
+
+    st.caption(
+        "Semakin tinggi volatilitas, semakin tinggi ketidakpastian pasar."
+    )
+
     fig_vol = go.Figure()
-    fig_vol.add_trace(go.Scatter(
-        x=df['date'], y=df['vol'],
-        name="Risk Level",
-        fill='tozeroy',
-        line=dict(color='#b38b59', width=2),
-        fillcolor='rgba(179,139,89,0.15)',
-        hovertemplate="Risk: %{y:.2f}<extra></extra>",
-    ))
+
+    fig_vol.add_trace(
+        go.Scatter(
+            x=df["date"],
+            y=df["vol"],
+            name="Risk Level",
+            fill="tozeroy",
+            line=dict(
+                color="#c7a96b",
+                width=2.5,
+            ),
+            fillcolor="rgba(199,169,107,0.18)",
+            hovertemplate="Risk: %{y:.2f}<extra></extra>",
+        )
+    )
+
     fig_vol.update_layout(
         template="plotly_white",
         hovermode="x unified",
         margin=dict(l=10, r=10, t=10, b=10),
-        height=260,
+        height=300,
         showlegend=False,
-        xaxis=dict(showgrid=False, title=None),
-        yaxis=dict(title="Variability (USD)", showgrid=True, gridcolor="#f0f0f0"),
+        xaxis=dict(
+            showgrid=False,
+            title=None,
+        ),
+        yaxis=dict(
+            title="Volatility",
+            showgrid=True,
+            gridcolor="#f0f0f0",
+        ),
     )
-    st.plotly_chart(fig_vol, use_container_width=True)
-    insight_card([
-        "Tall spikes = high uncertainty — pricing decisions carry more risk during these periods.",
-        "Low, flat areas = stable market — good conditions for longer-term contract commitments.",
-        "Sustained elevation (e.g. 2022) reflects structural market stress, not just short-term noise.",
-    ], accent="#b38b59")
+
+    st.plotly_chart(
+        fig_vol,
+        use_container_width=True,
+    )
+
+    st.warning(
+        """
+Lonjakan volatilitas biasanya muncul saat pasar mengalami tekanan besar, 
+misalnya akibat konflik geopolitik, gangguan supply, atau perubahan kebijakan energi global.
+"""
+    )
+
+st.divider()
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 3 — Market Cycle Signals
+# SECTION 3 — MARKET SIGNALS
 # ═══════════════════════════════════════════════════════════════════════════════
-section_label("Market Cycle Signals")
+st.markdown("### Market Signals")
 
-# Compute signals for the structured panel
-if not df.empty and len(df) >= 6:
-    recent_icp  = df['icp_price'].iloc[-1]
-    prev_icp    = df['icp_price'].iloc[-2]
-    ma3_latest  = df['ma3'].iloc[-1]
-    vol_latest  = df['vol'].iloc[-1]
-    vol_avg     = df['vol'].mean()
-    mom_pct     = (recent_icp - prev_icp) / prev_icp * 100
+# ── Signal Calculation ────────────────────────────────────────────────────────
+recent_icp = df["icp_price"].iloc[-1]
+prev_icp = df["icp_price"].iloc[-2]
 
-    # Direction
-    if recent_icp > ma3_latest * 1.02:
-        direction, dir_color, dir_bg = "Bullish", "#0a7c42", "#e8f7ef"
-    elif recent_icp < ma3_latest * 0.98:
-        direction, dir_color, dir_bg = "Bearish", "#c0392b", "#fdecea"
-    else:
-        direction, dir_color, dir_bg = "Neutral", "#7a8290", "#f0f2f5"
+ma3_latest = df["ma3"].iloc[-1]
 
-    # Volatility
-    if vol_latest < vol_avg * 0.8:
-        risk_label, risk_color, risk_bg = "Low — Stable", "#0a7c42", "#e8f7ef"
-    elif vol_latest > vol_avg * 1.2:
-        risk_label, risk_color, risk_bg = "Elevated — Caution", "#c0392b", "#fdecea"
-    else:
-        risk_label, risk_color, risk_bg = "Moderate — Normal", "#b38b59", "#fdf6ec"
+vol_latest = df["vol"].iloc[-1]
+vol_avg = df["vol"].mean()
 
-    # Momentum label
-    mom_label = f"{mom_pct:+.1f}% vs. prior period"
-    mom_color = "#0a7c42" if mom_pct > 0 else "#c0392b"
+mom_pct = ((recent_icp - prev_icp) / prev_icp) * 100
 
-    # Stability
-    stability = "Consolidating" if vol_latest < vol_avg * 0.8 else "Expanding" if vol_latest > vol_avg * 1.2 else "Ranging"
+# ── Direction ─────────────────────────────────────────────────────────────────
+if recent_icp > ma3_latest * 1.02:
+    direction = "Bullish"
+    direction_color = "#0a7c42"
 
-    col1, col2, col3, col4 = st.columns([1, 1, 1, 1], gap="small")
-
-    with col1:
-        st.metric(
-            label="Price Direction",
-            value=direction,
-            help=f"ICP is {'above' if direction == 'Bullish' else 'below' if direction == 'Bearish' else 'in line with'} its 3-month trend"
-        )
-
-    with col2:
-        st.metric(
-            label="Market Risk",
-            value=risk_label,
-            help=f"Current variability is ${vol_latest:.2f} vs. avg ${vol_avg:.2f}"
-        )
-
-    with col3:
-        st.metric(
-            label="Momentum",
-            value=mom_label,
-            help=f"Latest ICP: ${recent_icp:.2f} | Prior: ${prev_icp:.2f}"
-        )
-
-    with col4:
-        st.metric(
-            label="Cycle Phase",
-            value=stability,
-            help="Based on 3-month price variability relative to historical average"
-        )
-
-    # Operational takeaway strip
-    st.info(f"**Operational read:** {InsightService.get_market_trend_insight(df)}")
+elif recent_icp < ma3_latest * 0.98:
+    direction = "Bearish"
+    direction_color = "#c0392b"
 
 else:
-    st.warning("Insufficient historical data to compute market cycle signals.")
+    direction = "Stabil"
+    direction_color = "#7a8290"
+
+# ── Risk ──────────────────────────────────────────────────────────────────────
+if vol_latest > vol_avg * 1.2:
+    risk_label = "Tinggi"
+    risk_color = "#c0392b"
+
+elif vol_latest < vol_avg * 0.8:
+    risk_label = "Rendah"
+    risk_color = "#0a7c42"
+
+else:
+    risk_label = "Normal"
+    risk_color = "#b38b59"
+
+# ── Cycle ─────────────────────────────────────────────────────────────────────
+if vol_latest > vol_avg * 1.2:
+    cycle_phase = "Pasar Ekspansif"
+
+elif vol_latest < vol_avg * 0.8:
+    cycle_phase = "Konsolidasi"
+
+else:
+    cycle_phase = "Pergerakan Normal"
+
+# ── Cards ─────────────────────────────────────────────────────────────────────
+card1, card2, card3, card4 = st.columns(4, gap="medium")
+
+with card1:
+    st.metric(
+        label="Arah Pasar",
+        value=direction,
+        help="Posisi ICP terhadap tren 3 bulan",
+    )
+
+with card2:
+    st.metric(
+        label="Risiko Pasar",
+        value=risk_label,
+        help="Berdasarkan volatilitas historis",
+    )
+
+with card3:
+    st.metric(
+        label="Momentum",
+        value=f"{mom_pct:+.1f}%",
+        help="Perubahan dibanding periode sebelumnya",
+    )
+
+with card4:
+    st.metric(
+        label="Fase Pasar",
+        value=cycle_phase,
+        help="Kondisi pasar berdasarkan volatilitas",
+    )
+
+st.markdown("")
+
+st.success(
+    f"""
+{InsightService.get_market_trend_insight(df)}
+"""
+)
+
+st.divider()
 
 render_footer()

@@ -1,6 +1,5 @@
 import streamlit as st
 
-from config.settings import PAGE_ICON
 from utils.data_loader import load_pipeline_metrics
 from components.layouts import render_footer
 from components.diagnostics import render_diagnostics_panel

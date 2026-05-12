@@ -1,7 +1,5 @@
 import streamlit as st
 
-from config.settings import PAGE_ICON
-
 def render_sidebar():
     """Empty function - native Streamlit multipage navigation handles sidebar automatically."""
     pass

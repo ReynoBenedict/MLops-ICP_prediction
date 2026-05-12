@@ -2,7 +2,6 @@ import mlflow
 import mlflow.sklearn
 import pandas as pd
 from pathlib import Path
-import json
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 MLFLOW_DB = PROJECT_ROOT / "mlflow.db"
@@ -13,7 +12,7 @@ def verify():
     model_name = "ICP_Price_Model"
     stage = "Production"
     
-    print(f"--- VERIFYING PRODUCTION MODEL ---")
+    print("--- VERIFYING PRODUCTION MODEL ---")
     
     try:
         model_uri = f"models:/{model_name}/{stage}"

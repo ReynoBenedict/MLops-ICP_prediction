@@ -5,7 +5,6 @@ import mlflow.sklearn
 from mlflow import MlflowClient
 import logging
 import warnings
-from pathlib import Path
 
 from config.settings import MLFLOW_TRACKING_URI, MODEL_NAME, PRODUCTION_STAGE, FEATURE_COLUMNS
 
@@ -124,7 +123,8 @@ class PredictionService:
             return {"error": str(e)}
 
     def get_feature_sensitivity(self, base_features: dict, delta: float = 10.0):
-        if not base_features or self.model is None: return {}
+        if not base_features or self.model is None:
+            return {}
         results = {}
         try:
             baseline = self.predict(base_features)
@@ -133,7 +133,8 @@ class PredictionService:
                 test_payload[feat] += delta
                 new_pred = self.predict(test_payload)
                 results[feat] = {"impact": round(new_pred - baseline, 4)}
-        except: pass
+        except Exception:
+            pass
         return results
 
     def get_debug_info(self):

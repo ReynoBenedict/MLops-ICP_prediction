@@ -1,0 +1,58 @@
+{
+  "model_type": "<class 'sklearn.linear_model._base.LinearRegression'>",
+  "features": [
+    "wti_price",
+    "wti_lag_1",
+    "wti_rolling_mean_3",
+    "lag_1",
+    "lag_3",
+    "lag_6",
+    "rolling_mean_3"
+  ],
+  "coefficients": {
+    "wti_price": 0.8105399506764241,
+    "wti_lag_1": -0.10042959321552672,
+    "wti_rolling_mean_3": -0.19022679961429947,
+    "lag_1": 0.5433678018805608,
+    "lag_3": 0.2297477564564295,
+    "lag_6": -0.011597826576618436,
+    "rolling_mean_3": -0.28192560797029204
+  },
+  "sensitivity": [
+    {
+      "feature": "wti_price",
+      "delta": 8.1054,
+      "pct": 11.46
+    },
+    {
+      "feature": "wti_lag_1",
+      "delta": -1.0043,
+      "pct": -1.42
+    },
+    {
+      "feature": "wti_rolling_mean_3",
+      "delta": -1.9023,
+      "pct": -2.69
+    },
+    {
+      "feature": "lag_1",
+      "delta": 5.4337,
+      "pct": 7.68
+    },
+    {
+      "feature": "lag_3",
+      "delta": 2.2975,
+      "pct": 3.25
+    },
+    {
+      "feature": "lag_6",
+      "delta": -0.116,
+      "pct": -0.16
+    },
+    {
+      "feature": "rolling_mean_3",
+      "delta": -2.8193,
+      "pct": -3.98
+    }
+  ]
+}

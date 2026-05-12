@@ -2,160 +2,212 @@ import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
 
-from config.settings import PAGE_ICON
 from utils.data_loader import load_processed_data
 from components.layouts import render_footer
 from components.styles import apply_custom_styles
 from services.insight_service import InsightService
+
 
 # ── Page Config ───────────────────────────────────────────────────────────────
 apply_custom_styles()
 
 df = load_processed_data()
 
-# ── Page Header ───────────────────────────────────────────────────────────────
-st.title("ICP vs WTI")
-st.caption("Bagaimana harga minyak global mendorong penetapan harga domestik Indonesia")
-
-# ── Helper: section label ─────────────────────────────────────────────────────
-def section_label(text):
-    st.subheader(text)
-
-# ── Helper: insight card ──────────────────────────────────────────────────────
-def insight_card(bullets: list, accent: str = "#002b5c"):
-    for bullet in bullets:
-        st.markdown(f"- {bullet}")
-
-# ── Guard: empty data ─────────────────────────────────────────────────────────
+# ── Guard ─────────────────────────────────────────────────────────────────────
 if df.empty:
     st.error("No data available. Check the data pipeline.")
     render_footer()
     st.stop()
 
-# ── Compute analytics (no formula changes) ───────────────────────────────────
-corr = df['icp_price'].corr(df['wti_price'])                          # Pearson r
-x    = df['wti_price'].values
-y    = df['icp_price'].values
-coeffs      = np.polyfit(x, y, 1)                                     # linear fit
-slope       = coeffs[0]
-intercept   = coeffs[1]
+# ── Core Analytics ────────────────────────────────────────────────────────────
+corr = df["icp_price"].corr(df["wti_price"])
+
+x = df["wti_price"].values
+y = df["icp_price"].values
+
+coeffs = np.polyfit(x, y, 1)
+
+slope = coeffs[0]
+intercept = coeffs[1]
+
 trendline_x = np.linspace(x.min(), x.max(), 200)
 trendline_y = slope * trendline_x + intercept
 
-# Derived signal labels (business language)
-if corr > 0.9:
-    corr_label, corr_color, corr_bg = "Very Strong",  "#0a7c42", "#e8f7ef"
-elif corr > 0.7:
-    corr_label, corr_color, corr_bg = "Strong",       "#0a7c42", "#e8f7ef"
-elif corr > 0.4:
-    corr_label, corr_color, corr_bg = "Moderate",     "#b38b59", "#fdf6ec"
+# ── Labels ────────────────────────────────────────────────────────────────────
+if corr >= 0.9:
+    corr_label = "Very Strong"
+    corr_color = "#0a7c42"
+
+elif corr >= 0.7:
+    corr_label = "Strong"
+    corr_color = "#0a7c42"
+
+elif corr >= 0.5:
+    corr_label = "Moderate"
+    corr_color = "#b38b59"
+
 else:
-    corr_label, corr_color, corr_bg = "Weak",         "#c0392b", "#fdecea"
+    corr_label = "Weak"
+    corr_color = "#c0392b"
 
-dependency_pct  = min(round(abs(corr) * 100), 99)
-reliability_lbl = "High" if corr > 0.8 else "Moderate" if corr > 0.5 else "Low"
-influence_lbl   = f"${slope:.2f} ICP per $1 WTI"
+dependency_pct = min(round(abs(corr) * 100), 99)
+
+reliability_lbl = (
+    "High"
+    if corr >= 0.8
+    else "Moderate"
+)
+
+influence_lbl = f"{slope:.2f} ICP / 1 WTI"
+
+corr_insight = InsightService.get_correlation_insight(df)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 1 — Why WTI Matters
+# PAGE HEADER
 # ═══════════════════════════════════════════════════════════════════════════════
-section_label("Why WTI Matters")
+st.title("ICP vs WTI")
 
-col1, col2, col3, col4 = st.columns([1, 1, 1, 1], gap="small")
+st.caption(
+    "Hubungan antara benchmark minyak global dan harga minyak mentah Indonesia."
+)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# HERO SECTION
+# ═══════════════════════════════════════════════════════════════════════════════
+st.markdown("### WTI Relationship Overview")
+
+col1, col2, col3, col4 = st.columns(4, gap="medium")
 
 with col1:
     st.metric(
-        label="Correlation Strength",
+        label="Correlation",
         value=corr_label,
-        help=f"Pearson r = {corr:.4f}"
+        help=f"Pearson correlation: {corr:.4f}",
     )
 
 with col2:
     st.metric(
         label="Market Dependency",
         value=f"~{dependency_pct}%",
-        help="of ICP movement explained by WTI"
+        help="Estimated ICP dependency on WTI movement",
     )
 
 with col3:
     st.metric(
         label="Forecast Reliability",
         value=reliability_lbl,
-        help="WTI as a leading indicator for ICP"
+        help="WTI reliability as predictive indicator",
     )
 
 with col4:
     st.metric(
-        label="WTI Influence Level",
+        label="WTI Influence",
         value=influence_lbl,
-        help="Historical linear sensitivity estimate"
+        help="Historical sensitivity estimate",
     )
 
-# Context strip
-st.info(f"""
-**Why this relationship matters:** WTI (West Texas Intermediate) is the world's primary crude oil benchmark. Because Indonesian crude pricing is set in a globally integrated market, WTI movements consistently precede ICP adjustments. A {corr_label.lower()} correlation of **{corr:.4f}** means WTI is not just a reference — it is a reliable leading signal that the forecasting model actively uses to project next-month ICP with greater accuracy.
-""")
+st.markdown("")
+
+st.success(
+    f"""
+WTI masih menjadi driver utama pergerakan ICP. 
+Korelasi historis sebesar {corr:.2f} menunjukkan bahwa perubahan harga minyak global 
+masih sangat memengaruhi harga minyak domestik Indonesia.
+"""
+)
+
+st.divider()
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 2 — Scatter Plot
+# MAIN VISUAL
 # ═══════════════════════════════════════════════════════════════════════════════
-section_label("Price Relationship Map — WTI vs ICP")
+st.markdown("### Price Relationship Map")
 
-# Colour points by approximate era for visual context
+st.caption(
+    "Semakin dekat titik observasi terhadap garis tren, semakin konsisten hubungan ICP dan WTI."
+)
+
+# ── Era Colors ────────────────────────────────────────────────────────────────
 era_colors = []
-for _, row in df.iterrows():
-    yr = int(row['year']) if 'year' in df.columns else 2022
-    if yr <= 2020:
-        era_colors.append('#93b4d4')   # light navy — pandemic era
-    elif yr <= 2022:
-        era_colors.append('#002b5c')   # dark navy — recovery / spike
-    else:
-        era_colors.append('#b38b59')   # gold — recent
 
-hover_text = []
 for _, row in df.iterrows():
-    mo = int(row['month']) if 'month' in df.columns else 0
-    yr = int(row['year'])  if 'year'  in df.columns else 0
+
+    yr = int(row["year"]) if "year" in df.columns else 2022
+
+    if yr <= 2020:
+        era_colors.append("#9db8d3")
+
+    elif yr <= 2022:
+        era_colors.append("#002b5c")
+
+    else:
+        era_colors.append("#c7a96b")
+
+# ── Hover Text ────────────────────────────────────────────────────────────────
+hover_text = []
+
+for _, row in df.iterrows():
+
+    mo = int(row["month"]) if "month" in df.columns else 0
+    yr = int(row["year"]) if "year" in df.columns else 0
+
     hover_text.append(
         f"<b>{yr}-{mo:02d}</b><br>"
         f"WTI: ${row['wti_price']:.2f}<br>"
         f"ICP: ${row['icp_price']:.2f}"
     )
 
+# ── Scatter Plot ──────────────────────────────────────────────────────────────
 fig_scatter = go.Figure()
 
-# Data points
-fig_scatter.add_trace(go.Scatter(
-    x=df['wti_price'],
-    y=df['icp_price'],
-    mode='markers',
-    name='Monthly observation',
-    marker=dict(
-        color=era_colors,
-        size=9,
-        opacity=0.82,
-        line=dict(width=1, color='white'),
-    ),
-    text=hover_text,
-    hovertemplate="%{text}<extra></extra>",
-))
+fig_scatter.add_trace(
+    go.Scatter(
+        x=df["wti_price"],
+        y=df["icp_price"],
+        mode="markers",
+        name="Monthly Observation",
+        marker=dict(
+            color=era_colors,
+            size=9,
+            opacity=0.85,
+            line=dict(
+                width=1,
+                color="white",
+            ),
+        ),
+        text=hover_text,
+        hovertemplate="%{text}<extra></extra>",
+    )
+)
 
-# Trendline
-fig_scatter.add_trace(go.Scatter(
-    x=trendline_x,
-    y=trendline_y,
-    mode='lines',
-    name=f'Trend  (slope {slope:.2f})',
-    line=dict(color='#c0392b', width=2, dash='dash'),
-    hoverinfo='skip',
-))
+# ── Trend Line ────────────────────────────────────────────────────────────────
+fig_scatter.add_trace(
+    go.Scatter(
+        x=trendline_x,
+        y=trendline_y,
+        mode="lines",
+        name=f"Trend Line ({slope:.2f})",
+        line=dict(
+            color="#c0392b",
+            width=2.5,
+            dash="dash",
+        ),
+        hoverinfo="skip",
+    )
+)
 
 fig_scatter.update_layout(
     template="plotly_white",
-    height=420,
-    margin=dict(l=10, r=10, t=10, b=10),
-    hovermode='closest',
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+    height=520,
+    margin=dict(l=10, r=10, t=20, b=10),
+    hovermode="closest",
+    legend=dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.02,
+        xanchor="right",
+        x=1,
+    ),
     xaxis=dict(
         title="WTI Price (USD / BBL)",
         showgrid=True,
@@ -170,33 +222,103 @@ fig_scatter.update_layout(
     ),
 )
 
-st.plotly_chart(fig_scatter, use_container_width=True)
+st.plotly_chart(
+    fig_scatter,
+    use_container_width=True,
+)
 
-# Legend for era colours
-st.caption("🔵 2019–2020 (pandemic era) | 🔵 2021–2022 (recovery & spike) | 🟡 2023–present | 🔴 Trend line")
+# ── Legend ────────────────────────────────────────────────────────────────────
+legend_col1, legend_col2, legend_col3, legend_col4 = st.columns(4)
 
-insight_card([
-    f"**Tight clustering along the trend line** confirms that WTI and ICP move together with {corr_label.lower()} consistency — not by coincidence.",
-    f"**Each $1 rise in WTI** has historically corresponded to a ~${slope:.2f} change in ICP, based on the fitted trend.",
-    "**Points far from the line** (outliers) reflect periods of domestic policy intervention, supply disruptions, or lagged price adjustments.",
-    "**Operational implication:** when WTI moves sharply, expect ICP to follow within 1–2 months — use this window to prepare pricing and contract decisions.",
-])
+with legend_col1:
+    st.caption("🔵 2019–2020")
+
+with legend_col2:
+    st.caption("🔷 2021–2022")
+
+with legend_col3:
+    st.caption("🟡 2023–Present")
+
+with legend_col4:
+    st.caption("🔴 Trend Line")
+
+st.markdown("")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 3 — Correlation Intelligence
+# INSIGHT SECTION
 # ═══════════════════════════════════════════════════════════════════════════════
-section_label("Correlation Intelligence")
+st.markdown("### Correlation Intelligence")
 
-corr_insight_text = InsightService.get_correlation_insight(df)
+left_col, right_col = st.columns([1.2, 1], gap="large")
 
-st.markdown(f"""
-**Statistical Summary**
+with left_col:
 
-{corr_insight_text}
+    st.markdown("#### Statistical Summary")
 
----
+    st.write(corr_insight)
 
-**Forecasting implication:** The stronger this correlation, the more confidently the model can use WTI as a predictive input. A weakening correlation over time would be an early warning signal to re-evaluate the model's feature weights.
-""")
+    st.markdown("")
+
+    st.info(
+        f"""
+Market dependency terhadap WTI berada di sekitar {dependency_pct}% 
+dengan hubungan historis yang sangat konsisten. 
+Hal ini membuat WTI tetap menjadi indikator utama dalam proses forecasting ICP.
+"""
+    )
+
+with right_col:
+
+    st.markdown("#### Operational Interpretation")
+
+    st.warning(
+        """
+Perubahan WTI biasanya lebih dulu terjadi sebelum penyesuaian ICP domestik. 
+Kondisi ini dapat digunakan sebagai early signal untuk pricing strategy, 
+kontrak energi, dan monitoring risiko pasar.
+"""
+    )
+
+    st.markdown("")
+
+    st.markdown(
+        f"""
+<div style="
+padding: 1rem;
+border-radius: 12px;
+background-color: #f8fafc;
+border: 1px solid #e5e7eb;
+">
+
+<div style="
+font-size: 0.85rem;
+color: #6b7280;
+margin-bottom: 0.4rem;
+">
+Current Correlation Signal
+</div>
+
+<div style="
+font-size: 1.8rem;
+font-weight: 700;
+color: {corr_color};
+">
+{corr:.2f}
+</div>
+
+<div style="
+font-size: 0.9rem;
+color: #6b7280;
+margin-top: 0.3rem;
+">
+WTI and ICP remain tightly aligned
+</div>
+
+</div>
+""",
+        unsafe_allow_html=True,
+    )
+
+st.divider()
 
 render_footer()

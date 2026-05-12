@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-05-12T04:05:17.478855+00:00",
+  "timestamp": "2026-05-12T17:13:52.987297+00:00",
   "model_name": "ICP_Price_Model",
   "best_model_type": "LinearRegression",
   "rmse": 3.616376,

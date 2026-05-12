@@ -158,7 +158,6 @@ def main() -> None:
     print(f"[STEP] Promoting Run {best_run_id} to Production...")
     
     # Find the version associated with this run
-    filter_string = f"run_id='{best_run_id}'"
     versions = client.search_model_versions(f"name='{MODEL_NAME}' and run_id='{best_run_id}'")
     
     if not versions:

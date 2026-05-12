@@ -1,7 +1,6 @@
 import pandas as pd
 import json
 import logging
-from pathlib import Path
 
 from config.settings import CLEAN_DATA_PATH, METRICS_JSON_PATH
 

@@ -2,163 +2,250 @@ import pandas as pd
 import numpy as np
 from typing import Dict, Any
 
+
 class InsightService:
     """
-    Service to generate data-derived analytics insights and narratives.
-    Ensures all commentary is grounded in actual metrics and rules.
+    Generate concise business-oriented insights
+    for forecasting dashboard pages.
     """
-
-    # Thresholds for classification
-    VOLATILITY_THRESHOLD_LOW = 0.05  # Below 5% of mean is low
-    VOLATILITY_THRESHOLD_HIGH = 0.15 # Above 15% of mean is high
-    
-    CORRELATION_THRESHOLD_STRONG = 0.8
-    CORRELATION_THRESHOLD_MODERATE = 0.5
-    
-    MOMENTUM_THRESHOLD = 0.02 # 2% change for momentum detection
 
     @staticmethod
     def get_market_trend_insight(df: pd.DataFrame) -> str:
-        """Generates insight based on recent price movement and volatility."""
+        """Executive market pulse for Dashboard page."""
+
         if df.empty or len(df) < 6:
-            return "Data historis tidak mencukupi untuk analisis tren mendalam."
+            return (
+                "Data historis belum cukup untuk membaca kondisi pasar."
+            )
 
-        recent_icp = df['icp_price'].iloc[-1]
-        prev_icp = df['icp_price'].iloc[-2]
-        ma3 = df['icp_price'].rolling(window=3).mean().iloc[-1]
-        
-        # Volatility check
-        vol = df['icp_price'].rolling(window=3).std()
-        current_vol = vol.iloc[-1]
-        avg_vol = vol.mean()
-        
-        # Momentum check
-        change = (recent_icp - prev_icp) / prev_icp
-        
-        # Classification Logic
-        if current_vol < (avg_vol * 0.8):
-            vol_desc = "rendah (konsolidasi)"
-        elif current_vol > (avg_vol * 1.2):
-            vol_desc = "tinggi (ekspansif)"
-        else:
-            vol_desc = "normal"
+        recent_icp = df["icp_price"].iloc[-1]
+        prev_icp = df["icp_price"].iloc[-2]
 
+        ma3 = df["icp_price"].rolling(3).mean().iloc[-1]
+
+        change_pct = ((recent_icp - prev_icp) / prev_icp) * 100
+
+        volatility = (
+            df["icp_price"].rolling(3).std().iloc[-1]
+        )
+
+        avg_volatility = (
+            df["icp_price"].rolling(3).std().mean()
+        )
+
+        # Trend
         if recent_icp > ma3 * 1.02:
-            trend = "Bullish"
+            trend = "naik"
         elif recent_icp < ma3 * 0.98:
-            trend = "Bearish"
+            trend = "melemah"
         else:
-            trend = "Netral/Stabil"
+            trend = "relatif stabil"
 
-        return (f"Pasar saat ini menunjukkan tren <strong>{trend}</strong> dengan tingkat volatilitas <strong>{vol_desc}</strong>. "
-                f"Harga ICP berada {abs(change)*100:.1f}% {'di atas' if change > 0 else 'di bawah'} periode sebelumnya, "
-                f"mengindikasikan {'momentum kuat' if abs(change) > 0.05 else 'pergerakan organik'}.")
+        # Volatility
+        if volatility > avg_volatility * 1.2:
+            risk = "Volatilitas pasar masih cukup tinggi."
+        elif volatility < avg_volatility * 0.8:
+            risk = "Pergerakan pasar relatif stabil."
+        else:
+            risk = "Pasar bergerak dalam volatilitas normal."
+
+        return (
+            f"ICP saat ini berada dalam tren {trend} "
+            f"dengan perubahan {change_pct:+.1f}% "
+            f"dibanding periode sebelumnya. "
+            f"{risk}"
+        )
 
     @staticmethod
     def get_correlation_insight(df: pd.DataFrame) -> str:
-        """Generates grounded insight for ICP vs WTI relationship."""
-        if df.empty or 'icp_price' not in df or 'wti_price' not in df:
-            return "Data korelasi tidak tersedia."
+        """Relationship insight for ICP vs WTI page."""
 
-        corr = df['icp_price'].corr(df['wti_price'])
-        
-        if corr > 0.9:
-            strength = "Sangat Kuat (Sinkronisasi Penuh)"
-        elif corr > 0.7:
-            strength = "Kuat"
-        elif corr > 0.4:
-            strength = "Moderat"
+        if df.empty:
+            return (
+                "Hubungan ICP dan WTI belum dapat dianalisis."
+            )
+
+        corr = df["icp_price"].corr(df["wti_price"])
+
+        if corr >= 0.9:
+            strength = "sangat kuat"
+        elif corr >= 0.7:
+            strength = "kuat"
+        elif corr >= 0.5:
+            strength = "cukup kuat"
         else:
-            strength = "Lemah"
+            strength = "lemah"
 
-        # Simple regression slope approximation
         try:
-            x = df['wti_price'].values
-            y = df['icp_price'].values
-            slope = np.polyfit(x, y, 1)[0]
-            sensitivity = f"setiap kenaikan $1 pada WTI secara statistik berkorelasi dengan kenaikan ICP sebesar ~${slope:.2f}"
-        except:
-            sensitivity = "hubungan harga tetap linier"
+            slope = np.polyfit(
+                df["wti_price"],
+                df["icp_price"],
+                1,
+            )[0]
 
-        return (f"Korelasi Pearson saat ini adalah <strong>{corr:.4f}</strong>, dikategorikan sebagai <strong>{strength}</strong>. "
-                f"Secara historis, {sensitivity}. Hal ini menegaskan WTI sebagai indikator leading yang valid.")
+            impact_text = (
+                f"Secara historis, kenaikan WTI sebesar "
+                f"1 USD diikuti perubahan ICP sekitar "
+                f"{slope:.2f} USD."
+            )
+
+        except Exception:
+            impact_text = (
+                "Pergerakan historis ICP dan WTI "
+                "masih menunjukkan pola yang konsisten."
+            )
+
+        return (
+            f"Korelasi ICP dan WTI tergolong {strength} "
+            f"dengan nilai Pearson {corr:.2f}. "
+            f"{impact_text}"
+        )
 
     @staticmethod
-    def get_forecast_insight(pred_val: float, df: pd.DataFrame, model_meta: Dict[str, Any]) -> str:
-        """Generates insight for the prediction result."""
-        if df.empty:
-            return "Prediksi dihasilkan tanpa konteks historis."
+    def get_forecast_insight(
+        pred_val: float,
+        df: pd.DataFrame,
+        model_meta: Dict[str, Any],
+    ) -> str:
+        """Forecast interpretation for Forecasting page."""
 
-        latest_icp = df['icp_price'].iloc[-1]
+        if df.empty:
+            return (
+                "Forecast berhasil dibuat tanpa konteks historis."
+            )
+
+        latest_icp = df["icp_price"].iloc[-1]
+
         delta = pred_val - latest_icp
         delta_pct = (delta / latest_icp) * 100
-        
-        vol = df['icp_price'].rolling(window=3).std().iloc[-1]
-        avg_vol = df['icp_price'].rolling(window=3).std().mean()
-        
-        uncertainty = "Meningkat" if vol > avg_vol else "Normal/Rendah"
-        
-        v_name = model_meta.get('version', 'N/A')
-        
-        return (f"Model (v{v_name}) memproyeksikan pergerakan <strong>{delta_pct:+.2f}%</strong> dari harga saat ini. "
-                f"Ketidakpastian prediksi berada pada level <strong>{uncertainty}</strong> berdasarkan volatilitas pasar terakhir. "
-                f"Arah pergerakan {'mendukung' if delta > 0 else 'melawan'} tren jangka pendek saat ini.")
 
-    @staticmethod
-    def get_simulator_insight(sensitivity: Dict[str, Any], pred_val: float, baseline_val: float) -> str:
-        """Generates insight for simulator results."""
-        if not sensitivity:
-            return "Data sensitivitas tidak tersedia untuk skenario ini."
-
-        # Find top contributor
-        top_feat = max(sensitivity.items(), key=lambda x: abs(x[1].get('impact', 0)))
-        feat_name = top_feat[0].replace('_', ' ').title()
-        impact = top_feat[1].get('impact', 0)
-        
-        total_delta = pred_val - baseline_val
-        
-        return (f"Skenario ini menghasilkan perubahan bersih sebesar <strong>${total_delta:+.2f}</strong>. "
-                f"Faktor <strong>{feat_name}</strong> memberikan dampak marginal tertinggi sebesar <strong>${impact:+.2f}</strong> per unit kenaikan. "
-                f"Ini mengonfirmasi sensitivitas model terhadap input tersebut dalam kondisi skenario ini.")
-
-    @staticmethod
-    def get_dominance_insight(model_meta: Dict[str, Any]) -> str:
-        """Generates insight into which features dominate the model's logic."""
-        coefs = model_meta.get('coefficients')
-        if not coefs:
-            return "Analisis faktor dominan saat ini tidak tersedia (Model non-linier atau metadata terbatas)."
-
-        # Sort by absolute coefficient value
-        sorted_coefs = sorted(coefs.items(), key=lambda x: abs(x[1]), reverse=True)
-        top_3 = sorted_coefs[:3]
-        
-        narrative_parts = []
-        for feat, val in top_3:
-            name = feat.replace('_', ' ').title()
-            direction = "positif" if val > 0 else "negatif"
-            narrative_parts.append(f"<strong>{name}</strong> ({direction})")
-
-        primary = top_3[0][0].replace('_', ' ').title()
-        
-        return (f"Prediksi didominasi oleh pergerakan {', '.join(narrative_parts)}. "
-                f"Faktor <strong>{primary}</strong> memiliki bobot statistik tertinggi dalam menentukan output. "
-                f"Stabilitas variabel-variabel ini sangat krusial bagi akurasi proyeksi periode ini.")
-
-    @staticmethod
-    def get_confidence_insight(rmse: float, pred_val: float) -> str:
-        """Generates grounded explanation for confidence intervals."""
-        if rmse <= 0:
-            return "Interval kepercayaan tidak dapat dihitung karena data validasi tidak ditemukan."
-
-        error_pct = (rmse / pred_val) * 100 if pred_val != 0 else 0
-        
-        if error_pct < 5:
-            reliability = "Tinggi"
-        elif error_pct < 10:
-            reliability = "Optimal"
+        if delta_pct > 2:
+            direction = "kenaikan"
+        elif delta_pct < -2:
+            direction = "penurunan"
         else:
-            reliability = "Moderat"
+            direction = "pergerakan stabil"
 
-        return (f"Interval kepercayaan 95% dihitung berdasarkan RMSE historis (<strong>{rmse:.2f}</strong>). "
-                f"Tingkat reliabilitas model untuk prediksi ini dikategorikan sebagai <strong>{reliability}</strong>. "
-                f"Penyimpangan aktual secara historis jarang melebihi ambang batas ini.")
+        return (
+            f"Model memproyeksikan {direction} ICP "
+            f"sebesar {delta_pct:+.2f}% "
+            f"dibanding harga saat ini. "
+            f"Prediksi masih mengikuti pola pergerakan "
+            f"jangka pendek pasar minyak global."
+        )
+
+    @staticmethod
+    def get_simulator_insight(
+        sensitivity: Dict[str, Any],
+        pred_val: float,
+        baseline_val: float,
+    ) -> str:
+        """Interactive scenario insight for Predict Price page."""
+
+        if not sensitivity:
+            return (
+                "Analisis sensitivitas belum tersedia."
+            )
+
+        top_feat = max(
+            sensitivity.items(),
+            key=lambda x: abs(
+                x[1].get("impact", 0)
+            ),
+        )
+
+        feature = (
+            top_feat[0]
+            .replace("_", " ")
+            .replace("wti", "WTI")
+            .upper()
+        )
+
+        impact = top_feat[1].get("impact", 0)
+
+        delta = pred_val - baseline_val
+
+        direction = (
+            "meningkat"
+            if delta > 0
+            else "menurun"
+        )
+
+        return (
+            f"Skenario ini membuat proyeksi ICP "
+            f"{direction} sebesar {abs(delta):.2f} USD. "
+            f"Faktor paling dominan berasal dari "
+            f"{feature} dengan pengaruh sekitar "
+            f"{impact:+.2f} USD."
+        )
+
+    @staticmethod
+    def get_dominance_insight(
+        model_meta: Dict[str, Any],
+    ) -> str:
+        """Model driver explanation for Forecasting page."""
+
+        coefs = model_meta.get("coefficients")
+
+        if not coefs:
+            return (
+                "Faktor dominan model belum tersedia."
+            )
+
+        sorted_coefs = sorted(
+            coefs.items(),
+            key=lambda x: abs(x[1]),
+            reverse=True,
+        )
+
+        top_features = sorted_coefs[:3]
+
+        clean_names = []
+
+        for feat, _ in top_features:
+            clean = (
+                feat.replace("_", " ")
+                .replace("wti", "WTI")
+                .title()
+            )
+            clean_names.append(clean)
+
+        primary_driver = clean_names[0]
+
+        return (
+            f"Prediksi ICP saat ini paling dipengaruhi oleh "
+            f"{primary_driver}. "
+            f"Beberapa driver utama lainnya meliputi "
+            f"{', '.join(clean_names[1:])}."
+        )
+
+    @staticmethod
+    def get_confidence_insight(
+        rmse: float,
+        pred_val: float,
+    ) -> str:
+        """Confidence explanation for Forecasting page."""
+
+        if rmse <= 0:
+            return (
+                "Tingkat confidence belum dapat dihitung."
+            )
+
+        error_pct = (
+            (rmse / pred_val) * 100
+            if pred_val != 0
+            else 0
+        )
+
+        if error_pct < 5:
+            confidence = "tinggi"
+        elif error_pct < 10:
+            confidence = "baik"
+        else:
+            confidence = "moderat"
+
+        return (
+            f"Model menunjukkan tingkat confidence "
+            f"{confidence} dengan estimasi error "
+            f"historis sekitar ±{rmse:.2f} USD."
+        )

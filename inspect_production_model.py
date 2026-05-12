@@ -16,7 +16,7 @@ def inspect():
     model_name = "ICP_Price_Model"
     stage = "Production"
     
-    print(f"--- FINAL MODEL VALIDATION REPORT ---")
+    print("--- FINAL MODEL VALIDATION REPORT ---")
     print(f"Target: {model_name} [{stage}]")
     
     try:
@@ -34,7 +34,7 @@ def inspect():
             feature_names = inputs.input_names() if hasattr(inputs, "input_names") else [col.name for col in inputs]
             print(f"\n[1] MLflow Signature Features: {feature_names}")
         else:
-            print(f"\n[1] MLflow Signature: MISSING (Fallback used)")
+            print("\n[1] MLflow Signature: MISSING (Fallback used)")
             # Use the fallback features from prediction_service if signature is missing
             feature_names = ["lag_1", "lag_3", "lag_6", "rolling_mean_3", "wti_price", "wti_lag_1", "wti_rolling_mean_3"]
 
@@ -43,21 +43,21 @@ def inspect():
         
         if hasattr(sklearn_model, "coef_"):
             coefs = dict(zip(feature_names, sklearn_model.coef_.tolist()))
-            print(f"[3] Coefficients Analysis:")
+            print("[3] Coefficients Analysis:")
             for feat, val in coefs.items():
                 print(f"    - {feat:20}: {val:+.6f}")
             
             intercept = getattr(sklearn_model, "intercept_", 0.0)
             print(f"    - Intercept           : {intercept:+.6f}")
         else:
-            print(f"[3] Model coefficients not available via .coef_")
+            print("[3] Model coefficients not available via .coef_")
 
         # 4. Sensitivity Test
         base_val = 70.0
         base_payload = {f: base_val for f in feature_names}
         
         baseline_pred = pyfunc_model.predict(pd.DataFrame([base_payload])[feature_names])[0]
-        print(f"\n[4] Feature Sensitivity Test (+10.0 delta):")
+        print("\n[4] Feature Sensitivity Test (+10.0 delta):")
         print(f"    Baseline Prediction (all @ {base_val}): ${baseline_pred:.4f}")
         
         sensitivity_results = []
