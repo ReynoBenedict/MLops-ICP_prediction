@@ -1,44 +1,40 @@
 # MLflow Model Registry — ICP Price Model
-# Konfigurasi ini mencatat versi model aktif beserta metadata deployment-nya.
+# Synchronized with MLflow Registry (Last Update: 2026-05-12)
 
 model_name: ICP_Price_Model
 experiment_name: icp-price-prediction
 tracking_uri: sqlite:///mlflow.db
 inference_script: infer.py
 
-# Versi aktif saat ini
-production_version: 4
-staging_version: 3
+# Versi aktif saat ini (Synchronized with MLflow)
+production_version: 7
+staging_version: 1
 
 versions:
-  - version: 3
+  - version: 1
     stage: Staging
     description: >
-      RandomForest n_estimators=50. Model kandidat dengan performa terbaik
-      berdasarkan RMSE. Dilogging dengan model signature (input/output schema).
+      Initial RandomForest candidate model (n=50). 
+      Maintained for historical baseline comparison.
     parameters:
       model_type: RandomForest
       n_estimators: 50
-      random_state: 42
     metrics:
       rmse: 7.1417
       mae: 6.8954
-    tags:
-      model_type: RandomForest
-      feature: lag_1
 
-  - version: 4
+  - version: 7
     stage: Production
     description: >
-      RandomForest n_estimators=100. Model yang digunakan secara aktif untuk
-      inferensi produksi. Dilogging dengan model signature (input/output schema).
+      LinearRegression Champion Model. 
+      Utilizes full multi-feature schema (Lags, WTI, Rolling Means).
+      Validated as the most accurate model based on RMSE.
     parameters:
-      model_type: RandomForest
-      n_estimators: 100
-      random_state: 42
+      model_type: LinearRegression
     metrics:
-      rmse: 7.7813
-      mae: 7.5049
+      rmse: 3.6164
+      mae: 1.9155
     tags:
-      model_type: RandomForest
-      feature: lag_1
+      model_type: LinearRegression
+      schema: multi_feature
+      features: "lag_1, lag_3, lag_6, rolling_mean_3, wti_price, wti_lag_1, wti_rolling_mean_3"
