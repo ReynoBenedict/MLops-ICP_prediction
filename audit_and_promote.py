@@ -1,12 +1,11 @@
+from config.settings import MLFLOW_TRACKING_URI, MODEL_NAME
 # audit_and_promote.py
 import mlflow
 from mlflow import MlflowClient
-import sys
 import warnings
 
 warnings.filterwarnings("ignore")
 
-from config.settings import MLFLOW_TRACKING_URI, MODEL_NAME
 
 def get_model_rmse(client: MlflowClient, run_id: str) -> float:
     """Retrieve RMSE metric for a specific run."""

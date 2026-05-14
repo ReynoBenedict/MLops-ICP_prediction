@@ -1,5 +1,7 @@
-# Pipeline pelatihan model ICP dengan MLflow tracking
 from __future__ import annotations
+from config.settings import MLFLOW_TRACKING_URI, PROJECT_ROOT, CLEAN_DATA_PATH
+# Pipeline pelatihan model ICP dengan MLflow tracking
+
 
 import json
 import logging
@@ -31,9 +33,9 @@ warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 logging.getLogger("mlflow.sklearn").setLevel(logging.ERROR)
 logging.getLogger("mlflow").setLevel(logging.ERROR)
 
-from config.settings import MLFLOW_TRACKING_URI, PROJECT_ROOT, CLEAN_DATA_PATH
 EXPERIMENT_NAME     = "icp-price-prediction"
 CLEAN_CSV           = CLEAN_DATA_PATH
+
 
 CANDIDATE_TARGET_COLS = ["icp_price", "icp", "price", "harga"]
 

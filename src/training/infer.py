@@ -1,10 +1,11 @@
-# src/training/infer.py
 from __future__ import annotations
+from config.settings import MLFLOW_TRACKING_URI, MODEL_NAME, CLEAN_DATA_PATH, FEATURE_COLUMNS
+# src/training/infer.py
+
 
 import logging
 import sys
 import warnings
-from pathlib import Path
 
 import mlflow.pyfunc
 import pandas as pd
@@ -16,7 +17,6 @@ warnings.filterwarnings("ignore", category=UserWarning, module="mlflow")
 
 logging.getLogger("mlflow").setLevel(logging.ERROR)
 
-from config.settings import MLFLOW_TRACKING_URI, MODEL_NAME, CLEAN_DATA_PATH, FEATURE_COLUMNS
 
 MODEL_URI = f"models:/{MODEL_NAME}/Production"
 
@@ -54,7 +54,7 @@ def main() -> None:
             return
         version = prod_versions[0].version
         print(f"  Model      : {MODEL_NAME} (v{version})")
-        print(f"  Stage      : Production")
+        print("  Stage      : Production")
         print(f"  URI        : {MODEL_URI}")
     except Exception as e:
         print(f"[ERROR] Registry lookup failed: {e}")

@@ -1,10 +1,11 @@
-# src/training/register_model.py
 from __future__ import annotations
+from config.settings import MLFLOW_TRACKING_URI, MODEL_NAME
+# src/training/register_model.py
+
 
 import logging
 import sys
 import warnings
-from pathlib import Path
 
 import mlflow
 from mlflow import MlflowClient
@@ -15,7 +16,7 @@ warnings.filterwarnings("ignore", category=UserWarning, module="mlflow")
 
 logging.getLogger("mlflow").setLevel(logging.ERROR)
 
-from config.settings import MLFLOW_TRACKING_URI, MODEL_NAME
+
 
 EXPERIMENT_NAME = "icp-price-prediction"
 

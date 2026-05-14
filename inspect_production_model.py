@@ -1,8 +1,8 @@
 import mlflow
 import mlflow.sklearn
 import pandas as pd
-from pathlib import Path
 import json
+
 import warnings
 from config.settings import MLFLOW_TRACKING_URI, MODEL_NAME, PROJECT_ROOT
 
