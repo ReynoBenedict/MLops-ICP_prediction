@@ -15,7 +15,7 @@ LABEL version="1.0"
 # Environment 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    # MLflow SQLite backend (path dalam container)
+    # MLflow backend (override with PostgreSQL URI at runtime)
     MLFLOW_TRACKING_URI=sqlite:////app/mlflow.db \
     # Suppress MLflow & sklearn verbose logs
     MLFLOW_ENABLE_SYSTEM_METRICS_LOGGING=false

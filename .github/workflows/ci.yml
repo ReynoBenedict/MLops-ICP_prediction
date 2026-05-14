@@ -449,20 +449,8 @@ jobs:
       # Simulasi staging deployment.
       #
       - name: Daftarkan model ke registry
-        run: python -m src.training.register_model_ci
-
-      # Upload registry log
-      #
-      # Artifact:
-      # reports/registry_log.json
-      #
-      - name: Upload registry log
-        uses: actions/upload-artifact@v4
-        with:
-          name: registry-log
-          path: reports/registry_log.json
-          retention-days: 14
+        run: python -m src.training.register_model
 
       # Final success message
       - name: Pipeline selesai
-        run: echo "Pipeline MLOps selesai. Model berhasil didaftarkan ke Staging."
+        run: echo "Pipeline MLOps selesai. Model berhasil didaftarkan."

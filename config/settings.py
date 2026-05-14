@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 import logging
 
@@ -20,11 +21,24 @@ MLFLOW_DB_PATH = PROJECT_ROOT / "mlflow.db"
 # Log final paths
 logger.info(f"CLEAN_DATA_PATH: {CLEAN_DATA_PATH}")
 logger.info(f"MLFLOW_DB_PATH: {MLFLOW_DB_PATH}")
-logger.info(f"Data file exists: {CLEAN_DATA_PATH.exists()}")
-logger.info(f"MLflow DB exists: {MLFLOW_DB_PATH.exists()}")
 
 # MLflow Configuration
-MLFLOW_TRACKING_URI = f"sqlite:///{MLFLOW_DB_PATH.as_posix()}"
+# Priority: 1. Environment Variable 2. PostgreSQL Components 3. Local SQLite
+MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI")
+
+if not MLFLOW_TRACKING_URI:
+    DB_USER = os.getenv("MLFLOW_DB_USER")
+    DB_PASSWORD = os.getenv("MLFLOW_DB_PASSWORD")
+    DB_HOST = os.getenv("MLFLOW_DB_HOST", "localhost")
+    DB_PORT = os.getenv("MLFLOW_DB_PORT", "5432")
+    DB_NAME = os.getenv("MLFLOW_DB_NAME", "mlflow")
+
+    if DB_USER and DB_PASSWORD:
+        MLFLOW_TRACKING_URI = f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+    else:
+        # Fallback to local SQLite for development
+        MLFLOW_TRACKING_URI = f"sqlite:///{MLFLOW_DB_PATH.as_posix()}"
+
 MODEL_NAME = "ICP_Price_Model"
 PRODUCTION_STAGE = "Production"
 

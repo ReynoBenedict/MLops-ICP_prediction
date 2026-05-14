@@ -31,13 +31,9 @@ warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 logging.getLogger("mlflow.sklearn").setLevel(logging.ERROR)
 logging.getLogger("mlflow").setLevel(logging.ERROR)
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-CLEAN_CSV    = PROJECT_ROOT / "data" / "processed" / "clean_data.csv"
-
-# SQLite backend — aman di Windows, direkomendasikan MLflow 3.x
-MLFLOW_DB           = PROJECT_ROOT / "mlflow.db"
-MLFLOW_TRACKING_URI = f"sqlite:///{MLFLOW_DB.as_posix()}"
+from config.settings import MLFLOW_TRACKING_URI, PROJECT_ROOT, CLEAN_DATA_PATH
 EXPERIMENT_NAME     = "icp-price-prediction"
+CLEAN_CSV           = CLEAN_DATA_PATH
 
 CANDIDATE_TARGET_COLS = ["icp_price", "icp", "price", "harga"]
 
@@ -159,7 +155,7 @@ def run_experiment(
 
         mlflow.sklearn.log_model(
             sk_model=model,
-            name="model",
+            artifact_path="model",
             signature=signature,
             input_example=X_test.iloc[:1],
         )
@@ -233,7 +229,7 @@ def main() -> None:
     print("[INFO] Untuk membuka MLflow UI:")
     print(f"       mlflow ui --backend-store-uri {MLFLOW_TRACKING_URI}")
     print("       Lalu buka: http://127.0.0.1:5000")
-    print(f"[INFO] Database MLflow : {MLFLOW_DB}")
+    print(f"[INFO] Database MLflow (if using SQLite): {MLFLOW_TRACKING_URI}")
 
     # ── Export metrics for CI evaluation handoff ──────────────
     metrics_path = PROJECT_ROOT / "metrics.json"

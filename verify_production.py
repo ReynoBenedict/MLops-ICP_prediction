@@ -1,15 +1,10 @@
 import mlflow
-import mlflow.sklearn
 import pandas as pd
-from pathlib import Path
-
-PROJECT_ROOT = Path(__file__).resolve().parent
-MLFLOW_DB = PROJECT_ROOT / "mlflow.db"
-TRACKING_URI = f"sqlite:///{MLFLOW_DB.as_posix()}"
+from config.settings import MLFLOW_TRACKING_URI, MODEL_NAME
 
 def verify():
-    mlflow.set_tracking_uri(TRACKING_URI)
-    model_name = "ICP_Price_Model"
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    model_name = MODEL_NAME
     stage = "Production"
     
     print("--- VERIFYING PRODUCTION MODEL ---")
