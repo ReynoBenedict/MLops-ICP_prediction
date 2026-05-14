@@ -49,8 +49,11 @@ class PredictionService:
         if self.model is not None:
             return
         model_uri = f"models:/{self.model_name}/{self.stage}"
+        import os
+        logger.info(f"CWD: {os.getcwd()}")
         try:
             logger.info(f"Loading model from: {model_uri}")
+            logger.info(f"Tracking URI: {mlflow.get_tracking_uri()}")
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 self.model = mlflow.pyfunc.load_model(model_uri)
@@ -64,13 +67,19 @@ class PredictionService:
             self.feature_names = self._extract_feature_names()
             logger.info(f"Feature names: {self.feature_names}")
         except mlflow.exceptions.MlflowException as e:
-            logger.error(f"MLflow error: {str(e)}")
-            logger.error(f"Tracking URI: {self.tracking_uri}")
-            logger.error(f"Model name: {self.model_name}, Stage: {self.stage}")
-            raise InferenceError(f"Model loading failed: {str(e)}")
+            logger.error(f"MLflow error during load: {str(e)}")
+            # Try to see if we can get the source path
+            try:
+                v = self.client.get_latest_versions(self.model_name, stages=[self.stage])[0]
+                logger.error(f"Model source: {v.source}")
+                if v.source.startswith("/") and not os.path.exists(v.source):
+                    logger.error(f"CRITICAL: Local path {v.source} does not exist in this container!")
+            except:
+                pass
+            raise InferenceError(f"Model loading failed (MLflow): {str(e)}")
         except Exception as e:
             logger.error(f"Failed to load model: {str(e)}")
-            raise InferenceError(f"Model loading failed: {str(e)}")
+            raise InferenceError(f"Model loading failed (Generic): {str(e)}")
 
     def predict(self, features_dict: dict) -> float:
         self._load_model()

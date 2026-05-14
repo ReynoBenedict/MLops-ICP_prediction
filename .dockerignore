@@ -31,5 +31,7 @@ docs/
 *.log
 *.pdf
 *.csv
+!data/**/*.csv
 # mlruns/      # Keep if you want local history inside container, but usually ignored
 # mlflow.db    # Keep if needed for local inference demonstration
+

@@ -127,8 +127,10 @@ with st.form("scenario_form"):
 # ═══════════════════════════════════════════════════════════════════════════════
 # SECTION 2 — Prediction Results
 # ═══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
+# SECTION 2 — Prediction Results
+# ═══════════════════════════════════════════════════════════════════════════════
 if submitted:
-
     payload = {
         "lag_1": lag1,
         "lag_3": lag3,
@@ -140,209 +142,89 @@ if submitted:
     }
 
     try:
-
         pred_val = service.predict(payload)
-
         model_meta = service.get_model_metadata()
 
         baseline = defaults["lag_1"]
+        
+        if pred_val is not None:
+            diff = pred_val - baseline
+            pct_change = (diff / baseline) * 100 if baseline != 0 else 0.0
+            direction = "Bullish" if diff > 0 else "Bearish" if diff < 0 else "Stabil"
 
-        diff = pred_val - baseline
+            st.divider()
+            st.subheader("Simulation Result")
 
-        pct_change = (
-            (diff / baseline) * 100
-            if baseline != 0
-            else 0
-        )
+            top_col1, top_col2, top_col3, top_col4 = st.columns(4)
 
-        direction = (
-            "Bullish"
-            if diff > 0
-            else "Bearish"
-            if diff < 0
-            else "Stabil"
-        )
+            with top_col1:
+                st.metric(
+                    label="Predicted ICP",
+                    value=f"${pred_val:.2f}",
+                    delta=f"{pct_change:+.2f}%",
+                )
 
-        # ───────────────────────────────────────────────────────────────────────
-        st.divider()
+            with top_col2:
+                st.metric(label="Current ICP", value=f"${baseline:.2f}")
 
-        st.subheader("Simulation Result")
+            with top_col3:
+                st.metric(label="Market Direction", value=direction)
 
-        top_col1, top_col2, top_col3, top_col4 = st.columns(4)
+            with top_col4:
+                st.metric(label="WTI Scenario", value=f"${wti:.2f}")
 
-        with top_col1:
-            st.metric(
-                label="Predicted ICP",
-                value=f"${pred_val:.2f}",
-                delta=f"{pct_change:+.2f}%",
-            )
+            # Executive Interpretation
+            st.divider()
+            st.subheader("Scenario Interpretation")
+            interp_left, interp_right = st.columns([2, 1], gap="large")
 
-        with top_col2:
-            st.metric(
-                label="Current ICP",
-                value=f"${baseline:.2f}",
-            )
-
-        with top_col3:
-            st.metric(
-                label="Market Direction",
-                value=direction,
-            )
-
-        with top_col4:
-            st.metric(
-                label="WTI Scenario",
-                value=f"${wti:.2f}",
-            )
-
-        # ═══════════════════════════════════════════════════════════════════════
-        # SECTION 3 — Executive Interpretation
-        # ═══════════════════════════════════════════════════════════════════════
-        st.divider()
-
-        st.subheader("Scenario Interpretation")
-
-        interp_left, interp_right = st.columns([2, 1], gap="large")
-
-        with interp_left:
-
-            st.markdown(
-                f"""
+            with interp_left:
+                st.markdown(
+                    f"""
 Simulasi menunjukkan estimasi harga ICP berada di sekitar **${pred_val:.2f}** 
 dengan perubahan sekitar **{pct_change:+.2f}%** dibanding kondisi saat ini.
 
 Kondisi ini mengindikasikan bahwa perubahan harga WTI global masih memiliki 
-pengaruh signifikan terhadap arah harga ICP domestik. Ketika benchmark minyak global 
-mengalami kenaikan, model cenderung membaca adanya potensi penguatan harga ICP 
-pada periode berikutnya.
+pengaruh signifikan terhadap arah harga ICP domestik.
 """
-            )
-
-            st.markdown("##### Faktor yang paling memengaruhi simulasi")
-
-            st.markdown(
-                """
-- Pergerakan harga WTI global  
-- Momentum historis ICP  
-- Tren rata-rata harga beberapa periode terakhir  
-- Stabilitas kondisi pasar energi internasional  
-"""
-            )
-
-        with interp_right:
-
-            st.info(
-                """
-Gunakan simulasi ini sebagai alat eksplorasi skenario pasar, 
-bukan sebagai keputusan final investasi atau pricing strategy.
-"""
-            )
-
-            st.success(
-                f"""
-Sinyal model saat ini menunjukkan kondisi pasar:
-### {direction}
-"""
-            )
-
-        # ═══════════════════════════════════════════════════════════════════════
-        # SECTION 4 — Model Intelligence
-        # ═══════════════════════════════════════════════════════════════════════
-        st.divider()
-
-        st.subheader("Model Intelligence")
-
-        intel_left, intel_right = st.columns([1, 1], gap="large")
-
-        with intel_left:
-
-            st.markdown("##### Market Sensitivity")
-
-            sensitivity = service.get_feature_sensitivity(payload)
-
-            st.write(
-                InsightService.get_simulator_insight(
-                    sensitivity,
-                    pred_val,
-                    baseline,
                 )
-            )
+                st.markdown("##### Faktor Dominan")
+                st.markdown("- Pergerakan harga WTI global\n- Momentum historis ICP")
 
-            st.markdown("##### Forecast Reliability")
+            with interp_right:
+                st.info("Gunakan simulasi ini sebagai alat eksplorasi skenario pasar.")
+                st.success(f"Sinyal model saat ini menunjukkan kondisi pasar:\n### {direction}")
 
-            st.write(
-                """
-Hasil simulasi tetap dipengaruhi kondisi pasar aktual, volatilitas energi global, 
-dan perubahan geopolitik yang tidak selalu dapat diprediksi model sepenuhnya.
-"""
-            )
+            # Model Intelligence
+            st.divider()
+            st.subheader("Model Intelligence")
+            intel_left, intel_right = st.columns([1, 1], gap="large")
 
-        with intel_right:
+            with intel_left:
+                st.markdown("##### Market Sensitivity")
+                sensitivity = service.get_feature_sensitivity(payload)
+                st.write(InsightService.get_simulator_insight(sensitivity, pred_val, baseline))
 
-            st.markdown("##### Model Information")
+            with intel_right:
+                st.markdown("##### Model Information")
+                flavor = model_meta.get("flavor", ["ML"])[0]
+                version = model_meta.get("version", "N/A")
+                st.success(f"Model inference aktif.\n\nVersion: {version}\n\nEngine: {flavor}")
 
-            flavor = model_meta.get("flavor", ["ML"])[0]
-            version = model_meta.get("version", "N/A")
-
-            st.success(
-                f"""
-Model inference aktif dan tervalidasi.
-
-Version:
-{version}
-
-Engine:
-{flavor}
-"""
-            )
-
-            st.warning(
-                """
-Perubahan ekstrem pada harga minyak global dapat menghasilkan 
-deviasi prediksi yang lebih besar dibanding kondisi pasar normal.
-"""
-            )
-
-        # ═══════════════════════════════════════════════════════════════════════
-        # SECTION 5 — Operational Summary
-        # ═══════════════════════════════════════════════════════════════════════
-        st.divider()
-
-        sum_col1, sum_col2, sum_col3 = st.columns(3)
-
-        with sum_col1:
-
-            st.success(
-                f"""
-### {direction}
-
-Arah pasar hasil simulasi.
-"""
-            )
-
-        with sum_col2:
-
-            st.info(
-                f"""
-### {pct_change:+.2f}%
-
-Estimasi perubahan terhadap ICP saat ini.
-"""
-            )
-
-        with sum_col3:
-
-            st.warning(
-                f"""
-### ${wti:.2f}
-
-Benchmark WTI pada simulasi aktif.
-"""
-            )
+            # Operational Summary
+            st.divider()
+            sum_col1, sum_col2, sum_col3 = st.columns(3)
+            with sum_col1:
+                st.success(f"### {direction}\n\nArah pasar simulasi.")
+            with sum_col2:
+                st.info(f"### {pct_change:+.2f}%\n\nEstimasi perubahan.")
+            with sum_col3:
+                st.warning(f"### ${wti:.2f}\n\nBenchmark WTI.")
+        else:
+            st.error("Model gagal menghasilkan prediksi. Silakan periksa status MLflow di Dashboard.")
 
     except Exception as e:
-
         st.error(f"Simulasi gagal dijalankan: {str(e)}")
 
 # ── Footer ────────────────────────────────────────────────────────────────────
-render_footer()
+render_footer()
