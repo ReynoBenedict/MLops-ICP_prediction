@@ -367,3 +367,54 @@ python infer.py
 Model dimuat secara langsung dari MLflow Model Registry menggunakan URI `models:/ICP_Price_Model/Production` melalui fungsi `mlflow.pyfunc.load_model`, tanpa bergantung pada file model lokal. Pendekatan ini memastikan sistem inferensi selalu menggunakan versi model yang aktif di Production secara otomatis.
 
 Penggunaan model berbasis *time series* seperti ARIMAX atau LSTM belum diterapkan pada tahap ini mengingat keterbatasan jumlah data (±18 bulan), yang berpotensi mengakibatkan *overfitting* pada model temporal yang lebih kompleks.
+
+---
+
+## 6. [LK-09] Orkestrasi Layanan ML Terintegrasi Menggunakan Docker Compose
+
+Seluruh layanan pada sistem MLOps dijalankan menggunakan Docker Compose sehingga seluruh container dapat di-*orchestrate* secara otomatis dalam satu environment.
+
+---
+
+### 6.1 Menjalankan Sistem dengan Docker Compose
+
+Untuk menjalankan seluruh sistem:
+
+```bash
+docker compose up -d
+```
+
+Perintah tersebut akan menjalankan:
+
+- **Container Streamlit** sebagai aplikasi inference
+- **Container MLflow Tracking Server**
+- **Container PostgreSQL** sebagai backend metadata store
+
+---
+
+### 6.2 Memeriksa Status Container
+
+Gunakan perintah berikut untuk memastikan seluruh container berjalan dengan baik:
+
+```bash
+docker compose ps
+```
+
+Container yang berjalan dengan benar akan memiliki status `running` atau `healthy`.
+
+---
+
+### 6.3 Akses Service
+
+Setelah seluruh container berjalan, layanan dapat diakses melalui:
+
+| Service | URL |
+| :--- | :--- |
+| Streamlit App | http://localhost:8501 |
+| MLflow Tracking Server | http://localhost:5000 |
+
+---
+
+### 6.4 Hasil Orkestrasi
+
+Docker Compose berhasil mengintegrasikan layanan Streamlit, MLflow, dan PostgreSQL dalam satu environment terorkestrasi. Aplikasi Streamlit berhasil melakukan inference model menggunakan model yang diambil dari MLflow Model Registry melalui komunikasi antar container.
