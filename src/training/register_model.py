@@ -41,16 +41,14 @@ def main() -> None:
     # 1. Get Experiment
     experiment = client.get_experiment_by_name(EXPERIMENT_NAME)
     if not experiment:
-        print(f"[WARNING] Experiment '{EXPERIMENT_NAME}' not found.")
-        print("[INFO] Skipping registry simulation in CI environment.")
-        sys.exit(0)
-        
+        print(f"[ERROR] Experiment '{EXPERIMENT_NAME}' not found.")
+        sys.exit(1)
+
     # 2. Find Best Run
     best_run = get_best_run(client, experiment.experiment_id)
     if not best_run:
-        print(f"[WARNING] No runs found in experiment '{EXPERIMENT_NAME}'.")
-        print("[INFO] Skipping registry simulation.")
-        sys.exit(0)
+        print("[ERROR] No runs found in experiment.")
+        sys.exit(1)
 
         
     run_id = best_run.info.run_id
