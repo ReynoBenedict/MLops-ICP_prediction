@@ -1,1 +1,1 @@
-﻿# Marks utils as a Python package
+# Marks utils as a Python package

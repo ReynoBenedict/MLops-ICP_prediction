@@ -1,12 +1,11 @@
-import streamlit as st
 import numpy as np
 import plotly.graph_objects as go
+import streamlit as st
 
-from utils.data_loader import load_processed_data
 from components.layouts import render_footer
 from components.styles import apply_custom_styles
 from services.insight_service import InsightService
-
+from utils.data_loader import load_processed_data
 
 # ── Page Config ───────────────────────────────────────────────────────────────
 apply_custom_styles()
@@ -52,11 +51,7 @@ else:
 
 dependency_pct = min(round(abs(corr) * 100), 99)
 
-reliability_lbl = (
-    "High"
-    if corr >= 0.8
-    else "Moderate"
-)
+reliability_lbl = "High" if corr >= 0.8 else "Moderate"
 
 influence_lbl = f"{slope:.2f} ICP / 1 WTI"
 
@@ -67,9 +62,7 @@ corr_insight = InsightService.get_correlation_insight(df)
 # ═══════════════════════════════════════════════════════════════════════════════
 st.title("ICP vs WTI")
 
-st.caption(
-    "Hubungan antara benchmark minyak global dan harga minyak mentah Indonesia."
-)
+st.caption("Hubungan antara benchmark minyak global dan harga minyak mentah Indonesia.")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # HERO SECTION
@@ -110,8 +103,8 @@ st.markdown("")
 
 st.success(
     f"""
-WTI masih menjadi driver utama pergerakan ICP. 
-Korelasi historis sebesar {corr:.2f} menunjukkan bahwa perubahan harga minyak global 
+WTI masih menjadi driver utama pergerakan ICP.
+Korelasi historis sebesar {corr:.2f} menunjukkan bahwa perubahan harga minyak global
 masih sangat memengaruhi harga minyak domestik Indonesia.
 """
 )
@@ -123,15 +116,12 @@ st.divider()
 # ═══════════════════════════════════════════════════════════════════════════════
 st.markdown("### Price Relationship Map")
 
-st.caption(
-    "Semakin dekat titik observasi terhadap garis tren, semakin konsisten hubungan ICP dan WTI."
-)
+st.caption("Semakin dekat titik observasi terhadap garis tren, semakin konsisten hubungan ICP dan WTI.")
 
 # ── Era Colors ────────────────────────────────────────────────────────────────
 era_colors = []
 
 for _, row in df.iterrows():
-
     yr = int(row["year"]) if "year" in df.columns else 2022
 
     if yr <= 2020:
@@ -147,15 +137,10 @@ for _, row in df.iterrows():
 hover_text = []
 
 for _, row in df.iterrows():
-
     mo = int(row["month"]) if "month" in df.columns else 0
     yr = int(row["year"]) if "year" in df.columns else 0
 
-    hover_text.append(
-        f"<b>{yr}-{mo:02d}</b><br>"
-        f"WTI: ${row['wti_price']:.2f}<br>"
-        f"ICP: ${row['icp_price']:.2f}"
-    )
+    hover_text.append(f"<b>{yr}-{mo:02d}</b><br>WTI: ${row['wti_price']:.2f}<br>ICP: ${row['icp_price']:.2f}")
 
 # ── Scatter Plot ──────────────────────────────────────────────────────────────
 fig_scatter = go.Figure()
@@ -252,7 +237,6 @@ st.markdown("### Correlation Intelligence")
 left_col, right_col = st.columns([1.2, 1], gap="large")
 
 with left_col:
-
     st.markdown("#### Statistical Summary")
 
     st.write(corr_insight)
@@ -261,20 +245,19 @@ with left_col:
 
     st.info(
         f"""
-Market dependency terhadap WTI berada di sekitar {dependency_pct}% 
-dengan hubungan historis yang sangat konsisten. 
+Market dependency terhadap WTI berada di sekitar {dependency_pct}%
+dengan hubungan historis yang sangat konsisten.
 Hal ini membuat WTI tetap menjadi indikator utama dalam proses forecasting ICP.
 """
     )
 
 with right_col:
-
     st.markdown("#### Operational Interpretation")
 
     st.warning(
         """
-Perubahan WTI biasanya lebih dulu terjadi sebelum penyesuaian ICP domestik. 
-Kondisi ini dapat digunakan sebagai early signal untuk pricing strategy, 
+Perubahan WTI biasanya lebih dulu terjadi sebelum penyesuaian ICP domestik.
+Kondisi ini dapat digunakan sebagai early signal untuk pricing strategy,
 kontrak energi, dan monitoring risiko pasar.
 """
     )

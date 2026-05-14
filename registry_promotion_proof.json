@@ -1,7 +1,0 @@
-{
-  "production_version": 12,
-  "run_id": "67d6094405e746059d2f64595a4b7934",
-  "model_type": "LinearRegression",
-  "rmse": 3.6163761878506304,
-  "mae": 1.9155336572818351
-}

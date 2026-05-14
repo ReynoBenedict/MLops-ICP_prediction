@@ -1,23 +1,30 @@
-import pandas as pd
+import logging
+import os
+import warnings
+
 import mlflow
 import mlflow.pyfunc
 import mlflow.sklearn
+import pandas as pd
 from mlflow import MlflowClient
-import logging
-import warnings
 
-from config.settings import MLFLOW_TRACKING_URI, MODEL_NAME, PRODUCTION_STAGE, FEATURE_COLUMNS
+from config.settings import FEATURE_COLUMNS, MLFLOW_TRACKING_URI, MODEL_NAME, PRODUCTION_STAGE
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("prediction_service")
 
+
 class InferenceError(Exception):
     """Custom exception for inference-related errors."""
+
     pass
 
+
 class PredictionService:
-    def __init__(self, tracking_uri: str = MLFLOW_TRACKING_URI, model_name: str = MODEL_NAME, stage: str = PRODUCTION_STAGE):
+    def __init__(
+        self, tracking_uri: str = MLFLOW_TRACKING_URI, model_name: str = MODEL_NAME, stage: str = PRODUCTION_STAGE
+    ):
         self.tracking_uri = tracking_uri
         self.model_name = model_name
         self.stage = stage
@@ -25,142 +32,220 @@ class PredictionService:
         self.feature_names = None
         self.last_payload = None
         self.model_version = "Unknown"
-        
+        self.load_error = None
+
         mlflow.set_tracking_uri(self.tracking_uri)
         self.client = MlflowClient()
 
     def _extract_feature_names(self):
+        """Extract feature names from model signature or use defaults."""
         try:
-            if hasattr(self.model.metadata, 'signature') and self.model.metadata.signature:
+            if hasattr(self.model.metadata, "signature") and self.model.metadata.signature:
                 inputs = self.model.metadata.signature.inputs
-                if hasattr(inputs, 'input_names'):
+                if hasattr(inputs, "input_names"):
                     names = inputs.input_names()
-                elif hasattr(inputs, 'column_names'):
+                elif hasattr(inputs, "column_names"):
                     names = inputs.column_names()
                 else:
                     names = [col.name for col in inputs]
+                logger.info(f"Extracted feature names from signature: {names}")
                 return names
+            logger.warning("No signature found in model metadata, using defaults")
             return FEATURE_COLUMNS
         except Exception as e:
-            logger.warning(f"Signature extraction failed: {str(e)}")
+            logger.warning(f"Signature extraction failed: {str(e)}, using defaults")
             return FEATURE_COLUMNS
 
+    def _resolve_artifact_path(self):
+        """Resolve the actual artifact path from MLflow registry."""
+        try:
+            logger.info(f"Resolving artifact path for {self.model_name}/{self.stage}")
+            versions = self.client.get_latest_versions(self.model_name, stages=[self.stage])
+
+            if not versions:
+                logger.error(f"No model versions found for {self.model_name} in stage {self.stage}")
+                return None
+
+            version = versions[0]
+            logger.info(f"Found model version: {version.version}")
+            logger.info(f"Model source: {version.source}")
+            logger.info(f"Model status: {version.status}")
+
+            # Check if source path exists
+            if version.source and version.source.startswith("/"):
+                if os.path.exists(version.source):
+                    logger.info(f"Artifact path exists: {version.source}")
+                    return version.source
+                else:
+                    logger.warning(f"Artifact path does not exist: {version.source}")
+
+            return version.source
+        except Exception as e:
+            logger.error(f"Failed to resolve artifact path: {str(e)}")
+            return None
+
     def _load_model(self):
+        """Load model from MLflow with comprehensive error handling."""
         if self.model is not None:
             return
+
         model_uri = f"models:/{self.model_name}/{self.stage}"
-        import os
-        logger.info(f"CWD: {os.getcwd()}")
+
         try:
             logger.info(f"Loading model from: {model_uri}")
             logger.info(f"Tracking URI: {mlflow.get_tracking_uri()}")
+            logger.info(f"Current working directory: {os.getcwd()}")
+
+            # Try to resolve artifact path first
+            artifact_path = self._resolve_artifact_path()
+            if artifact_path:
+                logger.info(f"Resolved artifact path: {artifact_path}")
+
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 self.model = mlflow.pyfunc.load_model(model_uri)
+
             logger.info("Model loaded successfully")
-            
+
+            # Get model version info
             latest_versions = self.client.get_latest_versions(self.model_name, stages=[self.stage])
             if latest_versions:
-                self.model_version = latest_versions[0].version
+                self.model_version = str(latest_versions[0].version)
                 logger.info(f"Model version: {self.model_version}")
-            
+
+            # Extract feature names
             self.feature_names = self._extract_feature_names()
             logger.info(f"Feature names: {self.feature_names}")
+
         except mlflow.exceptions.MlflowException as e:
-            logger.error(f"MLflow error during load: {str(e)}")
-            # Try to see if we can get the source path
-            try:
-                v = self.client.get_latest_versions(self.model_name, stages=[self.stage])[0]
-                logger.error(f"Model source: {v.source}")
-                if v.source.startswith("/") and not os.path.exists(v.source):
-                    logger.error(f"CRITICAL: Local path {v.source} does not exist in this container!")
-            except:
-                pass
-            raise InferenceError(f"Model loading failed (MLflow): {str(e)}")
+            error_msg = f"MLflow error during load: {str(e)}"
+            logger.error(error_msg)
+            self.load_error = error_msg
+            raise InferenceError(error_msg)
         except Exception as e:
-            logger.error(f"Failed to load model: {str(e)}")
-            raise InferenceError(f"Model loading failed (Generic): {str(e)}")
+            error_msg = f"Failed to load model: {str(e)}"
+            logger.error(error_msg)
+            self.load_error = error_msg
+            raise InferenceError(error_msg)
 
     def predict(self, features_dict: dict) -> float:
-        self._load_model()
+        """Make a prediction with safe error handling."""
+        if not features_dict:
+            logger.error("Empty features dictionary provided")
+            raise InferenceError("No features provided for prediction")
+
+        try:
+            self._load_model()
+        except InferenceError as e:
+            logger.error(f"Model loading failed: {str(e)}")
+            raise
+
         self.last_payload = features_dict
         check_features = self.feature_names or FEATURE_COLUMNS
-        
+
         logger.info(f"Predicting with features: {features_dict}")
         logger.info(f"Expected features: {check_features}")
-        
+
+        # Check for missing features
         missing = [f for f in check_features if f not in features_dict]
         if missing:
-            logger.error(f"Missing features: {missing}")
-            raise InferenceError(f"Missing inputs: {missing}")
+            error_msg = f"Missing features: {missing}"
+            logger.error(error_msg)
+            raise InferenceError(error_msg)
+
         try:
             input_df = pd.DataFrame([features_dict])[check_features]
             logger.info(f"Input dataframe shape: {input_df.shape}")
             logger.info(f"Input dataframe:\n{input_df}")
-            
+
             prediction = self.model.predict(input_df)
             result = float(prediction[0])
+
+            # Validate result
+            if result is None or not isinstance(result, (int, float)):
+                raise ValueError(f"Invalid prediction result: {result}")
+
             logger.info(f"Prediction result: {result}")
             return result
         except Exception as e:
-            logger.error(f"Inference failed: {str(e)}")
+            error_msg = f"Inference failed: {str(e)}"
+            logger.error(error_msg)
             logger.error(f"Input features: {features_dict}")
-            raise InferenceError(f"Prediction failed: {str(e)}")
+            raise InferenceError(error_msg)
 
     def get_model_metadata(self):
+        """Get model metadata with safe error handling."""
         try:
             self._load_model()
             meta = {
                 "model_name": self.model_name,
                 "version": self.model_version,
                 "stage": self.stage,
-                "flavor": list(self.model.metadata.flavors.keys()),
-                "features": self.feature_names
+                "flavor": list(self.model.metadata.flavors.keys()) if self.model.metadata.flavors else [],
+                "features": self.feature_names or FEATURE_COLUMNS,
             }
+
+            # Try to extract sklearn-specific metadata
             if "sklearn" in meta["flavor"]:
                 try:
                     model_uri = f"models:/{self.model_name}/{self.stage}"
                     sk_model = mlflow.sklearn.load_model(model_uri)
                     if hasattr(sk_model, "coef_"):
-                        meta["coefficients"] = dict(zip(self.feature_names, sk_model.coef_.tolist()))
+                        meta["coefficients"] = dict(zip(self.feature_names or FEATURE_COLUMNS, sk_model.coef_.tolist()))
                     if hasattr(sk_model, "intercept_"):
                         meta["intercept"] = float(sk_model.intercept_)
                 except Exception as e:
+                    logger.warning(f"Failed to extract sklearn metadata: {str(e)}")
                     meta["internals_error"] = str(e)
+
             return meta
         except Exception as e:
-            return {"error": str(e)}
+            logger.error(f"Failed to get model metadata: {str(e)}")
+            return {"error": str(e), "model_name": self.model_name}
 
     def get_feature_sensitivity(self, base_features: dict, delta: float = 10.0):
+        """Calculate feature sensitivity with error handling."""
         if not base_features or self.model is None:
+            logger.warning("Cannot calculate sensitivity: missing features or model")
             return {}
+
         results = {}
         try:
             baseline = self.predict(base_features)
-            for feat in self.feature_names:
-                test_payload = base_features.copy()
-                test_payload[feat] += delta
-                new_pred = self.predict(test_payload)
-                results[feat] = {"impact": round(new_pred - baseline, 4)}
-        except Exception:
-            pass
+            for feat in self.feature_names or FEATURE_COLUMNS:
+                try:
+                    test_payload = base_features.copy()
+                    test_payload[feat] += delta
+                    new_pred = self.predict(test_payload)
+                    results[feat] = {"impact": round(new_pred - baseline, 4)}
+                except Exception as e:
+                    logger.warning(f"Failed to calculate sensitivity for {feat}: {str(e)}")
+                    results[feat] = {"impact": 0.0, "error": str(e)}
+        except Exception as e:
+            logger.error(f"Feature sensitivity calculation failed: {str(e)}")
+
         return results
 
     def get_debug_info(self):
+        """Get comprehensive debug information."""
         try:
             meta = self.get_model_metadata()
             sensitivity = self.get_feature_sensitivity(self.last_payload) if self.last_payload else {}
             return {
                 "active_model": meta,
                 "inference_status": "Healthy" if self.model else "Not Loaded",
+                "load_error": self.load_error,
                 "last_payload": self.last_payload,
-                "sensitivity_analysis": sensitivity
+                "sensitivity_analysis": sensitivity,
             }
         except Exception as e:
+            logger.error(f"Debug info generation failed: {str(e)}")
             return {"critical_error": str(e)}
+
 
 # Singleton instance
 _service_instance = None
+
 
 def get_prediction_service() -> PredictionService:
     global _service_instance

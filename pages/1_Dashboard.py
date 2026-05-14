@@ -1,17 +1,20 @@
-import streamlit as st
-import plotly.graph_objects as go
+import logging
 
-from config.settings import PAGE_ICON
-from utils.data_loader import (
-    load_processed_data,
-    load_pipeline_metrics,
-    get_latest_context,
-)
-from services.prediction_service import get_prediction_service
+import plotly.graph_objects as go
+import streamlit as st
+
 from components.layouts import render_footer
 from components.styles import apply_custom_styles
+from config.settings import PAGE_ICON
 from services.insight_service import InsightService
+from services.prediction_service import get_prediction_service
+from utils.data_loader import (
+    get_latest_context,
+    load_pipeline_metrics,
+    load_processed_data,
+)
 
+logger = logging.getLogger("dashboard")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGE CONFIG
@@ -37,53 +40,67 @@ latest_wti = df["wti_price"].iloc[-1] if not df.empty else 0.0
 
 features = get_latest_context(df)
 
-try:
-    pred_val = service.predict(features)
-    model_meta = service.get_model_metadata()
+# Safe prediction loading with error handling
+pred_val = None
+model_meta = {}
+prediction_error = None
 
-except Exception:
+try:
+    if features:
+        pred_val = service.predict(features)
+        model_meta = service.get_model_metadata()
+        logger.info(f"Prediction successful: {pred_val}")
+    else:
+        prediction_error = "No features available for prediction"
+        logger.warning(prediction_error)
+except Exception as e:
+    prediction_error = str(e)
+    logger.error(f"Prediction failed: {prediction_error}")
     pred_val = None
     model_meta = {}
 
 rmse = metrics.get("rmse", 3.6)
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# DERIVED METRICS
+# DERIVED METRICS - Safe formatting with None checks
 # ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-# DERIVED METRICS
-# ═══════════════════════════════════════════════════════════════════════════════
-if pred_val is not None and latest_icp:
+# Calculate delta percentage safely
+if pred_val is not None and latest_icp and latest_icp > 0:
     delta_pct = ((pred_val / latest_icp) - 1) * 100
 else:
     delta_pct = 0.0
 
+# Format relative delta safely
 relative_delta = f"{delta_pct:+.2f}%" if pred_val is not None else "N/A"
 
-trend_label = (
-    "Bullish"
-    if pred_val is not None and pred_val > latest_icp
-    else "Bearish"
-    if pred_val is not None and pred_val < latest_icp
-    else "Neutral"
-)
+# Determine trend label safely
+if pred_val is not None and latest_icp:
+    if pred_val > latest_icp * 1.01:
+        trend_label = "Bullish"
+    elif pred_val < latest_icp * 0.99:
+        trend_label = "Bearish"
+    else:
+        trend_label = "Neutral"
+else:
+    trend_label = "Unknown"
 
-confidence_low = pred_val - rmse if pred_val is not None else 0
-confidence_high = pred_val + rmse if pred_val is not None else 0
+# Calculate confidence range safely
+if pred_val is not None and rmse > 0:
+    confidence_low = max(0, pred_val - rmse)
+    confidence_high = pred_val + rmse
+    confidence_range = f"${confidence_low:.2f} — ${confidence_high:.2f}"
+else:
+    confidence_range = "N/A"
 
-confidence_range = (
-    f"${confidence_low:.2f} — ${confidence_high:.2f}"
-    if pred_val is not None
-    else "N/A"
-)
+# Get market insights safely
+market_trend = InsightService.get_market_trend_insight(df) if not df.empty else "Data unavailable"
+corr_insight = InsightService.get_correlation_insight(df) if not df.empty else "Data unavailable"
+dominant_driver = InsightService.get_dominance_insight(model_meta) if model_meta else "Model metadata unavailable"
 
-market_trend = InsightService.get_market_trend_insight(df)
-corr_insight = InsightService.get_correlation_insight(df)
-dominant_driver = InsightService.get_dominance_insight(model_meta)
-
+# Calculate correlation safely
 corr_val = (
     df["icp_price"].corr(df["wti_price"])
-    if not df.empty
+    if not df.empty and "icp_price" in df.columns and "wti_price" in df.columns
     else 0.0
 )
 
@@ -95,28 +112,31 @@ st.caption("Executive overview kondisi pasar minyak, forecasting ICP, dan sinyal
 st.markdown("")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# EXECUTIVE STATUS STRIP
+# EXECUTIVE STATUS STRIP - Safe rendering with error handling
 # ═══════════════════════════════════════════════════════════════════════════════
-if pred_val is not None:
+if prediction_error:
+    st.error(f"⚠️ Prediction Service Error: {prediction_error}")
+    st.info("Dashboard will display available data. Some metrics may show N/A.")
+elif pred_val is not None:
     if trend_label == "Bullish":
         st.success(
             f"""
-Pasar saat ini menunjukkan kecenderungan penguatan harga. 
-Model memproyeksikan ICP berada di sekitar ${pred_val:.2f} 
+Pasar saat ini menunjukkan kecenderungan penguatan harga.
+Model memproyeksikan ICP berada di sekitar ${pred_val:.2f}
 dengan potensi perubahan {relative_delta} dibanding kondisi saat ini.
 """
         )
     elif trend_label == "Bearish":
         st.warning(
             f"""
-Model mendeteksi potensi pelemahan harga ICP ke sekitar ${pred_val:.2f} dalam periode berikutnya. 
+Model mendeteksi potensi pelemahan harga ICP ke sekitar ${pred_val:.2f} dalam periode berikutnya.
 Pergerakan pasar masih dipengaruhi volatilitas global dan dinamika WTI.
 """
         )
     else:
         st.info("Pasar berada dalam kondisi relatif stabil dengan pergerakan yang belum menunjukkan arah dominan.")
 else:
-    st.error("Model Prediction Service tidak tersedia. Beberapa metrik mungkin menunjukkan N/A.")
+    st.warning("Model Prediction Service tidak tersedia. Beberapa metrik mungkin menunjukkan N/A.")
 
 st.markdown("")
 
@@ -254,4 +274,4 @@ with perf3:
     st.warning(f"### RMSE {rmse:.2f}\n\nEstimasi rata-rata error historis model.")
 
 st.divider()
-render_footer()
+render_footer()

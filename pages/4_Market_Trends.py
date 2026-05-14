@@ -1,11 +1,10 @@
-import streamlit as st
 import plotly.graph_objects as go
+import streamlit as st
 
-from utils.data_loader import load_processed_data
 from components.layouts import render_footer
 from components.styles import apply_custom_styles
 from services.insight_service import InsightService
-
+from utils.data_loader import load_processed_data
 
 # ── Page Config ───────────────────────────────────────────────────────────────
 apply_custom_styles()
@@ -19,9 +18,7 @@ df["vol"] = df["icp_price"].rolling(window=3).std()
 # ── Page Header ───────────────────────────────────────────────────────────────
 st.title("Market Trends")
 
-st.caption(
-    "Ringkasan kondisi pasar minyak, arah pergerakan harga, dan tingkat risiko pasar."
-)
+st.caption("Ringkasan kondisi pasar minyak, arah pergerakan harga, dan tingkat risiko pasar.")
 
 # ── Empty Guard ───────────────────────────────────────────────────────────────
 if df.empty:
@@ -36,8 +33,8 @@ st.markdown("### Market Overview")
 
 st.info(
     """
-Halaman ini digunakan untuk membaca kondisi pasar minyak secara umum, 
-mulai dari arah tren harga, perubahan momentum, hingga tingkat risiko pasar 
+Halaman ini digunakan untuk membaca kondisi pasar minyak secara umum,
+mulai dari arah tren harga, perubahan momentum, hingga tingkat risiko pasar
 berdasarkan volatilitas historis ICP dan WTI.
 """
 )
@@ -108,7 +105,7 @@ exp1, exp2, exp3 = st.columns(3, gap="medium")
 with exp1:
     st.success(
         """
-ICP dan WTI masih bergerak cukup searah. 
+ICP dan WTI masih bergerak cukup searah.
 Kenaikan WTI global biasanya ikut mendorong penyesuaian ICP domestik.
 """
     )
@@ -116,7 +113,7 @@ Kenaikan WTI global biasanya ikut mendorong penyesuaian ICP domestik.
 with exp2:
     st.warning(
         """
-Perbedaan jarak antar garis menunjukkan adanya tekanan pasar, 
+Perbedaan jarak antar garis menunjukkan adanya tekanan pasar,
 lag penyesuaian harga, atau perubahan kondisi global.
 """
     )
@@ -124,7 +121,7 @@ lag penyesuaian harga, atau perubahan kondisi global.
 with exp3:
     st.info(
         """
-Lonjakan besar seperti 2020 dan 2022 mencerminkan periode 
+Lonjakan besar seperti 2020 dan 2022 mencerminkan periode
 ketidakpastian pasar dan tekanan makro global.
 """
     )
@@ -136,9 +133,7 @@ st.divider()
 # ═══════════════════════════════════════════════════════════════════════════════
 st.markdown("### Momentum & Risk Analysis")
 
-st.caption(
-    "Membaca arah tren jangka pendek dan tingkat ketidakpastian pasar."
-)
+st.caption("Membaca arah tren jangka pendek dan tingkat ketidakpastian pasar.")
 
 col1, col2 = st.columns([1, 1], gap="large")
 
@@ -146,12 +141,9 @@ col1, col2 = st.columns([1, 1], gap="large")
 # LEFT — MOMENTUM
 # ──────────────────────────────────────────────────────────────────────────────
 with col1:
-
     st.markdown("#### Price Momentum")
 
-    st.caption(
-        "Garis biru tua menunjukkan tren rata-rata 3 bulan untuk menyaring noise jangka pendek."
-    )
+    st.caption("Garis biru tua menunjukkan tren rata-rata 3 bulan untuk menyaring noise jangka pendek.")
 
     fig_ma = go.Figure()
 
@@ -213,7 +205,7 @@ with col1:
 
     st.info(
         """
-Jika garis tren terus naik, pasar sedang berada dalam fase penguatan harga. 
+Jika garis tren terus naik, pasar sedang berada dalam fase penguatan harga.
 Sebaliknya, tren yang mulai datar atau turun biasanya menandakan pelemahan momentum pasar.
 """
     )
@@ -222,12 +214,9 @@ Sebaliknya, tren yang mulai datar atau turun biasanya menandakan pelemahan momen
 # RIGHT — VOLATILITY
 # ──────────────────────────────────────────────────────────────────────────────
 with col2:
-
     st.markdown("#### Market Risk")
 
-    st.caption(
-        "Semakin tinggi volatilitas, semakin tinggi ketidakpastian pasar."
-    )
+    st.caption("Semakin tinggi volatilitas, semakin tinggi ketidakpastian pasar.")
 
     fig_vol = go.Figure()
 
@@ -270,7 +259,7 @@ with col2:
 
     st.warning(
         """
-Lonjakan volatilitas biasanya muncul saat pasar mengalami tekanan besar, 
+Lonjakan volatilitas biasanya muncul saat pasar mengalami tekanan besar,
 misalnya akibat konflik geopolitik, gangguan supply, atau perubahan kebijakan energi global.
 """
     )

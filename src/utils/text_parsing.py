@@ -1,4 +1,4 @@
-﻿# text_parsing.py — Ekstraksi harga dan tanggal ICP dari teks PDF Kepmen
+# text_parsing.py — Ekstraksi harga dan tanggal ICP dari teks PDF Kepmen
 
 from __future__ import annotations
 
@@ -9,9 +9,18 @@ from typing import Optional, Tuple
 logger = logging.getLogger(__name__)
 
 MONTH_MAP: dict[str, int] = {
-    "januari": 1, "februari": 2, "maret": 3, "april": 4,
-    "mei": 5, "juni": 6, "juli": 7, "agustus": 8,
-    "september": 9, "oktober": 10, "november": 11, "desember": 12,
+    "januari": 1,
+    "februari": 2,
+    "maret": 3,
+    "april": 4,
+    "mei": 5,
+    "juni": 6,
+    "juli": 7,
+    "agustus": 8,
+    "september": 9,
+    "oktober": 10,
+    "november": 11,
+    "desember": 12,
 }
 
 _MONTH_RE = "|".join(MONTH_MAP.keys())
@@ -133,7 +142,7 @@ def parse_icp_price(text: str) -> Optional[Tuple[str, float]]:
             continue
         if not _valid_price(price):
             continue
-        window = flat[max(0, anchor.start() - 400):anchor.start()]
+        window = flat[max(0, anchor.start() - 400) : anchor.start()]
         best = None
         for my in _PAT_MONTH_YEAR.finditer(window):
             best = my
@@ -198,7 +207,7 @@ def parse_icp_price(text: str) -> Optional[Tuple[str, float]]:
         if not _valid_price(price):
             continue
         # Cari bulan/tahun dalam 800 karakter sebelum label RATA-RATA
-        window = flat[max(0, m.start() - 800):m.start()]
+        window = flat[max(0, m.start() - 800) : m.start()]
         ctx = _extract_month_year(window)
         if ctx:
             year_str, month_num = ctx
@@ -212,10 +221,13 @@ def parse_icp_price(text: str) -> Optional[Tuple[str, float]]:
     # (b) ada bulan/tahun yang teridentifikasi
     # (c) ada angka standalone dalam rentang harga yang wajar
     # Ambil MEDIAN untuk menghindari outlier (bukan mean)
-    is_icp_doc = bool(re.search(
-        r"HARGA\s+MINYAK\s+MENTAH\s+INDONESIA\s+BULAN",
-        flat, re.IGNORECASE,
-    ))
+    is_icp_doc = bool(
+        re.search(
+            r"HARGA\s+MINYAK\s+MENTAH\s+INDONESIA\s+BULAN",
+            flat,
+            re.IGNORECASE,
+        )
+    )
     if is_icp_doc:
         logger.debug("[FALLBACK] Dokumen ICP teridentifikasi. Mencoba ekstraksi angka standalone...")
         ctx = _extract_month_year(flat)
@@ -242,7 +254,9 @@ def parse_icp_price(text: str) -> Optional[Tuple[str, float]]:
                 date_str = f"{year_str}-{month_num:02d}"
                 logger.info(
                     "[FALLBACK] Strategi 6 (median %d angka): %s -> %.2f",
-                    len(candidates), date_str, median_price,
+                    len(candidates),
+                    date_str,
+                    median_price,
                 )
                 return date_str, median_price
 

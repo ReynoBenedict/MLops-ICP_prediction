@@ -1,16 +1,19 @@
+import logging
+
 import streamlit as st
 
+from components.charts import render_timeseries_analysis
+from components.layouts import render_footer
+from components.styles import apply_custom_styles
 from services.insight_service import InsightService
 from services.prediction_service import get_prediction_service
 from utils.data_loader import (
-    load_processed_data,
     get_latest_context,
     load_pipeline_metrics,
+    load_processed_data,
 )
-from components.layouts import render_footer
-from components.charts import render_timeseries_analysis
-from components.styles import apply_custom_styles
 
+logger = logging.getLogger("forecasting")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PAGE CONFIG
@@ -23,17 +26,9 @@ apply_custom_styles()
 df = load_processed_data()
 metrics = load_pipeline_metrics()
 
-latest_icp = (
-    df["icp_price"].iloc[-1]
-    if not df.empty
-    else 0.0
-)
+latest_icp = df["icp_price"].iloc[-1] if not df.empty else 0.0
 
-latest_wti = (
-    df["wti_price"].iloc[-1]
-    if not df.empty
-    else 0.0
-)
+latest_wti = df["wti_price"].iloc[-1] if not df.empty else 0.0
 
 features = get_latest_context(df)
 
@@ -41,11 +36,22 @@ service = get_prediction_service()
 
 rmse = metrics.get("rmse", 3.6)
 
-try:
-    pred_val = service.predict(features)
-    model_meta = service.get_model_metadata()
+# Safe prediction loading with error handling
+pred_val = None
+model_meta = {}
+prediction_error = None
 
-except Exception:
+try:
+    if features:
+        pred_val = service.predict(features)
+        model_meta = service.get_model_metadata()
+        logger.info(f"Prediction successful: {pred_val}")
+    else:
+        prediction_error = "No features available for prediction"
+        logger.warning(prediction_error)
+except Exception as e:
+    prediction_error = str(e)
+    logger.error(f"Prediction failed: {prediction_error}")
     pred_val = None
     model_meta = {}
 
@@ -54,36 +60,28 @@ except Exception:
 # ═══════════════════════════════════════════════════════════════════════════════
 st.title("Forecast Harga ICP")
 
-st.caption(
-    "Proyeksi harga ICP periode berikutnya berdasarkan kondisi pasar minyak dan pola historis."
-)
+st.caption("Proyeksi harga ICP periode berikutnya berdasarkan kondisi pasar minyak dan pola historis.")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# FORECAST CALCULATION
+# FORECAST CALCULATION - Safe with None checks
 # ═══════════════════════════════════════════════════════════════════════════════
 direction = "Unknown"
 direction_desc = "Estimasi tidak tersedia"
 delta_pct = 0.0
 confidence_range = "N/A"
 
-if pred_val is not None:
-    confidence_low = pred_val - rmse
+if pred_val is not None and latest_icp and latest_icp > 0:
+    confidence_low = max(0, pred_val - rmse)
     confidence_high = pred_val + rmse
 
-    confidence_range = (
-        f"${confidence_low:.2f} — ${confidence_high:.2f}"
-    )
+    confidence_range = f"${confidence_low:.2f} — ${confidence_high:.2f}"
 
-    delta_pct = (
-        ((pred_val / latest_icp) - 1) * 100
-        if latest_icp
-        else 0
-    )
+    delta_pct = ((pred_val / latest_icp) - 1) * 100
 
-    if pred_val > latest_icp:
+    if pred_val > latest_icp * 1.01:
         direction = "Bullish"
         direction_desc = "Potensi kenaikan harga"
-    elif pred_val < latest_icp:
+    elif pred_val < latest_icp * 0.99:
         direction = "Bearish"
         direction_desc = "Potensi pelemahan harga"
     else:
@@ -91,21 +89,24 @@ if pred_val is not None:
         direction_desc = "Pergerakan relatif netral"
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 1 — EXECUTIVE FORECAST STATUS
+# SECTION 1 — EXECUTIVE FORECAST STATUS - Safe error handling
 # ═══════════════════════════════════════════════════════════════════════════════
-if pred_val is not None:
+if prediction_error:
+    st.error(f"⚠️ Prediction Service Error: {prediction_error}")
+    st.info("Dashboard will display available data. Some metrics may show N/A.")
+elif pred_val is not None:
     if direction == "Bullish":
         st.success(
             f"""
-Model memproyeksikan harga ICP berada di sekitar ${pred_val:.2f} 
-dengan potensi kenaikan {delta_pct:+.2f}% dibanding kondisi saat ini. 
+Model memproyeksikan harga ICP berada di sekitar ${pred_val:.2f}
+dengan potensi kenaikan {delta_pct:+.2f}% dibanding kondisi saat ini.
 Pergerakan WTI global masih menjadi pendorong utama arah pasar.
 """
         )
     elif direction == "Bearish":
         st.warning(
             f"""
-Model mendeteksi potensi pelemahan harga ICP pada periode berikutnya ke sekitar ${pred_val:.2f}. 
+Model mendeteksi potensi pelemahan harga ICP pada periode berikutnya ke sekitar ${pred_val:.2f}.
 Volatilitas pasar global masih cukup tinggi sehingga pergerakan harga perlu dipantau lebih ketat.
 """
         )
@@ -164,7 +165,7 @@ with panel_left:
     if pred_val is not None:
         st.markdown(
             f"""
-Prediksi saat ini menunjukkan bahwa harga ICP berpotensi berada pada kisaran 
+Prediksi saat ini menunjukkan bahwa harga ICP berpotensi berada pada kisaran
 **{confidence_range}** dengan estimasi pusat di sekitar **${pred_val:.2f}**.
 
 Perubahan ini mengindikasikan kondisi pasar yang masih dipengaruhi oleh:
@@ -233,8 +234,8 @@ with intel_left:
     st.markdown("#### Market Context")
     st.write(
         f"""
-Harga ICP saat ini masih bergerak searah dengan benchmark WTI global. 
-Dengan posisi WTI terbaru di sekitar ${latest_wti:.2f}, model membaca adanya 
+Harga ICP saat ini masih bergerak searah dengan benchmark WTI global.
+Dengan posisi WTI terbaru di sekitar ${latest_wti:.2f}, model membaca adanya
 momentum harga yang masih cukup kuat untuk menopang pergerakan ICP jangka pendek.
 """
     )
@@ -252,7 +253,9 @@ with intel_right:
         st.warning("Metadata model tidak tersedia.")
     st.markdown("")
     st.markdown("#### Operational Notes")
-    st.warning("Forecast sebaiknya digunakan sebagai alat pendukung keputusan, bukan sebagai satu-satunya dasar pengambilan strategi pasar.")
+    st.warning(
+        "Forecast sebaiknya digunakan sebagai alat pendukung keputusan, bukan sebagai satu-satunya dasar pengambilan strategi pasar."
+    )
 
 st.divider()
 
@@ -271,4 +274,4 @@ with signal3:
     st.warning(f"### RMSE {rmse:.2f}\n\nEstimasi rata-rata error historis model.")
 
 
-render_footer() 
+render_footer()

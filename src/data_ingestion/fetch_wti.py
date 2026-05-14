@@ -1,4 +1,4 @@
-﻿# fetch_wti.py
+# fetch_wti.py
 # Download WTI crude oil monthly average prices.
 # Source (series): FRED DCOILWTICO — https://fred.stlouisfed.org/series/DCOILWTICO
 #
@@ -24,7 +24,7 @@ import requests
 logger = logging.getLogger(__name__)
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
-WTI_OUT_CSV   = _PROJECT_ROOT / "data" / "raw" / "wti.csv"
+WTI_OUT_CSV = _PROJECT_ROOT / "data" / "raw" / "wti.csv"
 
 # Source priority list — first reachable source wins.
 # GitHub CDN is globally fast; FRED is US-centric and can stall from Asia.
@@ -41,9 +41,7 @@ _SOURCES: List[dict] = [
     },
 ]
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; ICP-MLOps-Pipeline/1.0)"
-}
+HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; ICP-MLOps-Pipeline/1.0)"}
 
 MAX_RETRIES = 2
 RETRY_DELAY = 3.0
@@ -54,6 +52,7 @@ _TIMEOUT = (10, 30)
 # ---------------------------------------------------------------------------
 # Fetch
 # ---------------------------------------------------------------------------
+
 
 def _fetch_with_retry(url: str) -> requests.Response:
     """GET with automatic retry. Uses (connect, read) timeout tuple to avoid hangs."""
@@ -73,6 +72,7 @@ def _fetch_with_retry(url: str) -> requests.Response:
 # Parsers (one per source format)
 # ---------------------------------------------------------------------------
 
+
 def _parse_github_csv(text: str) -> pd.DataFrame:
     """
     Parse GitHub datasets/oil-prices WTI daily CSV.
@@ -89,7 +89,7 @@ def _parse_github_csv(text: str) -> pd.DataFrame:
         raise ValueError(f"[WTI] Unexpected GitHub CSV columns: {list(df.columns)}")
 
     df = df.rename(columns={"Date": "date", "Price": "wti_price"})
-    df["date"]      = pd.to_datetime(df["date"], errors="coerce")
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["wti_price"] = pd.to_numeric(df["wti_price"], errors="coerce")
     df = df.dropna(subset=["date", "wti_price"])
     return df
@@ -112,7 +112,7 @@ def _parse_fred_csv(text: str) -> pd.DataFrame:
         raise ValueError(f"[WTI] Unexpected FRED columns: {list(df.columns)}")
 
     df = df.rename(columns={"DATE": "date", "DCOILWTICO": "wti_price"})
-    df["date"]      = pd.to_datetime(df["date"], errors="coerce")
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
     df["wti_price"] = pd.to_numeric(df["wti_price"], errors="coerce")  # '.' -> NaN
 
     before = len(df)
@@ -126,13 +126,14 @@ def _parse_fred_csv(text: str) -> pd.DataFrame:
 
 _PARSERS = {
     "_parse_github_csv": _parse_github_csv,
-    "_parse_fred_csv":   _parse_fred_csv,
+    "_parse_fred_csv": _parse_fred_csv,
 }
 
 
 # ---------------------------------------------------------------------------
 # Aggregate
 # ---------------------------------------------------------------------------
+
 
 def _aggregate_to_monthly(df: pd.DataFrame) -> pd.DataFrame:
     """
@@ -144,14 +145,10 @@ def _aggregate_to_monthly(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df["year_month"] = df["date"].dt.to_period("M")
 
-    monthly = (
-        df.groupby("year_month", as_index=False)["wti_price"]
-        .mean()
-        .round(2)
-    )
+    monthly = df.groupby("year_month", as_index=False)["wti_price"].mean().round(2)
     monthly = monthly.rename(columns={"year_month": "date"})
     monthly["date"] = monthly["date"].astype(str)  # -> "YYYY-MM"
-    monthly = monthly.sort_values("date").reset_index(drop=True)
+    monthly = monthly.sort_values(by="date").reset_index(drop=True)
 
     return monthly[["date", "wti_price"]]
 
@@ -159,6 +156,7 @@ def _aggregate_to_monthly(df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Validate
 # ---------------------------------------------------------------------------
+
 
 def _validate(df: pd.DataFrame) -> None:
     """Lightweight validation — warnings only, no hard failures."""
@@ -180,36 +178,31 @@ def _validate(df: pd.DataFrame) -> None:
     # Suspicious price range (crude oil: $5–$200 is reasonable history)
     out_of_range = df[(df["wti_price"] < 5) | (df["wti_price"] > 200)]
     if not out_of_range.empty:
-        logger.warning(
-            "[WTI] %d rows with price outside $5–$200 range:\n%s",
-            len(out_of_range), out_of_range
-        )
+        logger.warning("[WTI] %d rows with price outside $5–$200 range:\n%s", len(out_of_range), out_of_range)
 
     # Suspicious spikes: month-over-month change > 50%
     pct_change = df["wti_price"].pct_change().abs()
     spikes = df[pct_change > 0.5]
     if not spikes.empty:
-        logger.warning(
-            "[WTI] %d rows with >50%% month-over-month price spike:\n%s",
-            len(spikes), spikes
-        )
+        logger.warning("[WTI] %d rows with >50%% month-over-month price spike:\n%s", len(spikes), spikes)
 
 
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
+
 def _fetch_from_sources() -> pd.DataFrame:
     """Try each source in order; return daily DataFrame from first that succeeds."""
     last_exc: Exception = RuntimeError("No sources defined.")
     for source in _SOURCES:
-        name   = source["name"]
-        url    = source["url"]
+        name = source["name"]
+        url = source["url"]
         parser = _PARSERS[source["parser"]]
         try:
             logger.info("[WTI] Trying source: %s ...", name)
             resp = _fetch_with_retry(url)
-            df   = parser(resp.text)
+            df = parser(resp.text)
             logger.info("[WTI] Success — %d daily rows from %s", len(df), name)
             return df
         except Exception as exc:
@@ -244,6 +237,7 @@ def fetch_wti_monthly(out_csv: Path = WTI_OUT_CSV) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Validation report
 # ---------------------------------------------------------------------------
+
 
 def validate_wti(df: pd.DataFrame) -> None:
     """Print a brief validation report for the WTI dataset."""

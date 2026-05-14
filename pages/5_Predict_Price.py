@@ -1,10 +1,14 @@
+import logging
+
 import streamlit as st
 
-from utils.data_loader import load_processed_data
-from services.prediction_service import get_prediction_service
 from components.layouts import render_footer
 from components.styles import apply_custom_styles
 from services.insight_service import InsightService
+from services.prediction_service import get_prediction_service
+from utils.data_loader import load_processed_data
+
+logger = logging.getLogger("predict_price")
 
 # ── Page Config ───────────────────────────────────────────────────────────────
 apply_custom_styles()
@@ -32,13 +36,11 @@ service = get_prediction_service()
 
 # ── Page Header ───────────────────────────────────────────────────────────────
 st.title("Predict Price")
-st.caption(
-    "Simulasi berbagai kondisi pasar untuk melihat potensi perubahan harga ICP."
-)
+st.caption("Simulasi berbagai kondisi pasar untuk melihat potensi perubahan harga ICP.")
 
 st.success(
     """
-Model simulasi memungkinkan pengguna menguji dampak perubahan harga WTI, 
+Model simulasi memungkinkan pengguna menguji dampak perubahan harga WTI,
 momentum historis ICP, dan kondisi pasar global terhadap estimasi harga ICP periode berikutnya.
 """
 )
@@ -50,18 +52,16 @@ st.subheader("Scenario Configuration")
 
 st.info(
     """
-Sesuaikan parameter pasar di bawah untuk mensimulasikan berbagai kondisi energi. 
+Sesuaikan parameter pasar di bawah untuk mensimulasikan berbagai kondisi energi.
 Perubahan nilai input akan memengaruhi hasil estimasi harga ICP secara langsung.
 """
 )
 
 with st.form("scenario_form"):
-
     left_col, right_col = st.columns([1, 1], gap="large")
 
     # ── ICP INPUTS ────────────────────────────────────────────────────────────
     with left_col:
-
         st.markdown("### Kondisi ICP Domestik")
 
         lag1 = st.slider(
@@ -90,7 +90,6 @@ with st.form("scenario_form"):
 
     # ── WTI INPUTS ────────────────────────────────────────────────────────────
     with right_col:
-
         st.markdown("### Kondisi Pasar Global (WTI)")
 
         wti = st.slider(
@@ -125,10 +124,7 @@ with st.form("scenario_form"):
     )
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 2 — Prediction Results
-# ═══════════════════════════════════════════════════════════════════════════════
-# ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 2 — Prediction Results
+# SECTION 2 — Prediction Results - Safe error handling
 # ═══════════════════════════════════════════════════════════════════════════════
 if submitted:
     payload = {
@@ -146,11 +142,11 @@ if submitted:
         model_meta = service.get_model_metadata()
 
         baseline = defaults["lag_1"]
-        
-        if pred_val is not None:
+
+        if pred_val is not None and baseline and baseline > 0:
             diff = pred_val - baseline
-            pct_change = (diff / baseline) * 100 if baseline != 0 else 0.0
-            direction = "Bullish" if diff > 0 else "Bearish" if diff < 0 else "Stabil"
+            pct_change = (diff / baseline) * 100
+            direction = "Bullish" if diff > 0.5 else "Bearish" if diff < -0.5 else "Stabil"
 
             st.divider()
             st.subheader("Simulation Result")
@@ -181,10 +177,10 @@ if submitted:
             with interp_left:
                 st.markdown(
                     f"""
-Simulasi menunjukkan estimasi harga ICP berada di sekitar **${pred_val:.2f}** 
+Simulasi menunjukkan estimasi harga ICP berada di sekitar **${pred_val:.2f}**
 dengan perubahan sekitar **{pct_change:+.2f}%** dibanding kondisi saat ini.
 
-Kondisi ini mengindikasikan bahwa perubahan harga WTI global masih memiliki 
+Kondisi ini mengindikasikan bahwa perubahan harga WTI global masih memiliki
 pengaruh signifikan terhadap arah harga ICP domestik.
 """
                 )
@@ -203,11 +199,14 @@ pengaruh signifikan terhadap arah harga ICP domestik.
             with intel_left:
                 st.markdown("##### Market Sensitivity")
                 sensitivity = service.get_feature_sensitivity(payload)
-                st.write(InsightService.get_simulator_insight(sensitivity, pred_val, baseline))
+                if sensitivity:
+                    st.write(InsightService.get_simulator_insight(sensitivity, pred_val, baseline))
+                else:
+                    st.warning("Sensitivity analysis unavailable")
 
             with intel_right:
                 st.markdown("##### Model Information")
-                flavor = model_meta.get("flavor", ["ML"])[0]
+                flavor = model_meta.get("flavor", ["ML"])[0] if model_meta.get("flavor") else "Unknown"
                 version = model_meta.get("version", "N/A")
                 st.success(f"Model inference aktif.\n\nVersion: {version}\n\nEngine: {flavor}")
 
@@ -221,10 +220,13 @@ pengaruh signifikan terhadap arah harga ICP domestik.
             with sum_col3:
                 st.warning(f"### ${wti:.2f}\n\nBenchmark WTI.")
         else:
-            st.error("Model gagal menghasilkan prediksi. Silakan periksa status MLflow di Dashboard.")
+            st.error("Model gagal menghasilkan prediksi yang valid. Silakan periksa status MLflow di Dashboard.")
 
     except Exception as e:
-        st.error(f"Simulasi gagal dijalankan: {str(e)}")
+        error_msg = str(e)
+        logger.error(f"Simulation failed: {error_msg}")
+        st.error(f"Simulasi gagal dijalankan: {error_msg}")
+        st.info("Silakan periksa koneksi MLflow dan coba lagi.")
 
 # ── Footer ────────────────────────────────────────────────────────────────────
-render_footer()
+render_footer()

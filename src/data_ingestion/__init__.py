@@ -1,1 +1,1 @@
-﻿# Marks data_ingestion as a Python package
+# Marks data_ingestion as a Python package

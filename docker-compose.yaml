@@ -76,7 +76,8 @@ services:
       MLFLOW_TRACKING_URI: http://127.0.0.1:5000
     volumes:
       - ./data:/app/data:ro
-      - mlflow-artifacts:/mlflow/artifacts:ro
+      - mlflow-artifacts:/mlflow/artifacts
+
 
 
 
@@ -94,6 +95,8 @@ services:
       MLFLOW_TRACKING_URI: http://127.0.0.1:5000
     volumes:
       - ./data:/app/data
+      - mlflow-artifacts:/mlflow/artifacts
+
     command: >
       sh -c "
         echo '=== Preparing data ===' &&

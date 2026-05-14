@@ -1,4 +1,4 @@
-﻿# run_ingestion.py
+# run_ingestion.py
 # Pipeline ETL: unduh laporan ICP dari ESDM ke data/raw/
 # Cara pakai: python src/data_processing/run_ingestion.py
 
@@ -10,7 +10,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Optional
-from urllib.parse import urljoin, urlparse, unquote
+from urllib.parse import unquote, urljoin, urlparse
 
 _SRC_DIR = Path(__file__).resolve().parents[1]
 _PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -24,13 +24,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger("run_ingestion")
 
-SOURCE_URL    = "https://migas.esdm.go.id/post/harga-minyak-mentah"
-RAW_PDF_DIR   = _PROJECT_ROOT / "data" / "raw"
+SOURCE_URL = "https://migas.esdm.go.id/post/harga-minyak-mentah"
+RAW_PDF_DIR = _PROJECT_ROOT / "data" / "raw"
 PROCESSED_DIR = _PROJECT_ROOT / "data" / "processed"
-DATASET_CSV   = RAW_PDF_DIR / "dataset.csv"
+DATASET_CSV = RAW_PDF_DIR / "dataset.csv"
 
 # target_year=None berarti proses semua tahun yang tersedia
-TARGET_YEAR    = None
+TARGET_YEAR = None
 DOWNLOAD_DELAY = 1.0
 
 HEADERS = {
@@ -44,20 +44,49 @@ HEADERS = {
 }
 
 MONTH_MAP_ID: dict[str, int] = {
-    "januari": 1, "februari": 2, "maret": 3, "april": 4,
-    "mei": 5, "juni": 6, "juli": 7, "agustus": 8,
-    "september": 9, "oktober": 10, "november": 11, "desember": 12,
+    "januari": 1,
+    "februari": 2,
+    "maret": 3,
+    "april": 4,
+    "mei": 5,
+    "juni": 6,
+    "juli": 7,
+    "agustus": 8,
+    "september": 9,
+    "oktober": 10,
+    "november": 11,
+    "desember": 12,
 }
 _MONTH_NAMES = set(MONTH_MAP_ID.keys())
 _MONTH_RE_STR = "|".join(MONTH_MAP_ID.keys())
 
 MONTH_MAP_EN: dict[str, int] = {
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4,
-    "mei": 5, "jun": 6, "jul": 7, "ags": 8, "aug": 8,
-    "sep": 9, "sept": 9, "oct": 10, "okto": 10, "nov": 11, "dec": 12,
-    "january": 1, "february": 2, "march": 3, "may": 5,
-    "june": 6, "july": 7, "august": 8, "september": 9,
-    "october": 10, "november": 11, "december": 12,
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "mei": 5,
+    "jun": 6,
+    "jul": 7,
+    "ags": 8,
+    "aug": 8,
+    "sep": 9,
+    "sept": 9,
+    "oct": 10,
+    "okto": 10,
+    "nov": 11,
+    "dec": 12,
+    "january": 1,
+    "february": 2,
+    "march": 3,
+    "may": 5,
+    "june": 6,
+    "july": 7,
+    "august": 8,
+    "september": 9,
+    "october": 10,
+    "november": 11,
+    "december": 12,
 }
 _MONTH_MAP_ALL = {**MONTH_MAP_ID, **MONTH_MAP_EN}
 _MONTH_RE_ALL = "|".join(sorted(_MONTH_MAP_ALL.keys(), key=len, reverse=True))
@@ -77,6 +106,7 @@ _PAT_FILENAME_DATE = re.compile(r"(\d{4})[_-](\d{2})", re.IGNORECASE)
 # ---------------------------------------------------------------------------
 # Deteksi titik lanjut: bulan/tahun terakhir yang sudah ada di dataset.csv
 # ---------------------------------------------------------------------------
+
 
 def detect_latest_month(csv_path: Path = DATASET_CSV) -> Optional[tuple[int, int]]:
     """
@@ -110,16 +140,17 @@ def detect_latest_month(csv_path: Path = DATASET_CSV) -> Optional[tuple[int, int
     if not required.issubset(df.columns):
         logger.warning(
             "[WARNING] dataset.csv tidak punya kolom %s (ada: %s) — dilewati.",
-            required, list(df.columns),
+            required,
+            list(df.columns),
         )
         return None
 
     # Buang baris yang kolom year/month-nya tidak bisa dikonversi ke integer
     before = len(df)
-    df["year"]  = pd.to_numeric(df["year"],  errors="coerce")
+    df["year"] = pd.to_numeric(df["year"], errors="coerce")
     df["month"] = pd.to_numeric(df["month"], errors="coerce")
     df = df.dropna(subset=["year", "month"])
-    df["year"]  = df["year"].astype(int)
+    df["year"] = df["year"].astype(int)
     df["month"] = df["month"].astype(int)
     removed = before - len(df)
     if removed:
@@ -147,7 +178,7 @@ def detect_latest_month(csv_path: Path = DATASET_CSV) -> Optional[tuple[int, int
             logger.warning("          [WARNING] duplikat: year=%d month=%d", row["year"], row["month"])
 
     # Urutkan kronologis dan periksa apakah dataset sudah terurut
-    df_sorted = df.sort_values(["year", "month"]).reset_index(drop=True)
+    df_sorted = df.sort_values(by=["year", "month"]).reset_index(drop=True)
     if not df.reset_index(drop=True)[["year", "month"]].equals(df_sorted[["year", "month"]]):
         logger.warning("[WARNING] dataset.csv tidak terurut kronologis — akan diurutkan sementara untuk deteksi.")
 
@@ -156,12 +187,14 @@ def detect_latest_month(csv_path: Path = DATASET_CSV) -> Optional[tuple[int, int
 
     # Ambil titik terakhir
     last = df_sorted.iloc[-1]
-    latest_year  = int(last["year"])
+    latest_year = int(last["year"])
     latest_month = int(last["month"])
 
     logger.info(
         "[LATEST] Titik data terakhir terdeteksi: %04d-%02d (baris=%d)",
-        latest_year, latest_month, len(df_sorted),
+        latest_year,
+        latest_month,
+        len(df_sorted),
     )
     return (latest_year, latest_month)
 
@@ -181,22 +214,17 @@ def _report_missing_months(df_sorted: Any) -> None:
 
     # Buat rangkaian bulan lengkap dari awal hingga akhir dataset
     first = df_sorted.iloc[0]
-    last  = df_sorted.iloc[-1]
+    last = df_sorted.iloc[-1]
 
     start = pd.Period(f"{int(first['year'])}-{int(first['month']):02d}", freq="M")
-    end   = pd.Period(f"{int(last['year'])}-{int(last['month']):02d}",   freq="M")
+    end = pd.Period(f"{int(last['year'])}-{int(last['month']):02d}", freq="M")
 
     full_range = pd.period_range(start=start, end=end, freq="M")
 
     # Set bulan yang benar-benar ada
-    existing = set(
-        zip(df_sorted["year"].tolist(), df_sorted["month"].tolist())
-    )
+    existing = set(zip(df_sorted["year"].tolist(), df_sorted["month"].tolist()))
 
-    missing = [
-        p for p in full_range
-        if (p.year, p.month) not in existing
-    ]
+    missing = [p for p in full_range if (p.year, p.month) not in existing]
 
     if missing:
         logger.warning("[WARNING] Ditemukan %d bulan yang hilang dalam dataset:", len(missing))
@@ -226,12 +254,12 @@ def _parse_html(html: str):
 
 def _infer_filename(pdf_url: str, link_text: str, column_year: Optional[int]) -> Optional[str]:
     decoded_url = unquote(pdf_url)
-    url_path    = urlparse(decoded_url).path
+    url_path = urlparse(decoded_url).path
 
     m = _PAT_URL_MONTH_YEAR.search(url_path)
     if m:
         month_num = _MONTH_MAP_ALL.get(m.group("month").lower())
-        year      = m.group("year")
+        year = m.group("year")
         if month_num:
             return f"icp_{year}_{month_num:02d}.pdf"
 
@@ -297,15 +325,17 @@ def collect_pdf_links(source_url: str, session, target_year: int = None) -> list
                         continue
                     seen_urls.add(full_url)
                     link_text = a_tag.get_text(strip=True)
-                    filename  = _infer_filename(full_url, link_text, col_year)
+                    filename = _infer_filename(full_url, link_text, col_year)
                     month_num = MONTH_MAP_ID.get(link_text.strip().lower())
-                    pdf_entries.append({
-                        "url":       full_url,
-                        "filename":  filename,
-                        "year":      col_year,
-                        "month":     month_num,
-                        "link_text": link_text,
-                    })
+                    pdf_entries.append(
+                        {
+                            "url": full_url,
+                            "filename": filename,
+                            "year": col_year,
+                            "month": month_num,
+                            "link_text": link_text,
+                        }
+                    )
 
     if not pdf_entries:
         logger.warning("Strategi tabel kosong — fallback ke semua link PDF di halaman.")
@@ -324,14 +354,16 @@ def collect_pdf_links(source_url: str, session, target_year: int = None) -> list
             seen_urls.add(full_url)
             link_text = a_tag.get_text(strip=True)
             month_num = _MONTH_MAP_ALL.get(link_text.strip().lower())
-            filename  = _infer_filename(full_url, link_text, inferred_year)
-            pdf_entries.append({
-                "url":       full_url,
-                "filename":  filename,
-                "year":      inferred_year,
-                "month":     month_num,
-                "link_text": link_text,
-            })
+            filename = _infer_filename(full_url, link_text, inferred_year)
+            pdf_entries.append(
+                {
+                    "url": full_url,
+                    "filename": filename,
+                    "year": inferred_year,
+                    "month": month_num,
+                    "link_text": link_text,
+                }
+            )
 
     logger.info("[EXTRACT] Ditemukan %d link PDF untuk tahun %s.", len(pdf_entries), target_year)
     return pdf_entries
@@ -349,7 +381,7 @@ def download_pdfs(
     total = len(pdf_entries)
 
     for idx, entry in enumerate(pdf_entries, start=1):
-        pdf_url  = entry["url"]
+        pdf_url = entry["url"]
         filename = entry.get("filename")
 
         if not filename:
@@ -367,7 +399,10 @@ def download_pdfs(
             size_kb = dest_path.stat().st_size // 1024
             logger.info(
                 "[EXISTS] [%d/%d] PDF sudah ada, dilewati: %s (%d KB)",
-                idx, total, filename, size_kb,
+                idx,
+                total,
+                filename,
+                size_kb,
             )
             downloaded.append(dest_path)
             continue
@@ -418,9 +453,9 @@ def _words_to_text(words: list) -> str:
 def _ocr_pdf(pdf_path: Path) -> str:
     try:
         import cv2
+        import fitz
         import numpy as np
         import pytesseract
-        import fitz
     except ImportError:
         logger.warning("OCR libraries not available (pytesseract, opencv-python, pymupdf).")
         return ""
@@ -433,6 +468,7 @@ def _ocr_pdf(pdf_path: Path) -> str:
             img_np = np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.h, pix.w, pix.n)
             if pix.n == 4:
                 import cv2 as _cv2
+
                 img_np = _cv2.cvtColor(img_np, cv2.COLOR_RGBA2RGB)
             gray = cv2.cvtColor(img_np, cv2.COLOR_RGB2GRAY)
             denoised = cv2.fastNlMeansDenoising(gray, h=10)
@@ -510,27 +546,34 @@ def extract_text_from_pdfs(
             if latest_month and file_ym and file_ym <= latest_month:
                 logger.debug(
                     "[SKIP] %s sudah ada di dataset (%04d-%02d <= %04d-%02d)",
-                    pdf_path.name, file_ym[0], file_ym[1],
-                    latest_month[0], latest_month[1],
+                    pdf_path.name,
+                    file_ym[0],
+                    file_ym[1],
+                    latest_month[0],
+                    latest_month[1],
                 )
                 skipped_old += 1
             else:
                 logger.info("[OCR SKIP] TXT sudah ada, baca dari disk: %s", txt_path.name)
 
-            results.append({
-                "pdf_name": pdf_path.name,
-                "pdf_path": str(pdf_path),
-                "txt_path": str(txt_path),
-                "text":     text,
-                "has_text": bool(text.strip()),
-            })
+            results.append(
+                {
+                    "pdf_name": pdf_path.name,
+                    "pdf_path": str(pdf_path),
+                    "txt_path": str(txt_path),
+                    "text": text,
+                    "has_text": bool(text.strip()),
+                }
+            )
             continue
 
         # [NEW] File belum pernah diekstrak -> proses sekarang
         if file_ym:
             logger.info(
                 "[NEW] Bulan baru terdeteksi: %04d-%02d — memproses %s",
-                file_ym[0], file_ym[1], pdf_path.name,
+                file_ym[0],
+                file_ym[1],
+                pdf_path.name,
             )
         else:
             logger.info("[TRANSFORM] Memproses: %s", pdf_path.name)
@@ -563,13 +606,15 @@ def extract_text_from_pdfs(
         txt_path.write_text(text, encoding="utf-8")
         logger.info("          -> %s", txt_path.name)
 
-        results.append({
-            "pdf_name": pdf_path.name,
-            "pdf_path": str(pdf_path),
-            "txt_path": str(txt_path),
-            "text":     text,
-            "has_text": bool(text),
-        })
+        results.append(
+            {
+                "pdf_name": pdf_path.name,
+                "pdf_path": str(pdf_path),
+                "txt_path": str(txt_path),
+                "text": text,
+                "has_text": bool(text),
+            }
+        )
 
     if skipped_old:
         logger.info("[SKIP] %d file lama dilewati (sudah ada di dataset).", skipped_old)
@@ -578,10 +623,23 @@ def extract_text_from_pdfs(
 
 
 _FNAME_MONTH_MAP: dict[str, int] = {
-    "jan": 1, "feb": 2, "mar": 3, "apr": 4,
-    "mei": 5, "jun": 6, "juli": 7, "jul": 7,
-    "ags": 8, "aug": 8, "sep": 9, "sept": 9,
-    "okto": 10, "oct": 10, "nov": 11, "dec": 12, "des": 12,
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "mei": 5,
+    "jun": 6,
+    "juli": 7,
+    "jul": 7,
+    "ags": 8,
+    "aug": 8,
+    "sep": 9,
+    "sept": 9,
+    "okto": 10,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+    "des": 12,
 }
 
 
@@ -628,7 +686,7 @@ def build_csv_dataset(
 
     for item in extraction_results:
         pdf_name = item["pdf_name"]
-        text     = item.get("text", "")
+        text = item.get("text", "")
 
         price_date = None
         if text.strip():
@@ -638,7 +696,7 @@ def build_csv_dataset(
             date_str, price = price_date
         else:
             date_str = _parse_date_from_any_filename(pdf_name)
-            price    = None
+            price = None
 
         if not date_str:
             logger.warning("  SKIP (tidak bisa tentukan tanggal): %s", pdf_name)
@@ -670,20 +728,12 @@ def build_csv_dataset(
 
     # Dedup: pertahankan baris dengan icp_price yang tidak null jika ada pilihan
     df_combined["icp_price"] = pd.to_numeric(df_combined["icp_price"], errors="coerce")
-    df_combined = df_combined.sort_values(
-        ["year", "month", "icp_price"], na_position="last"
-    )
+    df_combined = df_combined.sort_values(by=["year", "month", "icp_price"], na_position="last")
     df_combined = df_combined.drop_duplicates(subset=["year", "month"], keep="first")
-    df_combined = df_combined.sort_values(["year", "month"]).reset_index(drop=True)
+    df_combined = df_combined.sort_values(by=["year", "month"]).reset_index(drop=True)
 
     # Interpolasi harga yang masih kosong
-    df_combined["icp_price"] = (
-        df_combined["icp_price"]
-        .interpolate(method="linear")
-        .ffill()
-        .bfill()
-        .round(2)
-    )
+    df_combined["icp_price"] = df_combined["icp_price"].interpolate(method="linear").ffill().bfill().round(2)
 
     df_combined.to_csv(csv_path, index=False)
 
@@ -700,13 +750,13 @@ def build_csv_dataset(
 
 
 def run_local(
-    raw_pdf_dir:  Path = RAW_PDF_DIR,
+    raw_pdf_dir: Path = RAW_PDF_DIR,
     processed_dir: Path = PROCESSED_DIR,
-    target_year:  int   = TARGET_YEAR,  # None = semua tahun
+    target_year: int = TARGET_YEAR,  # None = semua tahun
 ) -> None:
-    raw_pdf_dir   = Path(raw_pdf_dir)
+    raw_pdf_dir = Path(raw_pdf_dir)
     processed_dir = Path(processed_dir)
-    csv_path      = raw_pdf_dir / "dataset.csv"
+    csv_path = raw_pdf_dir / "dataset.csv"
 
     raw_pdf_dir.mkdir(parents=True, exist_ok=True)
     processed_dir.mkdir(parents=True, exist_ok=True)
@@ -718,9 +768,7 @@ def run_local(
     logger.info("[LOCAL] Ekstrak dari PDF yang sudah ada di %s", raw_pdf_dir)
     logger.info("=" * 60)
 
-    extraction_results = extract_text_from_pdfs(
-        raw_pdf_dir, processed_dir, latest_month=latest_month
-    )
+    extraction_results = extract_text_from_pdfs(raw_pdf_dir, processed_dir, latest_month=latest_month)
 
     if not extraction_results:
         logger.error("[LOCAL] Tidak ada PDF yang berhasil diekstrak.")
@@ -734,15 +782,15 @@ def run_local(
 
 
 def run_ingestion(
-    source_url:   str   = SOURCE_URL,
-    raw_pdf_dir:  Path  = RAW_PDF_DIR,
+    source_url: str = SOURCE_URL,
+    raw_pdf_dir: Path = RAW_PDF_DIR,
     processed_dir: Path = PROCESSED_DIR,
-    delay:        float = DOWNLOAD_DELAY,
-    target_year:  int   = TARGET_YEAR,  # None = semua tahun
+    delay: float = DOWNLOAD_DELAY,
+    target_year: int = TARGET_YEAR,  # None = semua tahun
 ) -> None:
-    raw_pdf_dir   = Path(raw_pdf_dir)
+    raw_pdf_dir = Path(raw_pdf_dir)
     processed_dir = Path(processed_dir)
-    csv_path      = raw_pdf_dir / "dataset.csv"
+    csv_path = raw_pdf_dir / "dataset.csv"
 
     raw_pdf_dir.mkdir(parents=True, exist_ok=True)
     processed_dir.mkdir(parents=True, exist_ok=True)
@@ -768,9 +816,7 @@ def run_ingestion(
         logger.error("[EXTRACT] Tidak ada PDF yang diunduh.")
         return
 
-    extraction_results = extract_text_from_pdfs(
-        raw_pdf_dir, processed_dir, latest_month=latest_month
-    )
+    extraction_results = extract_text_from_pdfs(raw_pdf_dir, processed_dir, latest_month=latest_month)
     build_csv_dataset(extraction_results, csv_path, target_year=target_year)
 
     logger.info("Pipeline selesai.")
@@ -784,27 +830,27 @@ def main():
     parser = argparse.ArgumentParser(
         description="ICP ETL Pipeline -- unduh & ekstrak laporan harga minyak mentah ESDM."
     )
-    parser.add_argument("--url",         default=SOURCE_URL,         help="URL halaman sumber ESDM")
-    parser.add_argument("--raw-dir",     default=str(RAW_PDF_DIR),   help="Direktori simpan PDF")
-    parser.add_argument("--out-dir",     default=str(PROCESSED_DIR), help="Direktori output processed")
-    parser.add_argument("--delay",       type=float, default=DOWNLOAD_DELAY, help="Jeda antar-unduhan (detik)")
-    parser.add_argument("--year",        type=int,   default=TARGET_YEAR,    help="Tahun target (kosongkan = semua tahun)")
-    parser.add_argument("--local",       action="store_true",                help="Gunakan PDF lokal, skip download")
+    parser.add_argument("--url", default=SOURCE_URL, help="URL halaman sumber ESDM")
+    parser.add_argument("--raw-dir", default=str(RAW_PDF_DIR), help="Direktori simpan PDF")
+    parser.add_argument("--out-dir", default=str(PROCESSED_DIR), help="Direktori output processed")
+    parser.add_argument("--delay", type=float, default=DOWNLOAD_DELAY, help="Jeda antar-unduhan (detik)")
+    parser.add_argument("--year", type=int, default=TARGET_YEAR, help="Tahun target (kosongkan = semua tahun)")
+    parser.add_argument("--local", action="store_true", help="Gunakan PDF lokal, skip download")
     args = parser.parse_args()
 
     if args.local:
         run_local(
-            raw_pdf_dir   = Path(args.raw_dir),
-            processed_dir = Path(args.out_dir),
-            target_year   = args.year,
+            raw_pdf_dir=Path(args.raw_dir),
+            processed_dir=Path(args.out_dir),
+            target_year=args.year,
         )
     else:
         run_ingestion(
-            source_url    = args.url,
-            raw_pdf_dir   = Path(args.raw_dir),
-            processed_dir = Path(args.out_dir),
-            delay         = args.delay,
-            target_year   = args.year,
+            source_url=args.url,
+            raw_pdf_dir=Path(args.raw_dir),
+            processed_dir=Path(args.out_dir),
+            delay=args.delay,
+            target_year=args.year,
         )
 
 

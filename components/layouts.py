@@ -1,8 +1,10 @@
 import streamlit as st
 
+
 def render_sidebar():
     """Empty function - native Streamlit multipage navigation handles sidebar automatically."""
     pass
+
 
 def render_footer():
     """Compact footer using native Streamlit components."""

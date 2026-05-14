@@ -1,1 +1,1 @@
-﻿# Marks data_processing as a Python package
+# Marks data_processing as a Python package

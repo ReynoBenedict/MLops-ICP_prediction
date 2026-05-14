@@ -1,6 +1,6 @@
+import logging
 import os
 from pathlib import Path
-import logging
 
 logger = logging.getLogger("settings")
 
@@ -50,7 +50,4 @@ THEME_COLOR_NAVY = "#002b5c"
 THEME_COLOR_GOLD = "#b38b59"
 
 # Feature Schema
-FEATURE_COLUMNS = [
-    "lag_1", "lag_3", "lag_6", "rolling_mean_3", 
-    "wti_price", "wti_lag_1", "wti_rolling_mean_3"
-]
+FEATURE_COLUMNS = ["lag_1", "lag_3", "lag_6", "rolling_mean_3", "wti_price", "wti_lag_1", "wti_rolling_mean_3"]

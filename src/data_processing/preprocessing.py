@@ -1,4 +1,4 @@
-﻿# Fungsi preprocessing untuk dataset time-series ICP
+# Fungsi preprocessing untuk dataset time-series ICP
 from __future__ import annotations
 
 import logging
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 def sort_by_date(df: pd.DataFrame, date_col: str = "date") -> pd.DataFrame:
     df = df.copy()
     df[date_col] = pd.to_datetime(df[date_col])
-    return df.sort_values(date_col).reset_index(drop=True)
+    return df.sort_values(by=date_col).reset_index(drop=True)
 
 
 def handle_missing_values(
@@ -58,8 +58,7 @@ def preprocess(
 ) -> Tuple[pd.DataFrame, Optional[Union[MinMaxScaler, StandardScaler]]]:
     if feature_cols is None:
         feature_cols = [
-            c for c in df.columns
-            if c not in (date_col, target_col) and pd.api.types.is_numeric_dtype(df[c])
+            c for c in df.columns if c not in (date_col, target_col) and pd.api.types.is_numeric_dtype(df[c])
         ]
     df = sort_by_date(df, date_col=date_col)
     df = handle_missing_values(df, method=fill_method)

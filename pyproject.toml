@@ -1,3 +1,29 @@
 [tool.ruff]
-# Exclude Jupyter notebooks — cell-level import ordering (E402) is intentional
-exclude = ["notebooks"]
+line-length = 120
+exclude = [
+    ".git",
+    "__pycache__",
+    "data",
+    "models",
+    "notebooks",
+    "reports",
+    "tests"
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E402", "F401", "F403", "E501"]
+
+[tool.pyright]
+include = ["src", "services", "utils", "components", "config", "pages", "app.py"]
+exclude = ["**/__pycache__", ".git", "data", "models", ".venv"]
+venv = ".venv"
+venvPath = "."
+extraPaths = [".", "src"]
+executionEnvironments = [{ root = "." }]
+reportMissingImports = "error"
+reportMissingTypeStubs = false
+reportPrivateImportUsage = false
+reportAttributeAccessIssue = false
+reportArgumentType = false
+pythonVersion = "3.10"

@@ -1,0 +1,35 @@
+{
+  "include": [
+    "src",
+    "services",
+    "utils",
+    "components",
+    "config",
+    "pages",
+    "app.py",
+    "audit_and_promote.py"
+  ],
+  "exclude": [
+    "**/node_modules",
+    "**/__pycache__",
+    ".git",
+    ".venv"
+  ],
+  "venv": ".venv",
+  "venvPath": ".",
+  "extraPaths": [
+    ".",
+    "src"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "."
+    }
+  ],
+  "reportMissingImports": "error",
+  "reportMissingTypeStubs": false,
+  "reportPrivateImportUsage": false,
+  "reportAttributeAccessIssue": false,
+  "reportArgumentType": false,
+  "pythonVersion": "3.10"
+}

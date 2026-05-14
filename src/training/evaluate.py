@@ -1,4 +1,5 @@
-﻿"""evaluate.py — LK-8 RMSE threshold validation for CI pipeline."""
+"""evaluate.py — LK-8 RMSE threshold validation for CI pipeline."""
+
 import json
 import sys
 from pathlib import Path

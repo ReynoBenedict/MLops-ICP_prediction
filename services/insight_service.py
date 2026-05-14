@@ -1,6 +1,7 @@
-import pandas as pd
+from typing import Any, Dict
+
 import numpy as np
-from typing import Dict, Any
+import pandas as pd
 
 
 class InsightService:
@@ -14,9 +15,7 @@ class InsightService:
         """Executive market pulse for Dashboard page."""
 
         if df.empty or len(df) < 6:
-            return (
-                "Data historis belum cukup untuk membaca kondisi pasar."
-            )
+            return "Data historis belum cukup untuk membaca kondisi pasar."
 
         recent_icp = df["icp_price"].iloc[-1]
         prev_icp = df["icp_price"].iloc[-2]
@@ -25,13 +24,9 @@ class InsightService:
 
         change_pct = ((recent_icp - prev_icp) / prev_icp) * 100
 
-        volatility = (
-            df["icp_price"].rolling(3).std().iloc[-1]
-        )
+        volatility = df["icp_price"].rolling(3).std().iloc[-1]
 
-        avg_volatility = (
-            df["icp_price"].rolling(3).std().mean()
-        )
+        avg_volatility = df["icp_price"].rolling(3).std().mean()
 
         # Trend
         if recent_icp > ma3 * 1.02:
@@ -61,9 +56,7 @@ class InsightService:
         """Relationship insight for ICP vs WTI page."""
 
         if df.empty:
-            return (
-                "Hubungan ICP dan WTI belum dapat dianalisis."
-            )
+            return "Hubungan ICP dan WTI belum dapat dianalisis."
 
         corr = df["icp_price"].corr(df["wti_price"])
 
@@ -83,23 +76,12 @@ class InsightService:
                 1,
             )[0]
 
-            impact_text = (
-                f"Secara historis, kenaikan WTI sebesar "
-                f"1 USD diikuti perubahan ICP sekitar "
-                f"{slope:.2f} USD."
-            )
+            impact_text = f"Secara historis, kenaikan WTI sebesar 1 USD diikuti perubahan ICP sekitar {slope:.2f} USD."
 
         except Exception:
-            impact_text = (
-                "Pergerakan historis ICP dan WTI "
-                "masih menunjukkan pola yang konsisten."
-            )
+            impact_text = "Pergerakan historis ICP dan WTI masih menunjukkan pola yang konsisten."
 
-        return (
-            f"Korelasi ICP dan WTI tergolong {strength} "
-            f"dengan nilai Pearson {corr:.2f}. "
-            f"{impact_text}"
-        )
+        return f"Korelasi ICP dan WTI tergolong {strength} dengan nilai Pearson {corr:.2f}. {impact_text}"
 
     @staticmethod
     def get_forecast_insight(
@@ -110,9 +92,7 @@ class InsightService:
         """Forecast interpretation for Forecasting page."""
 
         if df.empty:
-            return (
-                "Forecast berhasil dibuat tanpa konteks historis."
-            )
+            return "Forecast berhasil dibuat tanpa konteks historis."
 
         latest_icp = df["icp_price"].iloc[-1]
 
@@ -143,33 +123,20 @@ class InsightService:
         """Interactive scenario insight for Predict Price page."""
 
         if not sensitivity:
-            return (
-                "Analisis sensitivitas belum tersedia."
-            )
+            return "Analisis sensitivitas belum tersedia."
 
         top_feat = max(
             sensitivity.items(),
-            key=lambda x: abs(
-                x[1].get("impact", 0)
-            ),
+            key=lambda x: abs(x[1].get("impact", 0)),
         )
 
-        feature = (
-            top_feat[0]
-            .replace("_", " ")
-            .replace("wti", "WTI")
-            .upper()
-        )
+        feature = top_feat[0].replace("_", " ").replace("wti", "WTI").upper()
 
         impact = top_feat[1].get("impact", 0)
 
         delta = pred_val - baseline_val
 
-        direction = (
-            "meningkat"
-            if delta > 0
-            else "menurun"
-        )
+        direction = "meningkat" if delta > 0 else "menurun"
 
         return (
             f"Skenario ini membuat proyeksi ICP "
@@ -188,9 +155,7 @@ class InsightService:
         coefs = model_meta.get("coefficients")
 
         if not coefs:
-            return (
-                "Faktor dominan model belum tersedia."
-            )
+            return "Faktor dominan model belum tersedia."
 
         sorted_coefs = sorted(
             coefs.items(),
@@ -203,11 +168,7 @@ class InsightService:
         clean_names = []
 
         for feat, _ in top_features:
-            clean = (
-                feat.replace("_", " ")
-                .replace("wti", "WTI")
-                .title()
-            )
+            clean = feat.replace("_", " ").replace("wti", "WTI").title()
             clean_names.append(clean)
 
         primary_driver = clean_names[0]
@@ -227,15 +188,9 @@ class InsightService:
         """Confidence explanation for Forecasting page."""
 
         if rmse <= 0:
-            return (
-                "Tingkat confidence belum dapat dihitung."
-            )
+            return "Tingkat confidence belum dapat dihitung."
 
-        error_pct = (
-            (rmse / pred_val) * 100
-            if pred_val != 0
-            else 0
-        )
+        error_pct = (rmse / pred_val) * 100 if pred_val != 0 else 0
 
         if error_pct < 5:
             confidence = "tinggi"
@@ -245,7 +200,5 @@ class InsightService:
             confidence = "moderat"
 
         return (
-            f"Model menunjukkan tingkat confidence "
-            f"{confidence} dengan estimasi error "
-            f"historis sekitar ±{rmse:.2f} USD."
+            f"Model menunjukkan tingkat confidence {confidence} dengan estimasi error historis sekitar ±{rmse:.2f} USD."
         )

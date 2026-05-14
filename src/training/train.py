@@ -1,8 +1,6 @@
 from __future__ import annotations
-from config.settings import MLFLOW_TRACKING_URI, PROJECT_ROOT, CLEAN_DATA_PATH
+
 # Pipeline pelatihan model ICP dengan MLflow tracking
-
-
 import json
 import logging
 import math
@@ -20,6 +18,8 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
+from config.settings import CLEAN_DATA_PATH, MLFLOW_TRACKING_URI, PROJECT_ROOT
+
 # Configure Matplotlib backend
 matplotlib.use("Agg")  # backend non-interaktif agar aman di semua OS
 import matplotlib.pyplot as plt  # noqa: E402
@@ -33,8 +33,8 @@ warnings.filterwarnings("ignore", category=UserWarning, module="sklearn")
 logging.getLogger("mlflow.sklearn").setLevel(logging.ERROR)
 logging.getLogger("mlflow").setLevel(logging.ERROR)
 
-EXPERIMENT_NAME     = "icp-price-prediction"
-CLEAN_CSV           = CLEAN_DATA_PATH
+EXPERIMENT_NAME = "icp-price-prediction"
+CLEAN_CSV = CLEAN_DATA_PATH
 
 
 CANDIDATE_TARGET_COLS = ["icp_price", "icp", "price", "harga"]
@@ -77,10 +77,7 @@ def load_data(
         sys.exit(1)
 
     # Pilih semua kolom lag_*, rolling_*, dan wti_* sebagai fitur secara otomatis
-    feature_cols = [
-        c for c in df.columns
-        if c.startswith("lag_") or c.startswith("rolling_") or c.startswith("wti_")
-    ]
+    feature_cols = [c for c in df.columns if c.startswith("lag_") or c.startswith("rolling_") or c.startswith("wti_")]
 
     if not feature_cols:
         print("[ERROR] Tidak ada kolom fitur (lag_*/rolling_*). Jalankan kembali prepare_data.py.")
@@ -114,7 +111,7 @@ def save_pred_plot(y_true: pd.Series, y_pred: Any, model_type: str) -> Path:
     """Buat dan simpan plot actual vs predicted sebagai PNG."""
     fig, ax = plt.subplots(figsize=(7, 4))
     ax.plot(y_true.values, marker="o", label="Actual", linewidth=1.5)
-    ax.plot(y_pred,        marker="x", label="Predicted", linewidth=1.5, linestyle="--")
+    ax.plot(y_pred, marker="x", label="Predicted", linewidth=1.5, linestyle="--")
     ax.set_title(f"Actual vs Predicted — {model_type}")
     ax.set_xlabel("Test Sample Index")
     ax.set_ylabel("ICP Price")
@@ -147,11 +144,11 @@ def run_experiment(
         model.fit(X_train, y_train)
 
         y_pred = model.predict(X_test)
-        rmse   = compute_rmse(y_test, y_pred)
-        mae    = compute_mae(y_test, y_pred)
+        rmse = compute_rmse(y_test, y_pred)
+        mae = compute_mae(y_test, y_pred)
 
         mlflow.log_metric("rmse", rmse)
-        mlflow.log_metric("mae",  mae)
+        mlflow.log_metric("mae", mae)
 
         signature = infer_signature(X_test, y_pred)
 
@@ -183,23 +180,23 @@ def main() -> None:
 
     experiments: list[dict] = [
         {
-            "model":        LinearRegression(),
-            "model_type":   "LinearRegression",
+            "model": LinearRegression(),
+            "model_type": "LinearRegression",
             "extra_params": {},
         },
         {
-            "model":        RandomForestRegressor(n_estimators=10, random_state=42),
-            "model_type":   "RandomForest_n10",
+            "model": RandomForestRegressor(n_estimators=10, random_state=42),
+            "model_type": "RandomForest_n10",
             "extra_params": {"n_estimators": 10},
         },
         {
-            "model":        RandomForestRegressor(n_estimators=50, random_state=42),
-            "model_type":   "RandomForest_n50",
+            "model": RandomForestRegressor(n_estimators=50, random_state=42),
+            "model_type": "RandomForest_n50",
             "extra_params": {"n_estimators": 50},
         },
         {
-            "model":        RandomForestRegressor(n_estimators=100, random_state=42),
-            "model_type":   "RandomForest_n100",
+            "model": RandomForestRegressor(n_estimators=100, random_state=42),
+            "model_type": "RandomForest_n100",
             "extra_params": {"n_estimators": 100},
         },
     ]

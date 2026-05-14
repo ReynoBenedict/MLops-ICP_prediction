@@ -1,4 +1,4 @@
-﻿# Membuat fitur temporal ICP + WTI dan menyimpan ke data/processed/clean_data.csv
+# Membuat fitur temporal ICP + WTI dan menyimpan ke data/processed/clean_data.csv
 from __future__ import annotations
 
 import sys
@@ -7,9 +7,9 @@ from pathlib import Path
 import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-RAW_CSV     = PROJECT_ROOT / "data" / "raw" / "dataset.csv"
-WTI_CSV     = PROJECT_ROOT / "data" / "raw" / "wti.csv"
-OUT_CSV     = PROJECT_ROOT / "data" / "processed" / "clean_data.csv"
+RAW_CSV = PROJECT_ROOT / "data" / "raw" / "dataset.csv"
+WTI_CSV = PROJECT_ROOT / "data" / "raw" / "wti.csv"
+OUT_CSV = PROJECT_ROOT / "data" / "processed" / "clean_data.csv"
 
 CANDIDATE_TARGET_COLS = ["icp_price", "icp", "price", "harga"]
 
@@ -38,7 +38,7 @@ def _load_wti(wti_path: Path, icp_min: str, icp_max: str) -> pd.DataFrame:
 
     # Crop to ICP range — removes historical data before 2019 and future leakage
     wti = wti[(wti["date"] >= icp_min) & (wti["date"] <= icp_max)].copy()
-    wti = wti.sort_values("date").reset_index(drop=True)
+    wti = wti.sort_values(by="date").reset_index(drop=True)
 
     # Lightweight validation
     dupes = wti.duplicated("date").sum()
@@ -79,7 +79,7 @@ def prepare(raw_path: Path = RAW_CSV, wti_path: Path = WTI_CSV, out_path: Path =
     # Pastikan urutan kronologis sebelum membuat fitur temporal
     df = df.copy()
     if "year" in df.columns and "month" in df.columns:
-        df = df.sort_values(["year", "month"]).reset_index(drop=True)
+        df = df.sort_values(by=["year", "month"]).reset_index(drop=True)
 
     # Build YYYY-MM merge key from ICP year/month columns
     df["date"] = df["year"].astype(str) + "-" + df["month"].astype(str).str.zfill(2)
@@ -97,7 +97,7 @@ def prepare(raw_path: Path = RAW_CSV, wti_path: Path = WTI_CSV, out_path: Path =
         print(f"[INFO] Merged ICP + WTI: {after} rows")
 
         # WTI features — shift(1) ensures no leakage (only past data used)
-        df["wti_lag_1"]          = df["wti_price"].shift(1)
+        df["wti_lag_1"] = df["wti_price"].shift(1)
         df["wti_rolling_mean_3"] = df["wti_price"].shift(1).rolling(window=3, min_periods=1).mean()
     else:
         print("[INFO] Running without WTI features.")
