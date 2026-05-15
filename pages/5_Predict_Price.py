@@ -1,20 +1,22 @@
 import logging
-
+import traceback
 import streamlit as st
-
 from components.layouts import render_footer
 from components.styles import apply_custom_styles
 from services.insight_service import InsightService
 from services.prediction_service import get_prediction_service
 from utils.data_loader import load_processed_data
 
+
 logger = logging.getLogger("predict_price")
 
-# ── Page Config ───────────────────────────────────────────────────────────────
+# --- Page Config ---
 apply_custom_styles()
 
-# ── Data Loading ──────────────────────────────────────────────────────────────
-df = load_processed_data()
+# --- Data Loading ---
+with st.spinner("Memuat data dasar pasar..."):
+    df = load_processed_data()
+
 
 if not df.empty:
     latest = df.iloc[-1]
@@ -34,7 +36,7 @@ else:
 
 service = get_prediction_service()
 
-# ── Page Header ───────────────────────────────────────────────────────────────
+# --- Page Header ---
 st.title("Predict Price")
 st.caption("Simulasi berbagai kondisi pasar untuk melihat potensi perubahan harga ICP.")
 
@@ -45,22 +47,14 @@ momentum historis ICP, dan kondisi pasar global terhadap estimasi harga ICP peri
 """
 )
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 1 — Scenario Configuration
-# ═══════════════════════════════════════════════════════════════════════════════
+# --- SECTION 1: Scenario Configuration ---
 st.subheader("Scenario Configuration")
-
-st.info(
-    """
-Sesuaikan parameter pasar di bawah untuk mensimulasikan berbagai kondisi energi.
-Perubahan nilai input akan memengaruhi hasil estimasi harga ICP secara langsung.
-"""
-)
+st.info("Sesuaikan parameter pasar di bawah untuk mensimulasikan berbagai kondisi energi.")
 
 with st.form("scenario_form"):
     left_col, right_col = st.columns([1, 1], gap="large")
 
-    # ── ICP INPUTS ────────────────────────────────────────────────────────────
+    # --- ICP INPUTS ---
     with left_col:
         st.markdown("### Kondisi ICP Domestik")
 
@@ -88,7 +82,7 @@ with st.form("scenario_form"):
             help="Merepresentasikan tren rata-rata ICP jangka pendek.",
         )
 
-    # ── WTI INPUTS ────────────────────────────────────────────────────────────
+    # --- WTI INPUTS ---
     with right_col:
         st.markdown("### Kondisi Pasar Global (WTI)")
 
@@ -120,12 +114,10 @@ with st.form("scenario_form"):
 
     submitted = st.form_submit_button(
         "Jalankan Simulasi Harga ICP",
-        use_container_width=True,
+        width="stretch",
     )
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# SECTION 2 — Prediction Results - Safe error handling
-# ═══════════════════════════════════════════════════════════════════════════════
+# --- SECTION 2: Prediction Results ---
 if submitted:
     payload = {
         "lag_1": lag1,
@@ -138,8 +130,12 @@ if submitted:
     }
 
     try:
-        pred_val = service.predict(payload)
-        model_meta = service.get_model_metadata()
+        with st.spinner("Menjalankan simulasi engine..."):
+            pred_val = service.predict(payload)
+        
+        with st.spinner("Mengambil detail model..."):
+            model_meta = service.get_model_metadata()
+
 
         baseline = defaults["lag_1"]
 
@@ -223,10 +219,10 @@ pengaruh signifikan terhadap arah harga ICP domestik.
             st.error("Model gagal menghasilkan prediksi yang valid. Silakan periksa status MLflow di Dashboard.")
 
     except Exception as e:
-        error_msg = str(e)
-        logger.error(f"Simulation failed: {error_msg}")
-        st.error(f"Simulasi gagal dijalankan: {error_msg}")
+        logger.error(f"Simulation failed: {str(e)}")
+        st.error(f"Simulasi gagal dijalankan: {str(e)}")
         st.info("Silakan periksa koneksi MLflow dan coba lagi.")
 
-# ── Footer ────────────────────────────────────────────────────────────────────
+# --- Footer ---
 render_footer()
+

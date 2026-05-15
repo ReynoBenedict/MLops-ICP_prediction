@@ -96,7 +96,7 @@ fig_history.update_layout(
 
 st.plotly_chart(
     fig_history,
-    use_container_width=True,
+    width="stretch",
 )
 
 # ── Context Explanation ───────────────────────────────────────────────────────
@@ -200,7 +200,7 @@ with col1:
 
     st.plotly_chart(
         fig_ma,
-        use_container_width=True,
+        width="stretch",
     )
 
     st.info(
@@ -254,7 +254,7 @@ with col2:
 
     st.plotly_chart(
         fig_vol,
-        use_container_width=True,
+        width="stretch",
     )
 
     st.warning(
@@ -360,3 +360,4 @@ st.success(
 st.divider()
 
 render_footer()
+

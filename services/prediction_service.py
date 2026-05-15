@@ -1,17 +1,16 @@
+import requests
 import logging
 import os
 import warnings
-
 import mlflow
 import mlflow.pyfunc
 import mlflow.sklearn
 import pandas as pd
 from mlflow import MlflowClient
-
 from config.settings import FEATURE_COLUMNS, MLFLOW_TRACKING_URI, MODEL_NAME, PRODUCTION_STAGE
 
+
 # Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("prediction_service")
 
 
@@ -33,9 +32,30 @@ class PredictionService:
         self.last_payload = None
         self.model_version = "Unknown"
         self.load_error = None
+        self._client = None
 
-        mlflow.set_tracking_uri(self.tracking_uri)
-        self.client = MlflowClient()
+    def check_mlflow_health(self, timeout: int = 2) -> bool:
+        """Fast check if MLflow tracking server is reachable."""
+        try:
+            health_url = f"{self.tracking_uri}/health"
+            response = requests.get(health_url, timeout=timeout)
+            return response.status_code == 200
+        except Exception:
+            return False
+
+    @property
+    def client(self):
+        if self._client is None:
+            if not self.check_mlflow_health():
+                raise InferenceError(f"MLflow tracking server at {self.tracking_uri} is unreachable.")
+            
+            try:
+                mlflow.set_tracking_uri(self.tracking_uri)
+                self._client = MlflowClient()
+            except Exception as e:
+                logger.error(f"MlflowClient initialization failed: {str(e)}")
+                raise
+        return self._client
 
     def _extract_feature_names(self):
         """Extract feature names from model signature or use defaults."""
@@ -48,7 +68,6 @@ class PredictionService:
                     names = inputs.column_names()
                 else:
                     names = [col.name for col in inputs]
-                logger.info(f"Extracted feature names from signature: {names}")
                 return names
             logger.warning("No signature found in model metadata, using defaults")
             return FEATURE_COLUMNS
@@ -59,7 +78,6 @@ class PredictionService:
     def _resolve_artifact_path(self):
         """Resolve the actual artifact path from MLflow registry."""
         try:
-            logger.info(f"Resolving artifact path for {self.model_name}/{self.stage}")
             versions = self.client.get_latest_versions(self.model_name, stages=[self.stage])
 
             if not versions:
@@ -67,14 +85,10 @@ class PredictionService:
                 return None
 
             version = versions[0]
-            logger.info(f"Found model version: {version.version}")
-            logger.info(f"Model source: {version.source}")
-            logger.info(f"Model status: {version.status}")
 
             # Check if source path exists
             if version.source and version.source.startswith("/"):
                 if os.path.exists(version.source):
-                    logger.info(f"Artifact path exists: {version.source}")
                     return version.source
                 else:
                     logger.warning(f"Artifact path does not exist: {version.source}")
@@ -92,30 +106,18 @@ class PredictionService:
         model_uri = f"models:/{self.model_name}/{self.stage}"
 
         try:
-            logger.info(f"Loading model from: {model_uri}")
-            logger.info(f"Tracking URI: {mlflow.get_tracking_uri()}")
-            logger.info(f"Current working directory: {os.getcwd()}")
+            if not self.check_mlflow_health():
+                raise InferenceError("Cannot load model: MLflow tracking server is offline.")
 
-            # Try to resolve artifact path first
-            artifact_path = self._resolve_artifact_path()
-            if artifact_path:
-                logger.info(f"Resolved artifact path: {artifact_path}")
-
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                self.model = mlflow.pyfunc.load_model(model_uri)
-
-            logger.info("Model loaded successfully")
+            self.model = mlflow.pyfunc.load_model(model_uri)
 
             # Get model version info
             latest_versions = self.client.get_latest_versions(self.model_name, stages=[self.stage])
             if latest_versions:
                 self.model_version = str(latest_versions[0].version)
-                logger.info(f"Model version: {self.model_version}")
 
             # Extract feature names
             self.feature_names = self._extract_feature_names()
-            logger.info(f"Feature names: {self.feature_names}")
 
         except mlflow.exceptions.MlflowException as e:
             error_msg = f"MLflow error during load: {str(e)}"
@@ -143,9 +145,6 @@ class PredictionService:
         self.last_payload = features_dict
         check_features = self.feature_names or FEATURE_COLUMNS
 
-        logger.info(f"Predicting with features: {features_dict}")
-        logger.info(f"Expected features: {check_features}")
-
         # Check for missing features
         missing = [f for f in check_features if f not in features_dict]
         if missing:
@@ -155,17 +154,9 @@ class PredictionService:
 
         try:
             input_df = pd.DataFrame([features_dict])[check_features]
-            logger.info(f"Input dataframe shape: {input_df.shape}")
-            logger.info(f"Input dataframe:\n{input_df}")
 
             prediction = self.model.predict(input_df)
             result = float(prediction[0])
-
-            # Validate result
-            if result is None or not isinstance(result, (int, float)):
-                raise ValueError(f"Invalid prediction result: {result}")
-
-            logger.info(f"Prediction result: {result}")
             return result
         except Exception as e:
             error_msg = f"Inference failed: {str(e)}"
@@ -226,28 +217,17 @@ class PredictionService:
 
         return results
 
-    def get_debug_info(self):
-        """Get comprehensive debug information."""
-        try:
-            meta = self.get_model_metadata()
-            sensitivity = self.get_feature_sensitivity(self.last_payload) if self.last_payload else {}
-            return {
-                "active_model": meta,
-                "inference_status": "Healthy" if self.model else "Not Loaded",
-                "load_error": self.load_error,
-                "last_payload": self.last_payload,
-                "sensitivity_analysis": sensitivity,
-            }
-        except Exception as e:
-            logger.error(f"Debug info generation failed: {str(e)}")
-            return {"critical_error": str(e)}
 
 
 # Singleton instance
 _service_instance = None
 
 
+import streamlit as st
+
+@st.cache_resource
 def get_prediction_service() -> PredictionService:
+
     global _service_instance
     if _service_instance is None:
         _service_instance = PredictionService()

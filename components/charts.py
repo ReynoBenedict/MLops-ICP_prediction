@@ -37,7 +37,7 @@ def render_timeseries_analysis(df):
         yaxis=dict(title="Price (USD/BBL)", showgrid=True, gridcolor="#f0f0f0"),
     )
 
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 
 def render_correlation_scatter(df):
@@ -57,4 +57,4 @@ def render_correlation_scatter(df):
         template="plotly_white",
         margin=dict(l=20, r=20, t=20, b=20),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")

@@ -1,25 +1,9 @@
-# =============================================================
-# Docker Compose — ICP Forecast Intelligence Platform (LK-09)
-#
-# Services:
-#   1. postgres   — MLflow metadata backend
-#   2. mlflow     — Tracking server + model registry
-#   3. streamlit  — Dashboard + inference UI
-#
-# Usage:
-#   First run (bootstrap ML pipeline):
-#     docker compose --profile init run --rm init
-#
-#   Normal startup:
-#     docker compose up -d
-#
-#   Shutdown:
-#     docker compose down
-# =============================================================
+# Init: docker compose --profile init run --rm init
+# Run:  docker compose up -d
 
 services:
 
-  # ── PostgreSQL ────────────────────────────────────────────
+  # DB for MLflow metadata
   postgres:
     image: postgres:15-alpine
     container_name: icp-postgres
@@ -29,7 +13,6 @@ services:
       POSTGRES_DB: mlflow
     ports:
       - "5433:5432"
-
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks:
@@ -40,7 +23,7 @@ services:
       timeout: 3s
       retries: 10
 
-  # ── MLflow Tracking Server ────────────────────────────────
+  # MLflow Tracking Server
   mlflow:
     build:
       context: .
@@ -48,16 +31,17 @@ services:
     container_name: icp-mlflow
     environment:
       BACKEND_STORE_URI: postgresql://mlflow:password@postgres:5432/mlflow
+      MLFLOW_HTTP_SERVER_ALLOWED_HOSTS: "mlflow,icp-mlflow,localhost,127.0.0.1,172.20.0.4,*"
     ports:
       - "5000:5000"
-      - "8501:8501"
     volumes:
       - mlflow-artifacts:/mlflow/artifacts
     depends_on:
       postgres:
         condition: service_healthy
     networks:
-      - mlops-net
+      mlops-net:
+        ipv4_address: 172.20.0.10
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 10s
@@ -65,38 +49,35 @@ services:
       retries: 10
       start_period: 30s
 
-  # ── Streamlit Dashboard ───────────────────────────────────
+  # Dashboard UI
   streamlit:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: icp-streamlit
-    network_mode: service:mlflow
+    ports:
+      - "8501:8501"
     environment:
-      MLFLOW_TRACKING_URI: http://127.0.0.1:5000
+      MLFLOW_TRACKING_URI: http://172.20.0.10:5000
     volumes:
-      - ./data:/app/data:ro
+      - .:/app
       - mlflow-artifacts:/mlflow/artifacts
+    networks:
+      - mlops-net
 
-
-
-
-  # ── Init (bootstrap ML pipeline) ─────────────────────────
-  # Run once to train + register + promote model:
-  #   docker compose --profile init run --rm init
-  #
+  # Init pipeline (train & register model)
   init:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: icp-init
-    network_mode: service:mlflow
     environment:
-      MLFLOW_TRACKING_URI: http://127.0.0.1:5000
+      MLFLOW_TRACKING_URI: http://172.20.0.10:5000
     volumes:
       - ./data:/app/data
       - mlflow-artifacts:/mlflow/artifacts
-
+    networks:
+      - mlops-net
     command: >
       sh -c "
         echo '=== Preparing data ===' &&
@@ -116,6 +97,9 @@ services:
 networks:
   mlops-net:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
 
 volumes:
   pgdata:

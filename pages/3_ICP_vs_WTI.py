@@ -209,7 +209,7 @@ fig_scatter.update_layout(
 
 st.plotly_chart(
     fig_scatter,
-    use_container_width=True,
+    width="stretch",
 )
 
 # ── Legend ────────────────────────────────────────────────────────────────────
@@ -264,44 +264,14 @@ kontrak energi, dan monitoring risiko pasar.
 
     st.markdown("")
 
-    st.markdown(
-        f"""
-<div style="
-padding: 1rem;
-border-radius: 12px;
-background-color: #f8fafc;
-border: 1px solid #e5e7eb;
-">
-
-<div style="
-font-size: 0.85rem;
-color: #6b7280;
-margin-bottom: 0.4rem;
-">
-Current Correlation Signal
-</div>
-
-<div style="
-font-size: 1.8rem;
-font-weight: 700;
-color: {corr_color};
-">
-{corr:.2f}
-</div>
-
-<div style="
-font-size: 0.9rem;
-color: #6b7280;
-margin-top: 0.3rem;
-">
-WTI and ICP remain tightly aligned
-</div>
-
-</div>
-""",
-        unsafe_allow_html=True,
+    st.metric(
+        label="Current Correlation Signal",
+        value=f"{corr:.2f}",
+        help="Pearson correlation between ICP and WTI",
     )
+    st.caption("WTI and ICP remain tightly aligned.")
 
 st.divider()
 
 render_footer()
+

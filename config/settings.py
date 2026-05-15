@@ -45,7 +45,8 @@ PRODUCTION_STAGE = "Production"
 logger.info(f"MLFLOW_TRACKING_URI: {MLFLOW_TRACKING_URI}")
 
 # UI Configuration
-PAGE_ICON = "https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.x/svgs/solid/oil-well.svg"
+PAGE_ICON = "📈"
+PAGE_ICON = "📈"
 THEME_COLOR_NAVY = "#002b5c"
 THEME_COLOR_GOLD = "#b38b59"
 
