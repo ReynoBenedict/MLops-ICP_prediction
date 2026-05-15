@@ -1,409 +1,84 @@
-# Workflow otomatis untuk proyek ICP Prediction (tugas LK-8)
-# Setiap kali ada push atau pull request, GitHub akan menjalankan pipeline ini secara otomatis
-#
-# Alur pipeline terbagi dua tahap:
-#   Tahap 1: lint -> test -> validate-dvc -> streamlit-smoke-test -> ci-summary
-#             (validasi kualitas kode + validasi frontend Streamlit)
-#
-#   Tahap 2: retrain -> evaluate -> register
-#             (pipeline otomatis MLOps dan registry model)
+# Workflow otomatis untuk proyek ICP Prediction
+# Versi Minimalis untuk troubleshooting Queued State
 
-name: CI + MLOps Automation Pipeline
+name: CI Automation Pipeline
 
 on:
   push:
-    branches: ["**"]       # berjalan di semua branch
+    branches: ["main"]      # Target branch utama
   pull_request:
-    branches: ["**"]       # berjalan saat pull request dibuat
+    branches: ["main"]
 
-# Agar folder src/ dapat diimpor langsung saat pytest berjalan
 env:
   PYTHONPATH: ${{ github.workspace }}/src
 
 jobs:
-
-  # ════════════════════════════════════════════════════════════
-  # JOB 1 — LINT & STYLE CHECK
-  # ════════════════════════════════════════════════════════════
-  #
-  # Job ini bertugas mengecek kualitas penulisan kode.
-  # Ruff akan mendeteksi:
-  # - unused import
-  # - formatting issue
-  # - syntax issue ringan
-  # - bad practices Python
-  #
-  # Tujuan:
-  # memastikan repository tetap rapi dan maintainable.
-  #
+  # JOB 1 — LINT
   lint:
     name: Lint and Style Check
     runs-on: ubuntu-latest
-
     steps:
-      # Clone repository ke runner GitHub Actions
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # Setup environment Python
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      # Install Ruff linter
       - name: Install ruff
         run: pip install ruff
+      - name: Run ruff
+        run: ruff check . --output-format=github
 
-      # Jalankan Ruff ke seluruh layer project
-      #
-      # Layer yang dicek:
-      # - src/            -> backend ML pipeline
-      # - tests/          -> unit tests
-      # - pages/          -> Streamlit pages
-      # - components/     -> reusable UI components
-      # - services/       -> prediction & insight service
-      # - utils/          -> helper utilities
-      #
-      - name: Run ruff linter
-        run: |
-          ruff check \
-            src/ \
-            tests/ \
-            pages/ \
-            components/ \
-            services/ \
-            utils/ \
-            --output-format=github
-
-  # ════════════════════════════════════════════════════════════
-  # JOB 2 — UNIT TESTING
-  # ════════════════════════════════════════════════════════════
-  #
-  # Job ini menjalankan semua unit test menggunakan pytest.
-  #
-  # Testing dilakukan di:
-  # - Python 3.10
-  # - Python 3.11
-  #
-  # Tujuan:
-  # memastikan pipeline tetap kompatibel lintas versi Python.
-  #
+  # JOB 2 — TESTS
   test:
     name: Unit Tests (pytest)
     runs-on: ubuntu-latest
-
     strategy:
       matrix:
         python-version: ["3.10", "3.11"]
-
     steps:
-      # Clone repository
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # Setup Python runtime
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
-
-      # Install semua dependency project
-      - name: Install project dependencies
+      - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-cov
-
-      # Validasi syntax seluruh aplikasi Streamlit
-      #
-      # py_compile memastikan:
-      # - syntax valid
-      # - import valid
-      # - file Python dapat di-compile
-      #
-      # Tujuan:
-      # mendeteksi error frontend sebelum deployment.
-      #
-      - name: Validate Streamlit application
-        run: |
-          python -m py_compile app.py
-
-          find pages -name "*.py" -exec python -m py_compile {} \;
-          find components -name "*.py" -exec python -m py_compile {} \;
-          find services -name "*.py" -exec python -m py_compile {} \;
-          find utils -name "*.py" -exec python -m py_compile {} \;
-
-          echo "Semua file Streamlit berhasil divalidasi."
-
-      # Jalankan pytest + coverage report
-      #
-      # Output:
-      # - junit.xml
-      # - coverage.xml
-      #
-      - name: Run pytest with coverage report
+      - name: Run tests
         run: |
           mkdir -p reports
-          python -m pytest tests/ \
-            --tb=short \
-            --strict-markers \
-            -v \
-            --junitxml=reports/junit.xml \
-            --cov=src \
-            --cov-report=term-missing \
-            --cov-report=xml:reports/coverage.xml
-
-      # Upload artifact report agar dapat dilihat di GitHub Actions
-      #
-      # Artifact:
-      # - coverage.xml
-      # - junit.xml
-      #
-      - name: Upload test reports
+          python -m pytest tests/ --junitxml=reports/junit.xml --cov=src --cov-report=xml:reports/coverage.xml
+      - uses: actions/upload-artifact@v4
         if: always()
-        uses: actions/upload-artifact@v4
         with:
           name: test-reports-py${{ matrix.python-version }}
           path: reports/
-          retention-days: 14
           if-no-files-found: ignore
 
-  # ════════════════════════════════════════════════════════════
-  # JOB 3 — VALIDASI DVC
-  # ════════════════════════════════════════════════════════════
-  #
-  # Job ini memvalidasi metadata DVC.
-  #
-  # Tujuan:
-  # memastikan pointer dataset dan pipeline DVC tetap konsisten.
-  #
-  validate-dvc:
-    name: Validate DVC Metadata
-    runs-on: ubuntu-latest
-
-    steps:
-      # Clone repository
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # Setup Python
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      # Install DVC
-      - name: Install DVC
-        run: pip install dvc
-
-      # Jalankan validasi status DVC
-      #
-      # --no-updates:
-      # mencegah pengecekan remote storage
-      #
-      - name: Check DVC status
-        run: |
-          dvc status --no-updates 2>&1 || true
-          echo "Pengecekan DVC selesai."
-
-  # ════════════════════════════════════════════════════════════
-  # JOB 4 — STREAMLIT SMOKE TEST
-  # ════════════════════════════════════════════════════════════
-  #
-  # Job ini melakukan runtime validation untuk frontend Streamlit.
-  #
-  # Tujuan:
-  # memastikan aplikasi Streamlit dapat dijalankan
-  # di environment Linux GitHub Actions.
-  #
-  # Validasi yang dilakukan:
-  # - compile Python pages
-  # - launch Streamlit headless
-  # - health endpoint check
-  # - capture Streamlit logs
-  #
-  streamlit-smoke-test:
+  # JOB 3 — SMOKE TEST
+  smoke-test:
     name: Streamlit Smoke Test
     runs-on: ubuntu-latest
-
     steps:
-      # Clone repository
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # Setup Python
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      # Install dependency project
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
-      # Compile seluruh page Streamlit
-      #
-      # Tujuan:
-      # memastikan tidak ada syntax error frontend.
-      #
-      - name: Validate Streamlit Pages
+      - name: Validate syntax
         run: |
           python -m py_compile app.py
-          python -m py_compile pages/1_Dashboard.py
-          python -m py_compile pages/2_Forecasting.py
-          python -m py_compile pages/3_ICP_vs_WTI.py
-          python -m py_compile pages/4_Market_Trends.py
-          python -m py_compile pages/5_Predict_Price.py
-          python -m py_compile pages/6_MLOps_Center.py
-
-      # Jalankan Streamlit secara headless
-      #
-      # nohup digunakan agar process tetap hidup
-      # selama GitHub Actions berjalan.
-      #
-      - name: Launch Streamlit App
+          find pages -name "*.py" -exec python -m py_compile {} \;
+      - name: Launch app
         run: |
           nohup streamlit run app.py --server.headless true > streamlit.log 2>&1 &
-          sleep 25
-
-      # Health check endpoint Streamlit
-      #
-      # Endpoint:
-      # /_stcore/health
-      #
-      # Jika endpoint gagal:
-      # job akan FAIL.
-      #
-      - name: Check Streamlit Health
-        run: |
-          curl --fail http://localhost:8501/_stcore/health
-
-      # Tampilkan log Streamlit
-      #
-      # Berguna untuk debugging jika app gagal boot.
-      #
-      - name: Show Streamlit Logs
+          sleep 20
+      - name: Health check
+        run: curl --fail http://localhost:8501/_stcore/health
+      - name: Show logs
         if: always()
-        run: |
-          cat streamlit.log
-
-  # ════════════════════════════════════════════════════════════
-  # JOB 5 — CI GATE
-  # ════════════════════════════════════════════════════════════
-  #
-  # Job ini bertindak sebagai gerbang validasi utama.
-  #
-  # Pipeline MLOps hanya akan lanjut jika:
-  # - lint sukses
-  # - pytest sukses
-  # - DVC valid
-  # - Streamlit smoke test sukses
-  #
-  ci-summary:
-    name: CI Gate
-    runs-on: ubuntu-latest
-    needs: [lint, test, validate-dvc, streamlit-smoke-test]
-    if: always()
-
-    steps:
-      - name: Periksa hasil semua job tahap 1
-        run: |
-          if [[ "${{ needs.lint.result }}" == "success" &&
-                "${{ needs.test.result }}" == "success" &&
-                "${{ needs.validate-dvc.result }}" == "success" &&
-                "${{ needs.streamlit-smoke-test.result }}" == "success" ]]; then
-
-            echo "Semua validasi berhasil."
-
-          else
-
-            echo "Terdapat job yang gagal."
-            exit 1
-
-          fi
-
-  # ════════════════════════════════════════════════════════════
-  # JOB 6 — MLOPS PIPELINE (Train → Evaluate → Register)
-  # ════════════════════════════════════════════════════════════
-  #
-  # Single-job orchestration untuk menjaga MLflow state
-  # (mlflow.db, experiment history, artifact store) tetap
-  # tersedia di seluruh tahap pipeline.
-  #
-  # Tahap:
-  #   1. Prepare data
-  #   2. Retrain model (creates MLflow experiment + runs)
-  #   3. Evaluate RMSE threshold
-  #   4. Register model to MLflow registry
-  #
-  mlops-pipeline:
-    name: MLOps Pipeline (Train → Evaluate → Register)
-    runs-on: ubuntu-latest
-    needs: ci-summary
-
-    steps:
-      # Clone repository
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      # Setup Python
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-
-      # Install dependency
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      # ── Step 1: Prepare data ──────────────────────────────
-      - name: Prepare data
-        run: python -m src.data_processing.prepare_data
-
-      # ── Step 2: Retrain model ─────────────────────────────
-      #
-      # MLflow experiment dan runs dibuat di sini.
-      # mlflow.db tetap tersedia untuk step berikutnya
-      # karena semuanya berjalan di runner yang sama.
-      #
-      - name: Retrain model
-        run: python -m src.training.train
-
-      # ── Step 3: Evaluate RMSE threshold ───────────────────
-      #
-      # Jika RMSE terlalu tinggi:
-      # pipeline FAIL dan registrasi tidak dilanjutkan.
-      #
-      - name: Evaluate RMSE threshold
-        run: python -m src.training.evaluate
-
-      # ── Step 4: Register model ────────────────────────────
-      #
-      # Karena mlflow.db masih ada di filesystem runner,
-      # register_model.py dapat menemukan experiment dan
-      # mendaftarkan model secara REAL ke MLflow registry.
-      #
-      - name: Register model to MLflow registry
-        run: python -m src.training.register_model
-
-      # Upload metrics sebagai artifact CI
-      - name: Upload metrics.json
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: metrics
-          path: metrics.json
-          retention-days: 7
-          if-no-files-found: ignore
-
-      # Final success message
-      - name: Pipeline selesai
-        run: echo "Pipeline MLOps selesai. Model berhasil didaftarkan."
-
+        run: cat streamlit.log
