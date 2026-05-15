@@ -1,7 +1,9 @@
 import logging
 import traceback
+
 import plotly.graph_objects as go
 import streamlit as st
+
 from components.layouts import render_footer
 from components.styles import apply_custom_styles
 from config.settings import PAGE_ICON
@@ -20,7 +22,7 @@ def render_metric_card(label, value, delta=None):
 
 def run_dashboard():
     apply_custom_styles()
-    
+
     try:
         with st.spinner("Loading market data..."):
             df = load_processed_data()
@@ -41,7 +43,7 @@ def run_dashboard():
             try:
                 with st.spinner("Initializing intelligence engine..."):
                     pred_val = service.predict(features)
-                
+
                 with st.spinner("Fetching model metadata..."):
                     model_meta = service.get_model_metadata()
                 logger.info(f"Prediction successful: {pred_val}")

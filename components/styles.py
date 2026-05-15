@@ -91,7 +91,7 @@ def apply_custom_styles():
             background: #cbd5e1;
             border-radius: 10px;
         }
-        
+
         /* Native metric enhancement - simplified */
         div[data-testid="stMetric"] {
             background: #ffffff;

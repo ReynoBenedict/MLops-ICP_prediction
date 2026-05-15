@@ -1,12 +1,13 @@
 import logging
 import traceback
+
 import streamlit as st
+
 from components.layouts import render_footer
 from components.styles import apply_custom_styles
 from services.insight_service import InsightService
 from services.prediction_service import get_prediction_service
 from utils.data_loader import load_processed_data
-
 
 logger = logging.getLogger("predict_price")
 
@@ -132,7 +133,7 @@ if submitted:
     try:
         with st.spinner("Menjalankan simulasi engine..."):
             pred_val = service.predict(payload)
-        
+
         with st.spinner("Mengambil detail model..."):
             model_meta = service.get_model_metadata()
 

@@ -1,14 +1,15 @@
-import requests
 import logging
 import os
 import warnings
+
 import mlflow
 import mlflow.pyfunc
 import mlflow.sklearn
 import pandas as pd
+import requests
 from mlflow import MlflowClient
-from config.settings import FEATURE_COLUMNS, MLFLOW_TRACKING_URI, MODEL_NAME, PRODUCTION_STAGE
 
+from config.settings import FEATURE_COLUMNS, MLFLOW_TRACKING_URI, MODEL_NAME, PRODUCTION_STAGE
 
 # Configure logging
 logger = logging.getLogger("prediction_service")
@@ -48,7 +49,7 @@ class PredictionService:
         if self._client is None:
             if not self.check_mlflow_health():
                 raise InferenceError(f"MLflow tracking server at {self.tracking_uri} is unreachable.")
-            
+
             try:
                 mlflow.set_tracking_uri(self.tracking_uri)
                 self._client = MlflowClient()
@@ -224,6 +225,7 @@ _service_instance = None
 
 
 import streamlit as st
+
 
 @st.cache_resource
 def get_prediction_service() -> PredictionService:

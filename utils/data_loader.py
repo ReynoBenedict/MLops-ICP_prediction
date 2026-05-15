@@ -10,6 +10,7 @@ logger = logging.getLogger("data_loader")
 
 import streamlit as st
 
+
 @st.cache_data
 def load_processed_data() -> pd.DataFrame:
     """Load the cleaned and engineered dataset."""
@@ -53,7 +54,7 @@ def get_latest_context(df: pd.DataFrame) -> dict:
     # lag_3: Price(N-2)
     # lag_6: Price(N-5)
     # rolling_mean_3: Average(Price(N), Price(N-1), Price(N-2))
-    
+
     context = {
         "lag_1": icp_history[-1],
         "lag_3": icp_history[-3],

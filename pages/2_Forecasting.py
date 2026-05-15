@@ -1,7 +1,9 @@
 import logging
 import traceback
+
 import plotly.graph_objects as go
 import streamlit as st
+
 from components.charts import render_timeseries_analysis
 from components.layouts import render_footer
 from components.styles import apply_custom_styles
