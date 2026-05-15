@@ -1,84 +1,12 @@
-# Workflow otomatis untuk proyek ICP Prediction
-# Versi Minimalis untuk troubleshooting Queued State
-
-name: CI Automation Pipeline
+name: Runner Test
 
 on:
   push:
-    branches: ["main"]      # Target branch utama
-  pull_request:
-    branches: ["main"]
-
-env:
-  PYTHONPATH: ${{ github.workspace }}/src
 
 jobs:
-  # JOB 1 — LINT
-  lint:
-    name: Lint and Style Check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install ruff
-        run: pip install ruff
-      - name: Run ruff
-        run: ruff check . --output-format=github
-
-  # JOB 2 — TESTS
   test:
-    name: Unit Tests (pytest)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.10", "3.11"]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: "pip"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-cov
-      - name: Run tests
-        run: |
-          mkdir -p reports
-          python -m pytest tests/ --junitxml=reports/junit.xml --cov=src --cov-report=xml:reports/coverage.xml
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-reports-py${{ matrix.python-version }}
-          path: reports/
-          if-no-files-found: ignore
 
-  # JOB 3 — SMOKE TEST
-  smoke-test:
-    name: Streamlit Smoke Test
-    runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      - name: Validate syntax
-        run: |
-          python -m py_compile app.py
-          find pages -name "*.py" -exec python -m py_compile {} \;
-      - name: Launch app
-        run: |
-          nohup streamlit run app.py --server.headless true > streamlit.log 2>&1 &
-          sleep 20
-      - name: Health check
-        run: curl --fail http://localhost:8501/_stcore/health
-      - name: Show logs
-        if: always()
-        run: cat streamlit.log
+      - name: Hello
+        run: echo "GitHub Actions works"
