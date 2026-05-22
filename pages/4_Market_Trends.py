@@ -3,10 +3,18 @@ import streamlit as st
 
 from components.layouts import render_footer
 from components.styles import apply_custom_styles
+from config.settings import PAGE_ICON
 from services.insight_service import InsightService
 from utils.data_loader import load_processed_data
 
-# ── Page Config ───────────────────────────────────────────────────────────────
+# Page Configuration
+st.set_page_config(
+    page_title="Market Trends | ICP Intelligence",
+    page_icon=PAGE_ICON,
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 apply_custom_styles()
 
 df = load_processed_data()

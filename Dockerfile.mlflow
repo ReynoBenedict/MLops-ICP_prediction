@@ -8,15 +8,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir mlflow>=2.13.0 psycopg2-binary>=2.9.0
+RUN pip install --no-cache-dir \
+    "mlflow~=3.5" \
+    "psycopg2-binary>=2.9.0"
 
 RUN mkdir -p /mlflow/artifacts
 
 EXPOSE 5000
 
-CMD mlflow server \
-    --host 0.0.0.0 \
-    --port 5000 \
-    --backend-store-uri ${BACKEND_STORE_URI} \
-    --default-artifact-root /mlflow/artifacts \
-    --serve-artifacts
+CMD ["sh", "-c", "\
+mlflow server \
+--host 0.0.0.0 \
+--port 5000 \
+--backend-store-uri ${BACKEND_STORE_URI} \
+--default-artifact-root /mlflow/artifacts \
+--serve-artifacts \
+--allowed-hosts ${MLFLOW_SERVER_ALLOWED_HOSTS:-localhost}"]

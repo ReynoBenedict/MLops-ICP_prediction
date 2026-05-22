@@ -2,59 +2,127 @@ import plotly.graph_objects as go
 import streamlit as st
 
 
+PLOT_TEMPLATE = dict(
+    template="plotly_dark",
+    hovermode="x unified",
+    margin=dict(l=10, r=10, t=20, b=10),
+    paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor="rgba(0,0,0,0)",
+    legend=dict(
+        orientation="h",
+        yanchor="bottom",
+        y=1.02,
+        xanchor="right",
+        x=1,
+        bgcolor="rgba(0,0,0,0)",
+    ),
+    xaxis=dict(
+        showgrid=False,
+        zeroline=False,
+    ),
+    yaxis=dict(
+        showgrid=True,
+        gridcolor="rgba(255,255,255,0.06)",
+        zeroline=False,
+    ),
+)
+
+
 def render_timeseries_analysis(df):
-    """Interactive Plotly timeseries for ICP and WTI prices."""
+
     if df.empty:
-        st.warning("No data available for visualization.")
+        st.warning("No market data available for visualization.")
         return
 
     fig = go.Figure()
 
-    # ICP Price Trace
     fig.add_trace(
         go.Scatter(
-            x=df["date"], y=df["icp_price"], name="ICP Price", line=dict(color="#002b5c", width=3), mode="lines+markers"
+            x=df["date"],
+            y=df["icp_price"],
+            name="ICP Price",
+            mode="lines",
+            line=dict(
+                color="#3b82f6",
+                width=3,
+            ),
+            hovertemplate="ICP: $%{y:.2f}<extra></extra>",
         )
     )
 
-    # WTI Price Trace
     fig.add_trace(
         go.Scatter(
             x=df["date"],
             y=df["wti_price"],
-            name="WTI Price",
-            line=dict(color="#b38b59", width=2, dash="dot"),
+            name="WTI Benchmark",
             mode="lines",
+            line=dict(
+                color="#f59e0b",
+                width=2.2,
+                dash="dot",
+            ),
+            hovertemplate="WTI: $%{y:.2f}<extra></extra>",
         )
     )
 
     fig.update_layout(
-        template="plotly_white",
-        hovermode="x unified",
-        margin=dict(l=20, r=20, t=20, b=20),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-        xaxis=dict(showgrid=False),
-        yaxis=dict(title="Price (USD/BBL)", showgrid=True, gridcolor="#f0f0f0"),
+        **PLOT_TEMPLATE,
+        height=420,
+        yaxis_title="USD / BBL",
     )
 
-    st.plotly_chart(fig, width="stretch")
+    st.plotly_chart(
+        fig,
+        width="stretch",
+        config={
+            "displayModeBar": False,
+            "responsive": True,
+        },
+    )
 
 
 def render_correlation_scatter(df):
-    """Scatter plot showing correlation between ICP and WTI."""
+
+    if df.empty:
+        st.warning("No correlation data available.")
+        return
+
     fig = go.Figure()
+
     fig.add_trace(
         go.Scatter(
             x=df["wti_price"],
             y=df["icp_price"],
             mode="markers",
-            marker=dict(color="#002b5c", size=8, opacity=0.6, line=dict(width=1, color="white")),
+            name="Observation",
+            marker=dict(
+                color="#3b82f6",
+                size=9,
+                opacity=0.7,
+                line=dict(
+                    width=1,
+                    color="rgba(255,255,255,0.18)",
+                ),
+            ),
+            hovertemplate=(
+                "WTI: $%{x:.2f}<br>"
+                "ICP: $%{y:.2f}<extra></extra>"
+            ),
         )
     )
+
     fig.update_layout(
-        xaxis_title="WTI Price ($)",
-        yaxis_title="ICP Price ($)",
-        template="plotly_white",
-        margin=dict(l=20, r=20, t=20, b=20),
+        **PLOT_TEMPLATE,
+        height=420,
+        xaxis_title="WTI Price (USD / BBL)",
+        yaxis_title="ICP Price (USD / BBL)",
     )
-    st.plotly_chart(fig, width="stretch")
+
+    st.plotly_chart(
+        fig,
+        width="stretch",
+        config={
+            "displayModeBar": False,
+            "responsive": True,
+        },
+    )

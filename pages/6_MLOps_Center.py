@@ -3,7 +3,16 @@ import streamlit as st
 from components.diagnostics import render_diagnostics_panel
 from components.layouts import render_footer
 from components.styles import apply_custom_styles
+from config.settings import PAGE_ICON
 from utils.data_loader import load_pipeline_metrics
+
+# Page Configuration
+st.set_page_config(
+    page_title="MLOps Center | ICP Intelligence",
+    page_icon=PAGE_ICON,
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 apply_custom_styles()
 

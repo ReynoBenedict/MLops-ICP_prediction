@@ -417,4 +417,65 @@ Setelah seluruh container berjalan, layanan dapat diakses melalui:
 
 ### 6.4 Hasil Orkestrasi
 
-Docker Compose berhasil mengintegrasikan layanan Streamlit, MLflow, dan PostgreSQL dalam satu environment terorkestrasi. Aplikasi Streamlit berhasil melakukan inference model menggunakan model yang diambil dari MLflow Model Registry melalui komunikasi antar container.
+Docker Compose berhasil mengintegrasikan layanan Streamlit, MLflow, dan PostgreSQL dalam satu environment terorkestrasi. Aplikasi Streamlit berhasil melakukan inference model menggunakan model yang diambil dari MLflow Model Registry melalui komunikasi antar container.
+
+---
+
+## 7. [LK-10] FastAPI Model Serving & Horizontal Scaling
+
+### 7.1 Arsitektur
+
+```
+Streamlit (:8501) → FastAPI model-api (:8000) → MLflow Registry → PostgreSQL
+```
+
+Model dimuat dari `models:/ICP_Price_Model/Production` via `mlflow.pyfunc.load_model()` saat container startup.
+
+### 7.2 Endpoints
+
+| Method | Path | Deskripsi |
+|--------|------|-----------|
+| GET | `/health` | Health check + model info |
+| POST | `/predict` | Prediksi harga ICP |
+| GET | `/docs` | Swagger UI |
+
+### 7.3 Contoh curl
+
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# Prediction
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"lag_1":70.0,"lag_3":68.0,"lag_6":65.0,"rolling_mean_3":69.0,"wti_price":72.0,"wti_lag_1":71.0,"wti_rolling_mean_3":71.5}'
+```
+
+### 7.4 Horizontal Scaling
+
+```bash
+# Scale to 3 replicas
+docker compose up -d --scale model-api=3
+
+# Verify replicas
+docker compose ps
+docker ps --filter "name=model-api"
+```
+
+### 7.5 Postman
+
+- **GET** `http://localhost:8000/health`
+- **POST** `http://localhost:8000/predict` — Body (JSON):
+
+```json
+{
+  "lag_1": 70.0,
+  "lag_3": 68.0,
+  "lag_6": 65.0,
+  "rolling_mean_3": 69.0,
+  "wti_price": 72.0,
+  "wti_lag_1": 71.0,
+  "wti_rolling_mean_3": 71.5
+}
+```
+

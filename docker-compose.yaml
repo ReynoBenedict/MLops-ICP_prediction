@@ -23,7 +23,7 @@ services:
       timeout: 3s
       retries: 10
 
-  # MLflow Tracking Server
+# MLflow Tracking Server
   mlflow:
     build:
       context: .
@@ -31,7 +31,7 @@ services:
     container_name: icp-mlflow
     environment:
       BACKEND_STORE_URI: postgresql://mlflow:password@postgres:5432/mlflow
-      MLFLOW_HTTP_SERVER_ALLOWED_HOSTS: "mlflow,icp-mlflow,localhost,127.0.0.1,172.20.0.4,*"
+      MLFLOW_SERVER_ALLOWED_HOSTS: "mlflow,mlflow:*,localhost,localhost:*,127.0.0.1,127.0.0.1:*,0.0.0.0,0.0.0.0:*"
     ports:
       - "5000:5000"
     volumes:
@@ -40,10 +40,10 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      mlops-net:
-        ipv4_address: 172.20.0.10
+      - mlops-net
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
+      test:
+        ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -58,12 +58,44 @@ services:
     ports:
       - "8501:8501"
     environment:
-      MLFLOW_TRACKING_URI: http://172.20.0.10:5000
+      MLFLOW_TRACKING_URI: http://mlflow:5000
     volumes:
       - .:/app
       - mlflow-artifacts:/mlflow/artifacts
+    depends_on:
+      mlflow:
+        condition: service_healthy
     networks:
       - mlops-net
+
+  # FastAPI Model Serving (LK-10)
+  model-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.serving
+    # NO container_name — required for --scale
+    environment:
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      MODEL_NAME: ICP_Price_Model
+      MODEL_STAGE: Production
+    expose:
+      - "8000"
+    ports:
+      - "8000:8000"
+    volumes:
+      - mlflow-artifacts:/mlflow/artifacts
+    depends_on:
+      mlflow:
+        condition: service_healthy
+    networks:
+      - mlops-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
 
   # Init pipeline (train & register model)
   init:
@@ -72,7 +104,7 @@ services:
       dockerfile: Dockerfile
     container_name: icp-init
     environment:
-      MLFLOW_TRACKING_URI: http://172.20.0.10:5000
+      MLFLOW_TRACKING_URI: http://mlflow:5000
     volumes:
       - ./data:/app/data
       - mlflow-artifacts:/mlflow/artifacts
@@ -97,9 +129,6 @@ services:
 networks:
   mlops-net:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.20.0.0/24
 
 volumes:
   pgdata:

@@ -3,13 +3,23 @@ import streamlit as st
 from services.prediction_service import get_prediction_service
 
 
-def render_diagnostics_panel(label="Engineering Diagnostics"):
-    """Reusable diagnostics expander for model observability."""
-    with st.expander(f"🔍 {label}"):
-        st.markdown("**Model Contract & Inference Validation**")
+def render_diagnostics_panel(label="System Diagnostics"):
+    with st.expander(label, expanded=False):
+
+        st.caption(
+            "Observability panel for model validation, registry state, and inference diagnostics."
+        )
+
         service = get_prediction_service()
         debug_info = service.get_debug_info()
-        st.json(debug_info)
 
         if "critical_error" in debug_info:
-            st.error(f"System Alert: {debug_info['critical_error']}")
+            st.error(
+                f"Critical system issue detected: {debug_info['critical_error']}"
+            )
+        else:
+            st.success("Inference service operational.")
+
+        st.markdown("### Runtime Metadata")
+
+        st.json(debug_info)

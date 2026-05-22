@@ -4,11 +4,16 @@ import traceback
 import plotly.graph_objects as go
 import streamlit as st
 
-from components.charts import render_timeseries_analysis
 from components.layouts import render_footer
 from components.styles import apply_custom_styles
+from components.metrics import (
+    render_analytics_card,
+    render_kpi_card,
+    render_narrative_card,
+)
 from services.insight_service import InsightService
 from services.prediction_service import get_prediction_service
+from config.settings import PAGE_ICON
 from utils.data_loader import (
     get_latest_context,
     load_pipeline_metrics,
@@ -17,136 +22,232 @@ from utils.data_loader import (
 
 logger = logging.getLogger("forecasting")
 
-# --- PAGE CONFIG ---
+# ---------------------------------------------------
+# PAGE CONFIG
+# ---------------------------------------------------
+
+st.set_page_config(
+    page_title="Forecasting | ICP Intelligence",
+    page_icon=PAGE_ICON,
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 apply_custom_styles()
 
-# --- DATA LOADING ---
-with st.spinner("Mengambil data pasar terbaru..."):
-    df = load_processed_data()
-    metrics = load_pipeline_metrics()
+# ---------------------------------------------------
+# FORECAST CHART
+# ---------------------------------------------------
 
-latest_icp = df["icp_price"].iloc[-1] if not df.empty else 0.0
-latest_wti = df["wti_price"].iloc[-1] if not df.empty else 0.0
-features = get_latest_context(df)
-service = get_prediction_service()
-rmse = metrics.get("rmse", 3.6)
+def build_forecast_chart(df, pred_val, rmse):
+    """Historical trend with forecast point and confidence band."""
+    chart_df = df.tail(24).copy()
+    fig = go.Figure()
 
-pred_val = None
-model_meta = {}
-prediction_error = None
+    # Historical ICP
+    fig.add_trace(
+        go.Scatter(
+            x=chart_df.index,
+            y=chart_df["icp_price"],
+            mode="lines",
+            name="ICP Historis",
+            line=dict(color="#2563eb", width=2.5),
+            hovertemplate="ICP: $%{y:.2f}<extra></extra>",
+        )
+    )
 
-if features:
-    try:
-        with st.spinner("Menganalisis pola pasar dengan engine AI..."):
-            pred_val = service.predict(features)
-        with st.spinner("Sinkronisasi metadata model..."):
-            model_meta = service.get_model_metadata()
-    except Exception as e:
-        prediction_error = str(e)
-        logger.error(f"Forecasting engine error: {prediction_error}")
-        pred_val = None
-        model_meta = {}
-else:
-    prediction_error = "No features available for prediction"
-
-# --- PAGE HEADER ---
-st.title("Forecast Harga ICP")
-st.caption("Proyeksi harga ICP periode berikutnya berdasarkan kondisi pasar minyak dan pola historis.")
-
-# --- FORECAST CALCULATION ---
-direction = "Unknown"
-direction_desc = "Estimasi tidak tersedia"
-delta_pct = 0.0
-confidence_range = "N/A"
-
-if pred_val is not None and latest_icp and latest_icp > 0:
-    confidence_low = max(0, pred_val - rmse)
-    confidence_high = pred_val + rmse
-    confidence_range = f"${confidence_low:.2f} — ${confidence_high:.2f}"
-    delta_pct = ((pred_val / latest_icp) - 1) * 100
-
-    if pred_val > latest_icp * 1.01:
-        direction = "Bullish"
-        direction_desc = "Potensi kenaikan harga"
-    elif pred_val < latest_icp * 0.99:
-        direction = "Bearish"
-        direction_desc = "Potensi pelemahan harga"
-    else:
-        direction = "Stabil"
-        direction_desc = "Pergerakan relatif netral"
-
-# --- SECTION 1: EXECUTIVE FORECAST STATUS ---
-if prediction_error:
-    st.error(f"⚠️ Prediction Service Error: {prediction_error}")
-    st.info("Dashboard will display available data. Some metrics may show N/A.")
-elif pred_val is not None:
-    if direction == "Bullish":
-        st.success(f"Model memproyeksikan harga ICP berada di sekitar ${pred_val:.2f} dengan potensi kenaikan {delta_pct:+.2f}% dibanding kondisi saat ini.")
-    elif direction == "Bearish":
-        st.warning(f"Model mendeteksi potensi pelemahan harga ICP pada periode berikutnya ke sekitar ${pred_val:.2f}.")
-    else:
-        st.info("Pergerakan harga diperkirakan relatif stabil tanpa perubahan signifikan dalam jangka pendek.")
-else:
-    st.error("Model gagal memuat data prediksi. Silakan periksa koneksi MLflow.")
-
-# --- SECTION 2: FORECAST SNAPSHOT ---
-st.markdown("")
-st.subheader("Forecast Snapshot")
-snap1, snap2, snap3, snap4 = st.columns(4, gap="medium")
-with snap1:
-    st.metric(label="Predicted ICP", value=f"${pred_val:.2f}" if pred_val is not None else "N/A", delta=f"{delta_pct:+.2f}%" if pred_val is not None else None)
-with snap2:
-    st.metric(label="Current ICP", value=f"${latest_icp:.2f}")
-with snap3:
-    st.metric(label="Forecast Direction", value=direction)
-with snap4:
-    st.metric(label="Confidence Level", value="95%" if pred_val is not None else "N/A")
-
-st.markdown("")
-
-# --- SECTION 3: FORECAST INTERPRETATION ---
-col_left, col_right = st.columns([2, 1], gap="large")
-with col_left:
-    st.markdown("### Forecast Interpretation")
     if pred_val is not None:
-        st.markdown(f"Prediksi saat ini menunjukkan bahwa harga ICP berpotensi berada pada kisaran **{confidence_range}** dengan estimasi pusat di sekitar **${pred_val:.2f}**.")
-    else:
-        st.markdown("Interpretasi tidak tersedia karena kegagalan prediksi.")
-with col_right:
-    st.markdown("### Forecast Signal")
-    st.metric(label="Forecast Range", value=confidence_range)
+        conf_low = max(0, pred_val - rmse)
+        conf_high = pred_val + rmse
+        last_idx = chart_df.index[-1]
 
-st.divider()
+        # Confidence band
+        fig.add_trace(
+            go.Scatter(
+                x=[last_idx, last_idx],
+                y=[conf_high, conf_low],
+                mode="lines",
+                name="Confidence Band",
+                line=dict(color="rgba(245,158,11,0.3)", width=0),
+                fill="toself",
+                fillcolor="rgba(245,158,11,0.12)",
+                showlegend=True,
+                hovertemplate="Range: $%{y:.2f}<extra></extra>",
+            )
+        )
 
-# --- SECTION 4: HISTORICAL & FORECAST CHART ---
-st.subheader("Historical Forecast Analysis")
-render_timeseries_analysis(df)
+        # Forecast point
+        fig.add_trace(
+            go.Scatter(
+                x=[last_idx],
+                y=[pred_val],
+                mode="markers",
+                name="Forecast",
+                marker=dict(
+                    size=14,
+                    color="#f59e0b",
+                    line=dict(width=2, color="#ffffff"),
+                ),
+                hovertemplate="Forecast: $%{y:.2f}<extra></extra>",
+            )
+        )
 
-st.divider()
+    fig.update_layout(
+        template="plotly_white",
+        height=400,
+        margin=dict(l=10, r=10, t=10, b=10),
+        hovermode="x unified",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        legend=dict(
+            orientation="h",
+            y=1.1,
+            x=1,
+            xanchor="right",
+        ),
+        xaxis=dict(showgrid=False, zeroline=False),
+        yaxis=dict(
+            showgrid=True,
+            gridcolor="rgba(148,163,184,0.12)",
+            zeroline=False,
+            title="USD / BBL",
+        ),
+    )
+    return fig
 
-# --- SECTION 5: MODEL INSIGHTS ---
-st.subheader("Model Intelligence")
-intel_left, intel_right = st.columns([1.2, 1], gap="large")
-with intel_left:
-    st.markdown("#### Market Context")
-    st.write(f"Harga ICP saat ini masih bergerak searah dengan benchmark WTI global (${latest_wti:.2f}).")
-with intel_right:
-    st.markdown("#### Dominant Drivers")
-    if model_meta:
-        st.info(InsightService.get_dominance_insight(model_meta))
-    else:
-        st.warning("Metadata model tidak tersedia.")
+# ---------------------------------------------------
+# EXECUTION
+# ---------------------------------------------------
 
-st.divider()
+def run_forecasting():
+    try:
+        with st.spinner("Analyzing forecast data..."):
+            df = load_processed_data()
+            metrics = load_pipeline_metrics()
 
-# --- SECTION 6: FINAL SIGNALS ---
-signal1, signal2, signal3 = st.columns(3, gap="medium")
-with signal1:
-    st.success(f"### {direction}\n\n{direction_desc}")
-with signal2:
-    st.info(f"### {delta_pct:+.2f}%\n\nEstimasi perubahan.")
-with signal3:
-    st.warning(f"### RMSE {rmse:.2f}\n\nError historis model.")
+        latest_icp = df["icp_price"].iloc[-1] if not df.empty else 0.0
+        features = get_latest_context(df)
+        service = get_prediction_service()
+        rmse = metrics.get("rmse", 3.6)
 
-render_footer()
+        pred_val = None
+        prediction_error = None
+        if features:
+            try:
+                pred_val = service.predict(features)
+            except Exception as e:
+                prediction_error = str(e)
 
+        # Metrics calc
+        direction = "Unknown"
+        direction_desc = "Estimasi tidak tersedia"
+        delta_pct = 0.0
+        confidence_range = "N/A"
+
+        if pred_val and latest_icp > 0:
+            conf_low = max(0, pred_val - rmse)
+            conf_high = pred_val + rmse
+            confidence_range = f"${conf_low:.2f} - ${conf_high:.2f}"
+            delta_pct = ((pred_val / latest_icp) - 1) * 100
+
+            if pred_val > latest_icp * 1.01:
+                direction, direction_desc = "Bullish", "Potensi kenaikan harga"
+            elif pred_val < latest_icp * 0.99:
+                direction, direction_desc = "Bearish", "Potensi pelemahan harga"
+            else:
+                direction, direction_desc = "Stabil", "Relatif netral"
+
+        st.title("Forecast Harga ICP")
+        st.caption("Proyeksi harga dan analisis prediktif untuk periode settlement berikutnya")
+        
+        if prediction_error:
+            st.error(f"Prediction Error: {prediction_error}")
+
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+
+        # SECTION 1: SNAPSHOT
+        s1, s2, s3, s4 = st.columns(4)
+        with s1:
+            render_kpi_card(
+                "Predicted ICP",
+                f"${pred_val:.2f}" if pred_val else "N/A",
+                delta=f"{delta_pct:+.2f}%" if pred_val else None,
+                detail="Estimasi harga ICP periode berikutnya.",
+                accent="blue"
+            )
+        with s2:
+            render_analytics_card(
+                "Forecast Direction",
+                direction,
+                subtitle=direction_desc,
+                accent="emerald" if direction == "Bullish" else "amber" if direction == "Bearish" else "slate"
+            )
+        with s3:
+            render_analytics_card(
+                "Confidence Range",
+                confidence_range,
+                subtitle=f"Rentang harga berdasarkan error historis (RMSE: {rmse:.2f}).",
+                accent="amber"
+            )
+        with s4:
+            render_analytics_card(
+                "Model Accuracy",
+                f"RMSE {rmse:.2f}",
+                subtitle="Rata-rata deviasi prediksi terhadap harga aktual.",
+                accent="blue"
+            )
+
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+        # SECTION 2: VISUALIZATION
+        st.markdown("## Forecast Visualization")
+        st.caption("Tren harga historis dengan proyeksi dan confidence band")
+        fig = build_forecast_chart(df, pred_val, rmse)
+        st.plotly_chart(fig, use_container_width=True, config={"displayModeBar": False})
+
+        st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+        # SECTION 3: INTERPRETATION
+        render_narrative_card(
+            "Forecast Interpretation",
+            InsightService.generate_forecast_interpretation(df, pred_val, rmse),
+            accent="blue"
+        )
+
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+        # SECTION 4: SCENARIOS
+        st.markdown("## Scenario Analysis")
+        st.caption("Analisis variasi kondisi pasar")
+        if pred_val:
+            scenarios = InsightService.generate_scenario_cards(pred_val, rmse)
+            sc1, sc2, sc3 = st.columns(3)
+            with sc1:
+                render_analytics_card(scenarios["optimistic"]["label"], f"${scenarios['optimistic']['price']:.2f}", subtitle=scenarios["optimistic"]["desc"], accent="emerald")
+            with sc2:
+                render_analytics_card(scenarios["base"]["label"], f"${scenarios['base']['price']:.2f}", subtitle=scenarios["base"]["desc"], accent="blue")
+            with sc3:
+                render_analytics_card(scenarios["pessimistic"]["label"], f"${scenarios['pessimistic']['price']:.2f}", subtitle=scenarios["pessimistic"]["desc"], accent="amber")
+
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+
+        # SECTION 5: OUTLOOK
+        st.markdown("## Directional Outlook")
+        st.caption("Analisis arah harga dan risiko jangka pendek")
+        render_narrative_card(
+            "Outlook Jangka Pendek",
+            InsightService.generate_directional_outlook(df, pred_val, direction if direction != "Stabil" else "Neutral"),
+            accent="slate"
+        )
+
+        st.markdown("<div style='height:4px'></div>", unsafe_allow_html=True)
+        render_footer()
+
+    except Exception as e:
+        traceback.print_exc()
+        st.error(f"Forecasting page failed: {e}")
+
+if __name__ == "__main__":
+    run_forecasting()
+else:
+    run_forecasting()

@@ -5,13 +5,21 @@ import streamlit as st
 
 from components.layouts import render_footer
 from components.styles import apply_custom_styles
+from config.settings import PAGE_ICON
 from services.insight_service import InsightService
 from services.prediction_service import get_prediction_service
 from utils.data_loader import load_processed_data
 
+# Page Configuration
+st.set_page_config(
+    page_title="Price Simulator | ICP Intelligence",
+    page_icon=PAGE_ICON,
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
 logger = logging.getLogger("predict_price")
 
-# --- Page Config ---
 apply_custom_styles()
 
 # --- Data Loading ---
@@ -195,9 +203,27 @@ pengaruh signifikan terhadap arah harga ICP domestik.
 
             with intel_left:
                 st.markdown("##### Market Sensitivity")
+
                 sensitivity = service.get_feature_sensitivity(payload)
+
                 if sensitivity:
-                    st.write(InsightService.get_simulator_insight(sensitivity, pred_val, baseline))
+
+                    top_features = sorted(
+                        sensitivity.items(),
+                        key=lambda x: abs(x[1]),
+                        reverse=True
+                    )[:3]
+
+                    narrative = (
+                        "Perubahan harga ICP saat ini paling sensitif terhadap "
+                        f"{top_features[0][0]}, diikuti oleh "
+                        f"{top_features[1][0]} dan {top_features[2][0]}. "
+                        "Hal ini menunjukkan bahwa faktor eksternal global "
+                        "masih menjadi driver utama dalam simulasi model."
+                    )
+
+                    st.write(narrative)
+
                 else:
                     st.warning("Sensitivity analysis unavailable")
 
