@@ -400,7 +400,7 @@ Gunakan perintah berikut untuk memastikan seluruh container berjalan dengan baik
 docker compose ps
 ```
 
-Container yang berjalan dengan benar akan memiliki status `running` atau `healthy`.
+Container yang berjalan dengan benar akan memiliki status `running` or `healthy`.
 
 ---
 
@@ -423,59 +423,104 @@ Docker Compose berhasil mengintegrasikan layanan Streamlit, MLflow, dan PostgreS
 
 ## 7. [LK-10] FastAPI Model Serving & Horizontal Scaling
 
-### 7.1 Arsitektur
+### 7.1 Mengakses Endpoint API
 
-```
-Streamlit (:8501) → FastAPI model-api (:8000) → MLflow Registry → PostgreSQL
-```
-
-Model dimuat dari `models:/ICP_Price_Model/Production` via `mlflow.pyfunc.load_model()` saat container startup.
-
-### 7.2 Endpoints
-
-| Method | Path | Deskripsi |
-|--------|------|-----------|
-| GET | `/health` | Health check + model info |
-| POST | `/predict` | Prediksi harga ICP |
-| GET | `/docs` | Swagger UI |
-
-### 7.3 Contoh curl
+Pastikan seluruh layanan sudah berjalan:
 
 ```bash
-# Health check
+docker compose up -d
+```
+
+Endpoint yang tersedia:
+
+| Method | Endpoint | Fungsi |
+|---------|-----------|---------|
+| GET | `/health` | Memeriksa status layanan model serving |
+| POST | `/predict` | Mengirim data inferensi untuk prediksi harga ICP |
+| GET | `/docs` | Swagger API documentation |
+
+Base URL:
+
+```text
+http://localhost:8000
+```
+
+Contoh pengecekan health endpoint:
+
+```bash
 curl http://localhost:8000/health
-
-# Prediction
-curl -X POST http://localhost:8000/predict \
-  -H "Content-Type: application/json" \
-  -d '{"lag_1":70.0,"lag_3":68.0,"lag_6":65.0,"rolling_mean_3":69.0,"wti_price":72.0,"wti_lag_1":71.0,"wti_rolling_mean_3":71.5}'
 ```
 
-### 7.4 Horizontal Scaling
+Contoh request prediksi:
 
 ```bash
-# Scale to 3 replicas
-docker compose up -d --scale model-api=3
-
-# Verify replicas
-docker compose ps
-docker ps --filter "name=model-api"
+curl -X POST http://localhost:8000/predict \
+-H "Content-Type: application/json" \
+-d '{
+"wti_price":72,
+"wti_lag_1":71,
+"wti_rolling_mean_3":71.5,
+"lag_1":70,
+"lag_3":68,
+"lag_6":65,
+"rolling_mean_3":69
+}'
 ```
 
-### 7.5 Postman
+Alternatif pengujian menggunakan Postman:
 
-- **GET** `http://localhost:8000/health`
-- **POST** `http://localhost:8000/predict` — Body (JSON):
+1. Buat request `GET`
+```
+http://localhost:8000/health
+```
+
+2. Buat request `POST`
+```
+http://localhost:8000/predict
+```
+
+Body → Raw → JSON:
 
 ```json
 {
-  "lag_1": 70.0,
-  "lag_3": 68.0,
-  "lag_6": 65.0,
-  "rolling_mean_3": 69.0,
-  "wti_price": 72.0,
-  "wti_lag_1": 71.0,
-  "wti_rolling_mean_3": 71.5
+  "wti_price":72,
+  "wti_lag_1":71,
+  "wti_rolling_mean_3":71.5,
+  "lag_1":70,
+  "lag_3":68,
+  "lag_6":65,
+  "rolling_mean_3":69
 }
 ```
-
+
+---
+
+### 7.2 Menambah Jumlah Replika Secara Dinamis
+
+Melakukan horizontal scaling layanan model serving:
+
+```bash
+docker compose up -d --scale model-api=3
+```
+
+Memverifikasi replika yang berjalan:
+
+```bash
+docker compose ps
+```
+
+Output akan menunjukkan beberapa instance container:
+
+```
+model-api-1
+model-api-2
+model-api-3
+```
+
+Menambah replika lain secara dinamis:
+
+```bash
+docker compose up -d --scale model-api=5
+```
+
+Docker Compose akan membuat instance tambahan tanpa mengubah layanan lain yang sedang berjalan.

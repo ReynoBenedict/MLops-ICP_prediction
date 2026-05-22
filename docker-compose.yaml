@@ -73,28 +73,33 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.serving
-    # NO container_name — required for --scale
+
+    # NO container_name — required for horizontal scaling
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MODEL_NAME: ICP_Price_Model
       MODEL_STAGE: Production
+
     expose:
       - "8000"
-    ports:
-      - "8000:8000"
+
     volumes:
       - mlflow-artifacts:/mlflow/artifacts
+
     depends_on:
       mlflow:
         condition: service_healthy
+
     networks:
       - mlops-net
+
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 60s
+
     restart: unless-stopped
 
   # Init pipeline (train & register model)
