@@ -5,427 +5,302 @@ def apply_custom_styles():
     st.markdown(
         """
         <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Manrope:wght@600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+        :root {
+            --bg: #f7f9fb;
+            --panel: #ffffff;
+            --panel-soft: #f2f4f6;
+            --border: #c6c6cd;
+            --border-soft: #e0e3e5;
+            --text: #191c1e;
+            --muted: #45464d;
+            --blue: #0058be;
+            --green: #16a34a;
+            --amber: #f59e0b;
+            --red: #ba1a1a;
+            --black: #000000;
+        }
 
         .stApp {
-            background:
-                radial-gradient(circle at top left,
-                rgba(37,99,235,0.04),
-                transparent 24%),
-
-                radial-gradient(circle at bottom right,
-                rgba(14,165,233,0.03),
-                transparent 20%),
-
-                #f8fafc;
-
-            color: #0f172a;
+            background: var(--bg) !important;
+            color: var(--text) !important;
+            font-family: Inter, sans-serif !important;
         }
 
         .main .block-container {
-            max-width: 1720px !important;
-            width: 100% !important;
-
-            padding-top: 0.9rem !important;
-            padding-bottom: 0.7rem !important;
-
-            padding-left: 1.4rem !important;
-            padding-right: 1.4rem !important;
-
-            margin: 0 auto !important;
+            max-width: 1440px !important;
+            padding: 1.35rem 1.7rem 0.8rem 1.7rem !important;
         }
 
         /* SIDEBAR */
-
         section[data-testid="stSidebar"] {
-            background:
-                linear-gradient(
-                    180deg,
-                    #ffffff,
-                    #f8fafc
-                );
-
-            border-right: 1px solid rgba(148,163,184,0.14);
-
-            min-width: 230px !important;
+            background: #f2f4f6 !important;
+            border-right: 1px solid var(--border) !important;
+            min-width: 260px !important;
         }
 
         section[data-testid="stSidebar"] * {
-            color: #1e293b !important;
+            color: var(--text) !important;
+        }
+
+        section[data-testid="stSidebar"] p,
+        section[data-testid="stSidebar"] label,
+        section[data-testid="stSidebar"] div[data-testid="stMarkdownContainer"] {
+            font-family: Inter, sans-serif !important;
+        }
+
+        span[data-testid="stIconMaterial"],
+        [data-testid="stIconMaterial"],
+        .material-symbols-rounded,
+        .material-symbols-outlined {
+            font-family: "Material Symbols Rounded" !important;
+        }
+
+        section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
+            font-size: 0.9rem !important;
+            font-weight: 600 !important;
         }
 
         /* TYPOGRAPHY */
-
         h1 {
-            font-size: 2.3rem !important;
-            font-weight: 850 !important;
-
-            color: #0f172a !important;
-
-            letter-spacing: -0.05em;
-
+            font-family: Manrope, Inter, sans-serif !important;
+            font-size: 1.9rem !important;
+            font-weight: 800 !important;
+            letter-spacing: -0.035em !important;
+            color: var(--text) !important;
             margin-bottom: 0.15rem !important;
         }
 
         h2 {
-            font-size: 1.02rem !important;
-            font-weight: 700 !important;
-
-            color: #0f172a !important;
-
-            margin-top: 0.2rem !important;
-            margin-bottom: 0.5rem !important;
+            font-family: Manrope, Inter, sans-serif !important;
+            font-size: 1.35rem !important;
+            font-weight: 800 !important;
+            letter-spacing: -0.025em !important;
+            color: var(--text) !important;
+            margin-top: 1.15rem !important;
+            margin-bottom: 0.45rem !important;
         }
 
         h3 {
-            font-size: 0.95rem !important;
-            font-weight: 650 !important;
-
-            color: #334155 !important;
-
-            margin-bottom: 0.25rem !important;
-        }
-
-        p,
-        label,
-        .stCaption,
-        .stMarkdown,
-        .stText {
-            color: #64748b !important;
-            line-height: 1.6;
-            font-size: 0.92rem;
-        }
-
-        /* KPI CARDS */
-
-        .analytics-card,
-        div[data-testid="stMetric"] {
-
-            background:
-                linear-gradient(
-                    180deg,
-                    rgba(255,255,255,0.96),
-                    rgba(248,250,252,0.98)
-                );
-
-            border: 1px solid rgba(148,163,184,0.14);
-
-            border-radius: 18px;
-
-            padding: 1rem 1.1rem;
-
-            box-shadow:
-                0 1px 2px rgba(15,23,42,0.03),
-                0 10px 30px rgba(15,23,42,0.03);
-
-            transition: all 0.22s ease;
-
-            position: relative;
-
-            overflow: hidden;
-        }
-
-        .analytics-card:hover,
-        div[data-testid="stMetric"]:hover {
-
-            transform: translateY(-2px);
-
-            border-color: rgba(59,130,246,0.18);
-
-            box-shadow:
-                0 12px 35px rgba(15,23,42,0.06);
-        }
-
-        /* TOP ACCENT */
-
-        .analytics-card::before,
-        div[data-testid="stMetric"]::before {
-
-            content: "";
-
-            position: absolute;
-
-            top: 0;
-            left: 0;
-
-            width: 100%;
-            height: 3px;
-
-            background:
-                linear-gradient(
-                    90deg,
-                    #2563eb,
-                    #38bdf8
-                );
-        }
-
-        /* METRIC */
-
-        .metric-label,
-        div[data-testid="stMetricLabel"] > div {
-
-            color: #64748b !important;
-
-            font-size: 0.72rem !important;
-
+            font-family: Inter, sans-serif !important;
+            font-size: 1rem !important;
             font-weight: 700 !important;
-
-            text-transform: uppercase;
-
-            letter-spacing: 0.07em;
-
-            margin-bottom: 0.55rem;
-        }
-
-        .metric-value,
-        div[data-testid="stMetricValue"] {
-
-            color: #0f172a !important;
-
-            font-size: 1.9rem !important;
-
-            font-weight: 850 !important;
-
-            line-height: 1;
-
-            letter-spacing: -0.04em;
-        }
-
-        .metric-subtitle {
-            color: #94a3b8;
-            font-size: 0.72rem;
-            margin-top: 0.45rem;
-        }
-
-        /* RANGE */
-
-        .confidence-range {
-
-            font-size: 1.45rem;
-
-            font-weight: 800;
-
-            letter-spacing: -0.03em;
-
-            color: #0f172a;
-
-            line-height: 1.1;
-        }
-
-        /* CHART */
-
-        .stPlotlyChart {
-
-            background:
-                linear-gradient(
-                    180deg,
-                    rgba(255,255,255,0.94),
-                    rgba(248,250,252,0.98)
-                );
-
-            border: 1px solid rgba(148,163,184,0.14);
-
-            border-radius: 22px;
-
-            padding: 0.6rem;
-
-            box-shadow:
-                0 6px 22px rgba(15,23,42,0.04);
-        }
-
-        /* CONTAINERS */
-
-        details,
-        [data-testid="stVerticalBlockBorderWrapper"] {
-
-            background:
-                linear-gradient(
-                    180deg,
-                    rgba(255,255,255,0.85),
-                    rgba(248,250,252,0.95)
-                );
-
-            border: 1px solid rgba(148,163,184,0.12);
-
-            border-radius: 20px;
-
-            box-shadow:
-                0 4px 20px rgba(15,23,42,0.03);
-        }
-
-        /* BUTTON */
-
-        .stButton button {
-
-            width: 100%;
-
-            border-radius: 12px;
-
-            padding: 0.58rem 1rem;
-
-            background:
-                linear-gradient(
-                    135deg,
-                    #0f172a,
-                    #1e293b
-                );
-
-            color: white;
-
-            border: none;
-
-            font-weight: 600;
-
-            transition: all 0.18s ease;
-        }
-
-        .stButton button:hover {
-
-            transform: translateY(-1px);
-
-            box-shadow:
-                0 10px 25px rgba(15,23,42,0.12);
-        }
-
-        /* INPUT */
-
-        .stTextInput input,
-        .stNumberInput input,
-        .stSelectbox div[data-baseweb="select"] {
-
-            background: rgba(255,255,255,0.92) !important;
-
-            border: 1px solid rgba(148,163,184,0.22) !important;
-
-            border-radius: 12px !important;
-        }
-
-        /* SPACING */
-
-        .element-container {
+            color: var(--text) !important;
             margin-bottom: 0.35rem !important;
         }
 
-        .stMarkdown {
-            margin-bottom: 0.15rem !important;
+        p, label, .stCaption, .stMarkdown, .stText {
+            color: var(--muted) !important;
+            font-size: 0.9rem !important;
+            line-height: 1.55 !important;
         }
 
-        [data-testid="column"] {
-            padding-top: 0rem !important;
+        /* CARD */
+        .analytics-card,
+        .narrative-card,
+        div[data-testid="stMetric"],
+        [data-testid="stVerticalBlockBorderWrapper"] {
+            background: var(--panel) !important;
+            border: 1px solid var(--border-soft) !important;
+            border-radius: 0.25rem !important;
+            box-shadow: none !important;
+            position: relative !important;
+            overflow: hidden !important;
         }
 
-        hr {
-            border: none;
-            height: 1px;
-
-            background:
-                rgba(148,163,184,0.16);
-
-            margin-top: 0.9rem;
-            margin-bottom: 0.9rem;
+        .analytics-card,
+        .narrative-card,
+        div[data-testid="stMetric"] {
+            padding: 1.05rem 1.15rem !important;
+            min-height: 112px !important;
         }
 
-        /* SUBTEXT */
-
-        .section-subtext {
-            color: #64748b !important;
-            font-size: 0.88rem !important;
-            margin-top: -0.5rem !important;
-            margin-bottom: 1.2rem !important;
-            font-weight: 500;
+        .analytics-card::before,
+        .narrative-card::before,
+        div[data-testid="stMetric"]::before {
+            content: "" !important;
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 3px !important;
+            background: var(--blue) !important;
         }
-
-        /* ACCENTS */
 
         .analytics-card.accent-blue::before,
-        .narrative-card.accent-blue::before { background: linear-gradient(90deg, #2563eb, #38bdf8); }
+        .narrative-card.accent-blue::before { background: var(--blue) !important; }
 
         .analytics-card.accent-amber::before,
-        .narrative-card.accent-amber::before { background: linear-gradient(90deg, #f59e0b, #fbbf24); }
+        .narrative-card.accent-amber::before { background: var(--amber) !important; }
 
         .analytics-card.accent-emerald::before,
-        .narrative-card.accent-emerald::before { background: linear-gradient(90deg, #10b981, #34d399); }
+        .narrative-card.accent-emerald::before { background: var(--green) !important; }
 
         .analytics-card.accent-slate::before,
-        .narrative-card.accent-slate::before { background: linear-gradient(90deg, #475569, #94a3b8); }
+        .narrative-card.accent-slate::before { background: #76777d !important; }
 
-        /* NARRATIVE CARD */
+        .analytics-card.accent-red::before,
+        .narrative-card.accent-red::before { background: var(--red) !important; }
 
-        .narrative-card {
-            background:
-                linear-gradient(
-                    180deg,
-                    rgba(255,255,255,0.96),
-                    rgba(248,250,252,0.98)
-                );
-
-            border: 1px solid rgba(148,163,184,0.14);
-            border-radius: 18px;
-            padding: 1.4rem 1.5rem;
-
-            box-shadow:
-                0 1px 2px rgba(15,23,42,0.03),
-                0 10px 30px rgba(15,23,42,0.03);
-
-            transition: all 0.22s ease;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .narrative-card::before {
-            content: "";
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 3px;
-        }
-
-        .narrative-card:hover {
-            transform: translateY(-2px);
-            border-color: rgba(59,130,246,0.18);
-            box-shadow: 0 12px 35px rgba(15,23,42,0.06);
-        }
-
+        /* KPI TEXT */
+        .metric-label,
+        div[data-testid="stMetricLabel"] > div,
         .narrative-title {
-            color: #64748b;
-            font-size: 0.72rem;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.07em;
-            margin-bottom: 0.85rem;
+            font-family: "JetBrains Mono", monospace !important;
+            font-size: 0.76rem !important;
+            font-weight: 700 !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.15em !important;
+            color: var(--text) !important;
+            margin-bottom: 0.42rem !important;
         }
 
-        .narrative-body {
-            color: #334155;
+        .metric-value,
+        .analytics-main,
+        div[data-testid="stMetricValue"] {
+            font-family: Manrope, Inter, sans-serif !important;
+            font-size: 1.65rem !important;
+            font-weight: 800 !important;
+            color: var(--black) !important;
+            letter-spacing: -0.035em !important;
+            line-height: 1.1 !important;
+            margin-bottom: 0.35rem !important;
+        }
+
+        .metric-subtitle {
+            color: var(--muted) !important;
+            font-size: 0.9rem !important;
+            line-height: 1.5 !important;
+            margin-top: 0.25rem !important;
+        }
+
+        .metric-delta {
+            font-family: "JetBrains Mono", monospace !important;
+            font-size: 0.78rem !important;
+            font-weight: 700 !important;
+            margin-top: 0.25rem !important;
+            margin-bottom: 0.25rem !important;
+        }
+
+        /* NARRATIVE */
+        .narrative-card {
+            min-height: auto !important;
+            padding: 1.25rem 1.35rem !important;
         }
 
         .narrative-paragraph {
-            color: #475569;
-            font-size: 0.88rem;
-            line-height: 1.8;
-            margin: 0 0 0.75rem 0;
+            color: var(--text) !important;
+            font-size: 0.93rem !important;
+            line-height: 1.7 !important;
+            margin: 0 0 0.75rem 0 !important;
         }
 
         .narrative-paragraph:last-child {
-            margin-bottom: 0;
+            margin-bottom: 0 !important;
         }
 
-        /* SCROLLBAR */
+        /* CHART */
+        .stPlotlyChart {
+            background: var(--panel) !important;
+            border: 1px solid var(--border) !important;
+            border-radius: 0.25rem !important;
+            padding: 0.8rem !important;
+            box-shadow: none !important;
+        }
+
+        /* ALERTS */
+        div[data-testid="stAlert"] {
+            border-radius: 0.25rem !important;
+            border: 1px solid var(--border-soft) !important;
+            box-shadow: none !important;
+        }
+
+        /* BUTTON */
+        .stButton button {
+            width: 100% !important;
+            border-radius: 0.2rem !important;
+            border: 1px solid var(--black) !important;
+            background: var(--black) !important;
+            color: #ffffff !important;
+            font-family: Inter, sans-serif !important;
+            font-size: 0.85rem !important;
+            font-weight: 700 !important;
+            padding: 0.65rem 1rem !important;
+            box-shadow: none !important;
+        }
+
+        .stButton button:hover {
+            background: var(--blue) !important;
+            border-color: var(--blue) !important;
+            color: #ffffff !important;
+        }
+
+        /* INPUTS */
+        .stTextInput input,
+        .stNumberInput input,
+        .stSelectbox div[data-baseweb="select"],
+        textarea {
+            background: var(--panel-soft) !important;
+            border: 1px solid var(--border) !important;
+            border-radius: 0.2rem !important;
+            font-family: "JetBrains Mono", monospace !important;
+            color: var(--text) !important;
+        }
+
+        hr {
+            border: none !important;
+            height: 1px !important;
+            background: var(--border) !important;
+            margin: 1rem 0 !important;
+        }
+
+        .element-container {
+            margin-bottom: 0.5rem !important;
+        }
+
+        [data-testid="column"] {
+            padding-top: 0 !important;
+        }
+
+        .section-subtext {
+            color: var(--muted) !important;
+            font-size: 0.9rem !important;
+            margin-top: -0.35rem !important;
+            margin-bottom: 1.1rem !important;
+            font-weight: 400 !important;
+        }
+
+        details {
+            background: var(--panel) !important;
+            border: 1px solid var(--border) !important;
+            border-radius: 0.25rem !important;
+            box-shadow: none !important;
+        }
+
+        details summary {
+            font-family: "JetBrains Mono", monospace !important;
+            font-size: 0.78rem !important;
+            text-transform: uppercase !important;
+            letter-spacing: 0.12em !important;
+        }
+
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
 
         ::-webkit-scrollbar {
-            width: 5px;
-            height: 5px;
+            width: 6px;
+            height: 6px;
         }
 
         ::-webkit-scrollbar-thumb {
-            background: #cbd5e1;
+            background: #b8bcc2;
             border-radius: 999px;
         }
 
         ::-webkit-scrollbar-track {
             background: transparent;
         }
-
         </style>
         """,
         unsafe_allow_html=True,

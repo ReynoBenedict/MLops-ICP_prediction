@@ -73,13 +73,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.serving
-
-    # NO container_name — required for horizontal scaling
+# container_name tidak digunakan agar service support horizontal scaling.
     environment:
       MLFLOW_TRACKING_URI: http://mlflow:5000
       MODEL_NAME: ICP_Price_Model
       MODEL_STAGE: Production
 
+# Port digunakan untuk pengujian lokal menggunakan curl.
+# Saat horizontal scaling dijalankan, gunakan expose saja karena beberapa replica tidak dapat menggunakan host port yang sama.
     expose:
       - "8000"
 
@@ -130,6 +131,50 @@ services:
     profiles:
       - init
 
+  #  Observability Stack (LK-11) 
+  # Prometheus — metrics collection
+  prometheus:
+    image: prom/prometheus:v2.51.2
+    container_name: icp-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    depends_on:
+      - model-api
+    networks:
+      - mlops-net
+    restart: unless-stopped
+
+  # Grafana — visualization & dashboards
+  grafana:
+    image: grafana/grafana:10.4.2
+    container_name: icp-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/icp_dashboard.json
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    networks:
+      - mlops-net
+    restart: unless-stopped
+
 
 networks:
   mlops-net:
@@ -138,3 +183,5 @@ networks:
 volumes:
   pgdata:
   mlflow-artifacts:
+  prometheus_data:
+  grafana_data:

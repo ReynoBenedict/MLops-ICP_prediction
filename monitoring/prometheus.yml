@@ -1,0 +1,33 @@
+global:
+  scrape_interval:     5s   # Interval pengambilan metrics dari target
+  evaluation_interval: 5s   # Interval evaluasi rule Prometheus
+  scrape_timeout:      4s   # Batas waktu maksimal proses scraping
+
+  external_labels:
+    environment: 'production'
+    project: 'icp-intelligence-platform'
+
+# Scrape configurations 
+scrape_configs:
+
+# Endpoint monitoring FastAPI untuk proses scraping metrics oleh Prometheus.
+# dns_sd_configs digunakan agar Prometheus dapat mendeteksi seluruh replica model-api saat horizontal scaling dijalankan.
+  - job_name: 'model-api'
+    dns_sd_configs:
+      - names: ['model-api']
+        type: 'A'
+        port: 8000
+# Konfigurasi tambahan untuk merapikan label instance pada dashboard Grafana
+      - source_labels: [__meta_dns_name]
+        target_label: service
+        replacement: 'model-api'
+      - source_labels: [__address__]
+        target_label: instance
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+          component: 'monitoring'

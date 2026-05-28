@@ -18,6 +18,21 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
+# Observability — LK-11
+# ---------------------------------------------------------------------------
+from prometheus_client import Histogram
+from prometheus_fastapi_instrumentator import Instrumentator
+
+# Custom histogram: records each prediction value.
+# Bucket boundaries cover the realistic ICP price range (0–200 USD/barrel).
+# Large distribution shifts in Grafana indicate possible data drift / model decay.
+ICP_PREDICTION_HISTOGRAM = Histogram(
+    "icp_prediction_value_usd",
+    "Distribution of ICP predicted prices (USD/barrel)",
+    buckets=[20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120, 140, 160, 200],
+)
+
+# ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
 MLFLOW_TRACKING_URI = os.getenv("MLFLOW_TRACKING_URI", "http://mlflow:5000")
@@ -127,6 +142,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Wire up Prometheus instrumentation — exposes /metrics automatically.
+# Instruments: http_request_duration_seconds, http_requests_total, etc.
+Instrumentator().instrument(app).expose(app)
+
 
 # ---------------------------------------------------------------------------
 # Pydantic Schemas
@@ -195,6 +214,8 @@ async def predict(request: PredictRequest):
         input_df = pd.DataFrame([features_dict])[_feature_names]
         raw = _model.predict(input_df)
         prediction = float(raw[0])
+        # Record prediction value for drift monitoring (LK-11)
+        ICP_PREDICTION_HISTOGRAM.observe(prediction)
     except Exception as exc:
         logger.error("Prediction failed: %s", exc)
         raise HTTPException(status_code=500, detail=f"Prediction error: {exc}")

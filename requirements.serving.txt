@@ -19,3 +19,6 @@ psycopg2-binary>=2.9.0
 
 # Network
 requests>=2.31.0
+
+# Observability — Prometheus metrics (LK-11)
+prometheus-fastapi-instrumentator>=6.1.0,<7.0.0
