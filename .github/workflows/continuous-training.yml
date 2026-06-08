@@ -138,20 +138,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # Simulasi data drift jika trigger dipilih
+      # Persiapan data
+      - name: "[1/4] Prepare data"
+        run: |
+          set -e
+          python -m src.data_processing.prepare_data
+
+      # Simulasi data drift jika trigger dipilih (harus setelah prepare_data)
       - name: "Simulasi data drift (Skenario B)"
         if: ${{ github.event.inputs.trigger_reason == 'data_drift' }}
         run: |
           set -e
           echo "[INFO] Trigger: data_drift — menjalankan simulasi drift..."
           python scripts/simulate_drift_trigger.py
-          echo "[OK] Simulasi drift selesai. ct_trigger_event.json diperbarui."
-
-      # Persiapan data
-      - name: "[1/4] Prepare data"
-        run: |
-          set -e
-          python -m src.data_processing.prepare_data
+          echo "[OK] Simulasi drift selesai."
 
       # Training ulang dan registrasi model
       - name: "[2/4] Train models"
