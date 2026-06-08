@@ -138,6 +138,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      # Ambil data WTI terbaru sebelum prepare_data (wti.csv tidak ada di Git)
+      - name: "Fetch WTI data"
+        run: |
+          set -e
+          python -m src.data_ingestion.fetch_wti
+          echo "[OK] wti.csv tersedia di data/raw/"
+
       # Persiapan data
       - name: "[1/4] Prepare data"
         run: |

@@ -118,6 +118,8 @@ services:
       - mlops-net
     command: >
       sh -c "
+        echo '=== Fetching WTI data ===' &&
+        python -m src.data_ingestion.fetch_wti &&
         echo '=== Preparing data ===' &&
         python -m src.data_processing.prepare_data &&
         echo '=== Training models ===' &&
