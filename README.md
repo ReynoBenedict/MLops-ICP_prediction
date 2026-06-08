@@ -524,3 +524,5 @@ docker compose up -d --scale model-api=5
 ```
 
 Docker Compose akan membuat instance tambahan tanpa mengubah layanan lain yang sedang berjalan.
+
+---

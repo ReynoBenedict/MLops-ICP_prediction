@@ -5,15 +5,15 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from components.layouts import render_footer
-from components.styles import apply_custom_styles
 from components.metrics import (
     render_analytics_card,
     render_kpi_card,
     render_narrative_card,
 )
+from components.styles import apply_custom_styles
+from config.settings import PAGE_ICON
 from services.insight_service import InsightService
 from services.prediction_service import get_prediction_service
-from config.settings import PAGE_ICON
 from utils.data_loader import (
     get_latest_context,
     load_pipeline_metrics,
@@ -159,7 +159,7 @@ def run_forecasting():
 
         st.title("Forecast Harga ICP")
         st.caption("Proyeksi harga dan analisis prediktif untuk periode settlement berikutnya")
-        
+
         if prediction_error:
             st.error(f"Prediction Error: {prediction_error}")
 

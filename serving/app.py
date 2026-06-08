@@ -15,13 +15,13 @@ import mlflow
 import mlflow.pyfunc
 import pandas as pd
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Observability — LK-11
 # ---------------------------------------------------------------------------
 from prometheus_client import Histogram
 from prometheus_fastapi_instrumentator import Instrumentator
+from pydantic import BaseModel, Field
 
 # Custom histogram: records each prediction value.
 # Bucket boundaries cover the realistic ICP price range (0–200 USD/barrel).

@@ -1,0 +1,287 @@
+# ============================================================
+# LK-12 Continuous Training (CT) Workflow
+# ICP Intelligence Platform — MLOps
+# ============================================================
+#
+# PURPOSE:
+#   This workflow handles ONLY Continuous Training (LK-12).
+#   Normal CI (lint, tests, smoke test) is handled by ci.yml.
+#   CT is intentionally separated so CI stays fast and stable,
+#   while retraining (slow, resource-intensive) runs independently.
+#
+# TRIGGERS (LK-12 Requirements):
+#   Scenario A — Performance-based (manual workflow_dispatch with
+#                trigger_reason=performance_degradation)
+#                Simulates: Grafana/Prometheus alert fires when
+#                model RMSE in production exceeds threshold (>= 10.0).
+#                The alert webhook would call this workflow via
+#                GitHub API. Here we simulate it with workflow_dispatch.
+#
+#   Scenario B — Data-drift-based (manual workflow_dispatch with
+#                trigger_reason=data_drift)
+#                Simulates: Feature distribution shift detected.
+#                The simulate_drift_trigger.py script writes a
+#                ct_trigger_event.json documenting the drift event.
+#
+#   Scenario C — Schedule-based (weekly cron on Sunday 00:00 UTC)
+#                Ensures models are retrained weekly even without alerts.
+#
+# RETRAINING PIPELINE:
+#   1. Ruff lint check (guard before expensive training)
+#   2. Smoke test (validate app Python syntax)
+#   3. Prepare data  →  python -m src.data_processing.prepare_data
+#   4. Train models  →  python -m src.training.train
+#   5. Register best →  python -m src.training.register_model
+#   6. Audit/promote →  python audit_and_promote.py
+#   7. Upload metrics.json + reports/ as artifacts
+# ============================================================
+
+name: LK-12 Continuous Training
+
+on:
+  # ── Scenario A & B: Manual / alert-simulated trigger ──────
+  workflow_dispatch:
+    inputs:
+      trigger_reason:
+        description: >
+          Retraining trigger reason.
+          'performance_degradation' = Scenario A (RMSE alert).
+          'data_drift'              = Scenario B (drift detected).
+          'manual'                  = ad-hoc / testing.
+        required: true
+        default: manual
+        type: choice
+        options:
+          - manual
+          - performance_degradation
+          - data_drift
+      rmse_observed:
+        description: "Observed RMSE value that breached threshold (Scenario A). Optional."
+        required: false
+        default: ""
+
+  # ── Scenario C: Weekly scheduled retraining ────────────────
+  schedule:
+    - cron: "0 0 * * 0"   # Every Sunday at 00:00 UTC
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ct-${{ github.ref }}
+  cancel-in-progress: false   # Never cancel a running CT (training integrity)
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+  MLFLOW_TRACKING_URI: "sqlite:///mlflow.db"
+
+jobs:
+  # ============================================================
+  # JOB 1 — Log trigger event & write ct_trigger_event.json
+  # ============================================================
+  log-trigger:
+    name: "Log CT Trigger"
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Print trigger context
+        run: |
+          echo "============================================================"
+          echo "  LK-12 CONTINUOUS TRAINING — TRIGGER LOG"
+          echo "============================================================"
+          echo "  Event         : ${{ github.event_name }}"
+          echo "  Trigger reason: ${{ inputs.trigger_reason || 'scheduled' }}"
+          echo "  RMSE observed : ${{ inputs.rmse_observed || 'N/A' }}"
+          echo "  Ref           : ${{ github.ref_name }}"
+          echo "  Run ID        : ${{ github.run_id }}"
+          echo "  Timestamp     : $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          echo "============================================================"
+
+      - name: Write ct_trigger_event.json
+        run: |
+          mkdir -p reports
+          python - <<'PYEOF'
+          import json, os
+          from datetime import datetime, timezone
+          event = {
+              "event": "ct_trigger",
+              "timestamp": datetime.now(timezone.utc).isoformat(),
+              "triggered_by": os.environ.get("GITHUB_EVENT_NAME", "unknown"),
+              "trigger_reason": "${{ inputs.trigger_reason || 'scheduled' }}",
+              "rmse_observed": "${{ inputs.rmse_observed || 'N/A' }}",
+              "run_id": os.environ.get("GITHUB_RUN_ID", "unknown"),
+              "branch": os.environ.get("GITHUB_REF_NAME", "unknown"),
+              "rmse_threshold": 10.0,
+              "drift_threshold": "PSI > 0.20 on lag_1 feature",
+          }
+          with open("ct_trigger_event.json", "w") as f:
+              json.dump(event, f, indent=2)
+          print("[INFO] ct_trigger_event.json written:")
+          print(json.dumps(event, indent=2))
+          PYEOF
+
+      - name: Upload trigger event artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ct-trigger-event-${{ github.run_id }}
+          path: ct_trigger_event.json
+          retention-days: 30
+
+  # ============================================================
+  # JOB 2 — Ruff lint check (guard before expensive training)
+  # ============================================================
+  lint:
+    name: "Ruff Lint Check"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install ruff
+      - name: Run ruff check
+        run: ruff check . --output-format=github
+
+  # ============================================================
+  # JOB 3 — Smoke test (validate Python syntax before training)
+  # ============================================================
+  smoke-test:
+    name: "Smoke Test"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Validate app Python syntax
+        run: |
+          set -e
+          python -m py_compile app.py
+          find pages -name "*.py" -exec python -m py_compile {} \;
+          echo "[OK] Smoke test passed — all app files compile cleanly."
+
+  # ============================================================
+  # JOB 4 — Full CT pipeline: train → register → audit/promote
+  # ============================================================
+  continuous-training:
+    name: "Retraining Pipeline"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [log-trigger, lint, smoke-test]
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      MLFLOW_TRACKING_URI: "sqlite:///mlflow.db"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # ── Show active trigger context ──────────────────────
+      - name: Show trigger context
+        run: |
+          echo "=== CT Trigger ==="
+          echo "Event         : ${{ github.event_name }}"
+          echo "Trigger reason: ${{ inputs.trigger_reason || 'scheduled' }}"
+          echo "RMSE observed : ${{ inputs.rmse_observed || 'N/A' }}"
+          echo "RMSE threshold: 10.0"
+
+      # ── Step 1: Prepare data ─────────────────────────────
+      - name: "[1/4] Prepare data"
+        run: |
+          set -e
+          echo "[STEP 1] Preparing data..."
+          python -m src.data_processing.prepare_data
+          echo "[OK] Data preparation complete."
+
+      # ── Step 2: Train models (MLflow tracking) ───────────
+      - name: "[2/4] Train models"
+        run: |
+          set -e
+          echo "[STEP 2] Training models..."
+          python -m src.training.train
+          echo "[OK] Training complete."
+
+      # ── Step 3: Register best run as candidate ───────────
+      - name: "[3/4] Register best model"
+        run: |
+          set -e
+          echo "[STEP 3] Registering best model..."
+          python -m src.training.register_model
+          echo "[OK] Model registered as candidate."
+
+      # ── Step 4: Audit & promote (comparative evaluation) ─
+      - name: "[4/4] Audit and promote"
+        run: |
+          set -e
+          echo "[STEP 4] Running promotion audit..."
+          echo "Rule: Candidate promoted ONLY if candidate RMSE < Production RMSE"
+          python audit_and_promote.py
+          echo "[OK] Audit complete."
+
+      # ── Show training metrics ────────────────────────────
+      - name: Display metrics.json
+        if: always()
+        run: |
+          echo "=== metrics.json ==="
+          cat metrics.json 2>/dev/null || echo "(metrics.json not found — training may have skipped)"
+
+      # ── Upload artifacts ─────────────────────────────────
+      - name: Upload CT artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ct-pipeline-artifacts-${{ github.run_id }}
+          path: |
+            metrics.json
+            reports/
+            ct_trigger_event.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # ============================================================
+  # JOB 5 — CT summary gate
+  # ============================================================
+  ct-summary:
+    name: "CT Pipeline Gate"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [lint, smoke-test, continuous-training]
+    if: always()
+    steps:
+      - name: Evaluate CT pipeline result
+        run: |
+          echo "========================================================"
+          echo "  LK-12 CONTINUOUS TRAINING — PIPELINE SUMMARY"
+          echo "========================================================"
+          echo "  lint              : ${{ needs.lint.result }}"
+          echo "  smoke-test        : ${{ needs.smoke-test.result }}"
+          echo "  continuous-training: ${{ needs.continuous-training.result }}"
+          echo "========================================================"
+          if [[ "${{ needs.lint.result }}"              == "success" && \
+                "${{ needs.smoke-test.result }}"         == "success" && \
+                "${{ needs.continuous-training.result }}" == "success" ]]; then
+            echo "[PASS] All CT stages completed successfully."
+          else
+            echo "[FAIL] One or more CT stages failed. Check logs above."
+            exit 1
+          fi

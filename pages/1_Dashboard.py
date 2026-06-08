@@ -5,18 +5,15 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from components.layouts import render_footer
-from components.styles import apply_custom_styles
-from config.settings import PAGE_ICON
-
 from components.metrics import (
     render_analytics_card,
     render_kpi_card,
     render_narrative_card,
 )
-
+from components.styles import apply_custom_styles
+from config.settings import PAGE_ICON
 from services.insight_service import InsightService
 from services.prediction_service import get_prediction_service
-
 from utils.data_loader import (
     get_latest_context,
     load_pipeline_metrics,

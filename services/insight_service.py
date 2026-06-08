@@ -314,10 +314,10 @@ class InsightService:
         if df.empty or pred_val is None:
             return "Outlook tidak tersedia."
 
-        recent_icp = df["icp_price"].iloc[-1]
+        _recent_icp = df["icp_price"].iloc[-1]
         latest_wti = df["wti_price"].iloc[-1]
-        ma3 = df["icp_price"].rolling(3).mean().iloc[-1]
-        ma6 = df["icp_price"].rolling(6).mean().iloc[-1]
+        _ma3 = df["icp_price"].rolling(3).mean().iloc[-1]
+        _ma6 = df["icp_price"].rolling(6).mean().iloc[-1]
         std_recent = df["icp_price"].tail(6).std()
 
         if trend_label == "Bullish":
@@ -363,24 +363,24 @@ class InsightService:
                 "price": pred_val + rmse,
                 "label": "Optimistic",
                 "desc": (
-                    f"Skenario terbaik jika WTI mengalami penguatan lebih lanjut "
-                    f"dan sentimen pasar global membaik."
+                    "Skenario terbaik jika WTI mengalami penguatan lebih lanjut "
+                    "dan sentimen pasar global membaik."
                 ),
             },
             "base": {
                 "price": pred_val,
                 "label": "Base Case",
                 "desc": (
-                    f"Skenario paling mungkin berdasarkan pola historis "
-                    f"dan kondisi pasar saat ini."
+                    "Skenario paling mungkin berdasarkan pola historis "
+                    "dan kondisi pasar saat ini."
                 ),
             },
             "pessimistic": {
                 "price": max(0, pred_val - rmse),
                 "label": "Pessimistic",
                 "desc": (
-                    f"Skenario terburuk jika WTI terkoreksi tajam "
-                    f"atau terjadi gangguan supply global."
+                    "Skenario terburuk jika WTI terkoreksi tajam "
+                    "atau terjadi gangguan supply global."
                 ),
             },
         }
@@ -397,7 +397,7 @@ class InsightService:
             return "Sample size insufficient for structural market validation."
 
         recent_icp = df["icp_price"].iloc[-1]
-        prev_icp = df["icp_price"].iloc[-2]
+        _prev_icp = df["icp_price"].iloc[-2]
         ma3 = df["icp_price"].rolling(3).mean().iloc[-1]
         corr = df["icp_price"].corr(df["wti_price"])
 

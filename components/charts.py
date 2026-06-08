@@ -1,7 +1,6 @@
 import plotly.graph_objects as go
 import streamlit as st
 
-
 PLOT_TEMPLATE = dict(
     template="plotly_dark",
     hovermode="x unified",

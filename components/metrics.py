@@ -1,5 +1,6 @@
-import streamlit as st
 from html import escape
+
+import streamlit as st
 
 
 def _render(html: str):
