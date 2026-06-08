@@ -1,0 +1,13 @@
+{
+  "event": "ct_trigger",
+  "timestamp": "2026-06-08T14:46:50.150054+00:00",
+  "trigger_reason": "data_drift",
+  "scenario": "B - Data Drift",
+  "drift_metric": "PSI (Population Stability Index)",
+  "psi_simulated": 0.3092,
+  "drift_threshold": 0.2,
+  "drift_detected": true,
+  "rmse_threshold": 10.0,
+  "shifted_dataset": "C:\\Users\\User\\PycharmProjects\\MLops\\MLops-ICP_prediction_OLD\\data\\processed\\clean_data_shifted.csv",
+  "note": "Dataset yang digeser hanya digunakan sebagai bukti drift. Pipeline retraining tetap menggunakan clean_data.csv yang valid."
+}
