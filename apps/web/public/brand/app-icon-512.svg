@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="ICP Intelligence app icon">
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#16456E"/><stop offset="1" stop-color="#0E2E4A"/></linearGradient></defs>
+  <rect width="512" height="512" rx="112" fill="url(#g)"/>
+  <rect x="104" y="304" width="64" height="104" rx="20" fill="#FFFFFF" opacity="0.92"/>
+  <rect x="216" y="232" width="64" height="176" rx="20" fill="#FFFFFF" opacity="0.92"/>
+  <rect x="328" y="160" width="64" height="248" rx="20" fill="#FFFFFF" opacity="0.92"/>
+  <path d="M88 264 L208 184 L288 216 L416 96" fill="none" stroke="#D99A2B" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M352 88 L424 88 L424 160" fill="none" stroke="#D99A2B" stroke-width="28" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

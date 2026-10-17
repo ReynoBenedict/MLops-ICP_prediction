@@ -1,0 +1,72 @@
+# Render Blueprint for the ICP API - DOCUMENTATION ONLY.
+#
+# Nothing in this repository applies this file; Render reads Blueprints only from a connected Git
+# repository, which would deploy the remote (older) tree instead of the local working tree. The
+# service is created by hand from the Render dashboard ("New > Web Service > Deploy an existing
+# image") with exactly the values below. Keep this file in sync with infra/render/README.md and
+# docs/DEPLOYMENT.md.
+#
+# Cost: plan `free` (Render Free web service, 750 instance-hours per workspace per month, spins down
+# after 15 minutes without traffic, no persistent disk; without a payment method Render suspends free
+# services at the quota instead of billing). No database, disk, cron or background worker is used:
+# all persistent state lives in Cloudflare D1 / KV behind the gateway Worker (free plan).
+services:
+  - type: web
+    name: icp-api-staging
+    plan: free
+    runtime: image
+    image:
+      # Private registry image built locally from the working tree (infra/docker/api.Dockerfile):
+      #   docker build -f infra/docker/api.Dockerfile -t <registry>/<user>/icp-api:staging .
+      #   docker push <registry>/<user>/icp-api:staging
+      url: docker.io/<dockerhub-user>/icp-api:staging
+      creds:
+        # Registry credential created in Render > Account Settings > Registry Credentials
+        # (Docker Hub username + read-only access token). Never in this file.
+        fromRegistryCreds:
+          name: dockerhub-readonly
+    healthCheckPath: /health/live
+    # Render injects PORT; `icp-api serve` binds 0.0.0.0:$PORT (RENDER=true is set by the platform).
+    envVars:
+      - key: APP_ENV
+        value: staging
+      - key: LOG_FORMAT
+        value: json
+      - key: LOG_LEVEL
+        value: INFO
+      - key: EXPOSE_API_DOCS
+        value: "true"
+      # --- storage through the Cloudflare Worker data plane (no Cloudflare API token here) ---------
+      - key: METADATA_BACKEND
+        value: d1_gateway
+      - key: OBJECT_STORE_BACKEND
+        value: gateway
+      - key: GATEWAY_INTERNAL_URL
+        value: https://icp-gateway-staging.<account-subdomain>.workers.dev
+      # --- model: exported bundle in the object store; no MLflow server online -------------------
+      - key: MODEL_SOURCE
+        value: bundle
+      - key: MODEL_NAME
+        value: ICP_Price_Model
+      - key: MODEL_ALIAS
+        value: production
+      # --- security (secrets are entered in the dashboard; `sync: false` = never from a file) -------
+      - key: GATEWAY_SHARED_SECRET
+        sync: false # same value as the Worker secret (>= 32 chars)
+      - key: REQUIRE_GATEWAY_SECRET
+        value: "true"
+      - key: ADMIN_API_TOKENS
+        sync: false # name:token pairs, each >= 32 chars (`icp-api new-token`)
+      - key: METRICS_TOKEN
+        sync: false # optional
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://icp-gateway-staging.<account-subdomain>.workers.dev
+      - key: PUBLIC_REGISTRATION_ENABLED
+        value: "true"
+      # --- jobs: ingestion only (training is refused in bundle mode) -------------------------------
+      - key: JOB_MAX_CONCURRENT
+        value: "1"
+      - key: JOB_TIMEOUT_INGEST_SECONDS
+        value: "600"
+      - key: EIA_API_KEY
+        sync: false # optional, free key; the public mirror is used when unset

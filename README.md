@@ -1,528 +1,373 @@
-# Prediksi ICP (Indonesian Crude Price) - MLOps
+# ICP Intelligence
 
-Proyek ini bertujuan untuk membangun jalur kerja (*pipeline*) **Machine Learning Operations (MLOps)** untuk melakukan peramalan (*forecasting*) harga historis **Indonesian Crude Price (ICP)**.
+A web application for analysing and forecasting the **Indonesian Crude Price (ICP)**, the official
+monthly crude oil price set by Indonesia's Ministry of Energy and Mineral Resources (ESDM). It
+combines the official ICP series with world benchmarks (Brent, Dubai, WTI) and the USD/IDR exchange
+rate, and offers market summaries, price exploration, forecasts with uncertainty ranges, scenario
+analysis, rule-based insights and downloadable reports.
 
-Pada tahap pengembangan selanjutnya, sistem ini akan mengimplementasikan model **hybrid ARIMAX-LSTM** untuk memodelkan pola data deret waktu (*time series*) harga minyak mentah Indonesia.
+ICP is used in Indonesian budgeting, oil and gas revenue sharing and energy planning, but the
+official value for a month is published only in the following month, in decrees and announcements
+that are not available as a clean data series. The project addresses three problems:
 
-Saat ini proyek berada pada tahap **inisialisasi awal (MLOps LK-02)** yang difokuskan pada beberapa aktivitas utama, yaitu:
+- rebuilding a **trustworthy official series** from ESDM's own documents, with per-month evidence;
+- estimating the value of months that have ended but are **not yet published**, and projecting
+  future months under **explicit benchmark assumptions**;
+- presenting the results to analysts in energy, finance and planning teams with the uncertainty
+  and the assumptions visible.
 
-- Perancangan struktur proyek berbasis praktik MLOps
-- Pengumpulan data (*data collection*)
-- Analisis data eksploratif (*Exploratory Data Analysis / EDA*)
+The user interface is in Indonesian by default, with an English toggle.
 
----
+## Project status
 
-# 1. Struktur Proyek
+This is a **portfolio project with a public staging deployment**, not a production service.
 
-Struktur direktori proyek dirancang untuk memisahkan berbagai komponen sistem secara modular sehingga proses pengembangan, pemeliharaan, serta pengujian sistem dapat dilakukan dengan lebih terorganisir.
+- The web app, API gateway and storage run on Cloudflare's free plan.
+- The Python backend runs as a Docker container on the author's machine and is exposed through a
+  **Cloudflare Quick Tunnel**. When that machine is off or the process stops, every feature that
+  needs the API is unavailable; the tunnel hostname also changes on each restart.
+- There is no uptime guarantee, no monitoring with alerting and no load testing.
+- Payment, e-mail delivery and several account features are not implemented
+  (see [Known limitations](#known-limitations)).
 
-```text
-MLops-ICP_prediction/
-├── .dvc/               # Direktori konfigurasi DVC (dihasilkan otomatis oleh `dvc init`)
-├── .dvcignore          # File daftar pola yang dikecualikan dari pelacakan DVC
-├── .gitignore          # File daftar pola yang dikecualikan dari Git
-├── configs/
-│   └── config.yaml         # Konfigurasi pipeline (path data, parameter ingestion)
-├── data/
-│   ├── raw/                # Data mentah: PDF laporan ICP dan dataset yang dilacak DVC
-│   │   ├── dataset.csv         # Dataset utama hasil ingestion (dilacak oleh DVC)
-│   │   └── dataset.csv.dvc     # File metadata DVC untuk dataset.csv
-│   └── processed/          # Output dataset hasil preprocessing (CSV)
-├── notebooks/
-│   ├── 01_eda.ipynb            # Notebook EDA utama
-│   └── icp_exploration.ipynb   # Notebook eksplorasi tambahan
-├── src/
-│   ├── data_processing/
-│   │   └── run_ingestion.py    # Script ingestion utama (jalankan dengan flag --local)
-│   ├── utils/
-│   │   └── text_parsing.py     # Fungsi parsing teks dari PDF
-│   ├── data_loader.py          # Modul pemuatan dataset ke DataFrame
-│   └── preprocessing.py        # Modul preprocessing (normalisasi, missing value)
-├── tests/
-│   ├── test_data_loader.py     # Unit test untuk data_loader
-│   └── test_preprocessing.py   # Unit test untuk preprocessing
-├── requirements.txt        # Daftar dependency Python
-└── README.md               # Dokumentasi proyek
+## Live demo
+
+**Staging:** https://icp-gateway-staging.icp-gateway.workers.dev
+
+The landing page and static assets are always served by Cloudflare. Market data, forecasts,
+sign-in and all other API features work only while the self-hosted backend is running; otherwise
+the app shows a "data service unavailable" message instead of figures. Anyone can register a
+trial organisation from the landing page.
+
+When the backend was online on 2026-10-17, the following passed against the public URL: the
+repository smoke test (11 of 11 checks) and an end-to-end feature check (18 of 18: registration,
+sign-in, market summary, price history, forecast with a scenario, CSV export, saving and comparing
+scenarios, PDF/CSV report generation and download, access control on private and internal routes,
+sign-out).
+
+## Key features
+
+| Area | What it does |
+|---|---|
+| Market summary | Latest official ICP, monthly and yearly change, Brent/Dubai/WTI, JISDOR USD/IDR, rupiah equivalent, data freshness |
+| Price exploration | ICP vs a chosen benchmark over 1, 3, 5 years or all, ICP-benchmark spread, rupiah view, missing months shown as gaps, CSV download, per-month verification status |
+| Forecasts | 1-6 month horizon from the latest official month; "estimate awaiting publication" vs "future forecast" labels; empirical 50/80/95 % ranges; per-month input assumptions with their source; forecast history and CSV export |
+| Scenarios | Saved benchmark/FX assumptions per month, compared side by side (up to four) against a no-assumption baseline |
+| Insights | Rule-based observations (material changes, unusual spreads, FX context, forecast shifts, data quality), each traceable to a dataset version |
+| Reports and alerts | Branded PDF, Excel and CSV reports (monthly market, forecast, scenario comparison, data provenance); alert rules with an in-app inbox |
+| Accounts | Self-service organisation sign-up (trial plan), members and roles, API keys, plan entitlements enforced on the server |
+| Platform operations | Operator area for dataset versions and source evidence, model evaluation and promotion, background jobs, system health, audit log, tenant administration |
+
+Feature availability depends on the plan (for example, the trial plan limits the forecast horizon
+to three months and report formats to PDF and CSV).
+
+## Screenshots
+
+| Landing page | Market summary |
+|---|---|
+| <img src="docs/screenshots/after-v2/1440-landing-top.png" alt="Landing page" width="420"> | <img src="docs/screenshots/ux-v3/after/1440-ringkasan.png" alt="Market summary" width="420"> |
+
+| Forecast | Forecast with a benchmark scenario |
+|---|---|
+| <img src="docs/screenshots/ux-v3/after/1440-proyeksi.png" alt="Forecast page" width="420"> | <img src="docs/screenshots/after-v2/1440-proyeksi-skenario-top.png" alt="Forecast with a Brent scenario" width="420"> |
+
+| Reports | Mobile (390 px) |
+|---|---|
+| <img src="docs/screenshots/ux-v3/after/1440-laporan.png" alt="Reports page" width="420"> | <img src="docs/screenshots/ux-v3/after/390-ringkasan.png" alt="Market summary on mobile" width="200"> |
+
+Screenshots were taken from the local application with test accounts. More captures, including
+the operator area and error states, are in [docs/screenshots/](docs/screenshots/).
+
+## System architecture
+
+```mermaid
+flowchart LR
+    B[Browser] --> W
+
+    subgraph CF["Cloudflare (free plan)"]
+        W["Worker: icp-gateway-staging<br/>static React app + /api gateway<br/>rate limits, shared secret"]
+        D1[("D1<br/>application metadata")]
+        KV[("Workers KV<br/>datasets, exports, reports,<br/>model bundle")]
+        W -- "internal data plane<br/>(shared secret)" --> D1
+        W --> KV
+    end
+
+    subgraph OP["Operator machine"]
+        T["Cloudflare Quick Tunnel"] --> API["FastAPI backend<br/>(Docker image)<br/>MODEL_SOURCE=bundle"]
+        ML["Training: pipeline/icp_ml<br/>+ local MLflow registry"]
+    end
+
+    W -- "/api/v1/*" --> T
+    API -- "D1 / KV via Worker" --> W
+    ML -- "export-model<br/>(promoted version)" --> KV
 ```
 
-Struktur ini mengikuti praktik umum dalam pengembangan sistem Machine Learning dan MLOps, sehingga memudahkan pengelolaan data, kode, serta eksperimen model.
-
-## 2. Instruksi Penggunaan Sistem
-
-Bagian ini menjelaskan langkah-langkah untuk menjalankan sistem pada lingkungan lokal (*local environment*).
-
-### A. Persiapan Lingkungan Sistem (Environment Setup)
-
-Untuk menghindari konflik dependency dengan proyek Python lain, disarankan menggunakan virtual environment.
-
-Sistem ini memerlukan Python versi 3.9 atau lebih baru.
-
-Buat virtual environment:
-
-```bash
-python -m venv venv
-```
-
-Aktifkan virtual environment.
-
-Windows:
-
-```cmd
-venv\Scripts\activate
-```
-
-Linux / MacOS:
-
-```bash
-source venv/bin/activate
-```
-
-Setelah environment aktif, instal seluruh dependency proyek melalui perintah berikut pada root directory proyek:
-
-```bash
-pip install -r requirements.txt
-```
-
-Perintah ini akan menginstal berbagai library yang dibutuhkan seperti pandas, numpy, scikit-learn, serta library pendukung lainnya.
-
-### B. Konfigurasi Parameter Sistem
-
-Parameter konfigurasi sistem disimpan secara terpusat pada file berikut:
-
-`configs/config.yaml`
-
-File ini berisi beberapa pengaturan penting seperti:
-
-- lokasi direktori data
-- parameter preprocessing
-- konfigurasi pipeline pemrosesan data
-- pengaturan output dataset
-
-Dengan pendekatan ini, perubahan konfigurasi dapat dilakukan tanpa perlu memodifikasi langsung kode pada direktori `src/`.
-
-### C. Ekstraksi dan Pembuatan Dataset (Data Processing)
-
-Tahap ini digunakan untuk mengekstrak data Indonesian Crude Price (ICP) dari laporan bulanan dalam format PDF.
-
-Proses yang dilakukan meliputi:
-
-- Membaca seluruh dokumen PDF pada direktori: `data/raw/`
-- Mengekstrak informasi harga ICP dari dokumen tersebut.
-- Mengubah data menjadi dataset terstruktur.
-- Menyimpan hasil ekstraksi ke dalam direktori: `data/processed/`
-
-Proses ekstraksi dataset dapat dijalankan dengan perintah berikut:
-
-```bash
-python src/data_processing/rebuild_dataset.py
-```
-
-Script tersebut akan membaca dokumen PDF, mengekstrak informasi yang relevan, dan menghasilkan dataset historis dalam format CSV yang siap digunakan untuk analisis maupun pemodelan.
-
-### D. Exploratory Data Analysis (EDA)
-
-Analisis data eksploratif dilakukan menggunakan Jupyter Notebook yang tersedia pada direktori:
-
-`notebooks/`
-
-Notebook ini digunakan untuk:
-
-- memahami karakteristik data
-- menganalisis distribusi data
-- mengidentifikasi pola tren pada data time series
-- mendeteksi missing values
-- membuat visualisasi grafik harga ICP
-
-Notebook dapat dijalankan dengan perintah berikut:
-
-```bash
-jupyter notebook notebooks/01_eda.ipynb
-```
-
-Selain menggunakan Jupyter Notebook, file ini juga dapat dijalankan melalui Visual Studio Code yang memiliki dukungan bawaan untuk menjalankan notebook secara interaktif.
-
-### E. Pengujian Sistem (Unit Testing)
-
-Untuk memastikan kualitas dan stabilitas kode, proyek ini juga menyediakan unit testing.
-
-Seluruh script pengujian berada pada direktori:
-
-`tests/`
-
-Pengujian dapat dijalankan menggunakan framework pytest dengan perintah berikut:
-
-```bash
-pytest tests/
-```
-
-Jika seluruh pengujian berhasil dijalankan, terminal akan menampilkan status passed, yang menandakan bahwa fungsi-fungsi utama sistem berjalan dengan baik tanpa error.
-
-## Keterbatasan Saat Ini
-Pada tahap LK-02 ini proyek masih berada pada fase inisialisasi, sehingga beberapa komponen sistem belum sepenuhnya lengkap. Dataset ICP yang dihasilkan masih terbatas karena sebagian dokumen PDF bersifat *image-based* sehingga belum dapat diekstrak secara otomatis tanpa implementasi OCR. Selain itu, tahap pemodelan machine learning seperti implementasi model ARIMAX, LSTM, maupun model hybrid ARIMAX–LSTM belum diintegrasikan ke dalam pipeline. Pengembangan selanjutnya akan difokuskan pada penyempurnaan dataset, integrasi variabel eksternal (seperti harga Brent dan nilai tukar USD/IDR), serta pembangunan pipeline pelatihan dan evaluasi model secara penuh.
-
----
-
-## 3. Data Versioning Menggunakan DVC (LK-05)
-
-Pada tahap ini dilakukan implementasi **Data Version Control (DVC)** untuk mengelola dan melacak perubahan dataset secara terstruktur dalam pipeline MLOps. Fokus utama adalah mendokumentasikan **alur penambahan versi data (data versioning workflow)**.
-
----
-
-### 3.1 Alur Penambahan Versi Data
-
-Proses versioning dataset dalam proyek ini dilakukan melalui tahapan berikut:
-
-1. **Inisialisasi DVC**
-   Repository diinisialisasi menggunakan DVC untuk memungkinkan pelacakan dataset berbasis hash.
-
-2. **Tracking Dataset Awal (Versi 1)**
-   Dataset awal dihasilkan dari proses ingestion data ICP tahun 2019 dan disimpan dalam format CSV. Dataset ini kemudian dilacak menggunakan DVC sebagai versi pertama (*version 1*).
-
-3. **Penambahan Data Baru (Simulasi Continual Learning)**
-   Dataset diperbarui dengan menambahkan data baru (tahun 2020) melalui proses ingestion ulang. Tahap ini merepresentasikan skenario *continual learning*, di mana data bertambah seiring waktu.
-
-4. **Versioning Dataset (Versi 2)**
-   Dataset yang telah diperbarui kembali dilacak menggunakan DVC, sehingga menghasilkan versi kedua (*version 2*) dengan hash yang berbeda.
-
-5. **Audit dan Perbandingan Versi Data**
-   Perbedaan antara dataset versi lama dan versi baru dianalisis menggunakan fitur `dvc diff` untuk memastikan bahwa perubahan data telah tercatat dengan baik.
-
----
-
-### 3.2 Implementasi Teknis
-
-Berikut adalah perintah yang digunakan dalam setiap tahapan:
-
-#### a. Inisialisasi DVC
-
-```bash
-dvc init
-git add .dvc .gitignore
-git commit -m "init DVC"
-```
-
-#### b. Tracking Dataset Versi 1 (2019)
-
-```bash
-dvc add data/raw/dataset.csv
-git add data/raw/dataset.csv.dvc
-git commit -m "dataset v1 (2019)"
-```
-
-#### c. Penambahan Data Baru
-
-```bash
-python src/data_processing/run_ingestion.py --local
-```
-
-#### d. Tracking Dataset Versi 2 (2019 + 2020)
-
-```bash
-dvc add data/raw/dataset.csv
-git add data/raw/dataset.csv.dvc
-git commit -m "dataset v2 (add 2020)"
-```
-
-#### e. Perbandingan Versi Dataset
-
-```bash
-dvc diff HEAD~1 HEAD
-```
-
----
-
-### 3.3 Hasil Versioning
-
-Hasil dari proses `dvc diff` menunjukkan bahwa dataset mengalami perubahan:
-
-```text
-Modified:
-    data/raw/dataset.csv
-```
-
-Perubahan ini mengindikasikan bahwa:
-
-- Dataset telah diperbarui dengan data baru
-- DVC berhasil mendeteksi perubahan melalui perbedaan nilai hash
-- Riwayat perubahan dataset tersimpan dengan baik dalam repository
-
----
-
-### 3.4 Kesimpulan
-
-Implementasi DVC dalam proyek ini berhasil mendukung proses versioning dataset secara sistematis. Alur penambahan versi data dimulai dari pembuatan dataset awal, dilanjutkan dengan penambahan data baru, hingga pelacakan perubahan antar versi menggunakan DVC.
-
-Pendekatan ini memungkinkan:
-
-- Pengelolaan dataset secara efisien
-- Pelacakan perubahan data secara transparan
-- Mendukung prinsip reproducibility dalam MLOps
-
----
-
-## 4. Manajemen Eksperimen dan Pelacakan Metrik dengan MLflow (LK-06)
-
-Pada tahap ini dilakukan integrasi **MLflow** ke dalam proses pelatihan model untuk mencatat, melacak, dan membandingkan eksperimen secara sistematis.
-
----
-
-### 4.1 Variasi Eksperimen
-
-Eksperimen dilakukan dengan beberapa variasi model sebagai berikut:
-
-- **Linear Regression** — model baseline tanpa hyperparameter tambahan
-- **Random Forest** dengan variasi `n_estimators`:
-  - `n_estimators = 10`
-  - `n_estimators = 50`
-  - `n_estimators = 100`
-
-Setiap run MLflow mencatat:
-
-- **Parameter**: `model_type`, `n_estimators`
-- **Metrik evaluasi**: RMSE (*Root Mean Squared Error*) dan MAE (*Mean Absolute Error*)
-- **Artefak**: visualisasi perbandingan nilai aktual dan prediksi dalam format PNG
-
----
-
-### 4.2 Hasil Eksperimen
-
-Berikut adalah rangkuman hasil evaluasi dari seluruh eksperimen:
-
-| Model | RMSE | MAE |
+**Serving path.** The browser only talks to the Worker. The Worker serves the React build and
+forwards `/api/v1/*` to the backend with a shared secret; the backend rejects requests that did
+not come through the gateway. The backend keeps no state of its own: it reads and writes metadata
+in D1 and objects in KV through secret-protected internal routes on the same Worker. Forecasts are
+computed from an **exported model bundle** (model v5), so no MLflow server runs online.
+
+**Training path.** Training, validation and promotion happen on the operator machine with the
+`pipeline/icp_ml` package and a local MLflow registry. A promoted version is exported as a bundle
+with `icp-api export-model`; the staging backend refuses training and promotion requests.
+
+Locally, the same code runs on SQLite and a filesystem object store under `var/`. The code also
+supports the D1 REST API, S3-compatible object storage and a PostgreSQL MLflow store; those
+options are not used by the current deployment. Details: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md),
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+## Technology stack
+
+| Layer | Technologies |
+|---|---|
+| Frontend | React 19, TypeScript, Vite, React Router, Recharts, Lucide icons |
+| Gateway and hosting | Cloudflare Workers (static assets, rate limiting), Wrangler, Cloudflare Quick Tunnel |
+| Backend | Python 3.10-3.12, FastAPI, Pydantic, Uvicorn, ReportLab and openpyxl for reports |
+| Data engineering | pandas, httpx, PyMuPDF and Tesseract OCR for ESDM decrees, DVC for the original raw files |
+| Machine learning | scikit-learn, skops model serialisation, MLflow tracking and registry |
+| Storage | SQLite (local), Cloudflare D1 and Workers KV (staging) |
+| Quality | pytest, Vitest and Testing Library, ruff, mypy, ESLint, OpenAPI contract with generated TypeScript types |
+| Packaging | npm workspaces, Docker |
+
+## Data sources and methodology
+
+| Dataset | Source | Notes |
 |---|---|---|
-| LinearRegression | 18.54 | 17.61 |
-| RandomForest (n=10) | 8.72 | 8.24 |
-| **RandomForest (n=50)** | **7.14** | **6.90** |
-| RandomForest (n=100) | 7.78 | 7.50 |
+| ICP (official) | ESDM monthly ministerial decrees and announcements | Reconciled per month; see below |
+| WTI, Brent | U.S. EIA spot series (API, or a public mirror of the same release) | Daily values averaged per month; public domain |
+| Dubai | World Bank Commodity Markets "Pink Sheet" | Monthly; CC BY 4.0 |
+| USD/IDR | Bank Indonesia JISDOR reference rate | Daily values averaged per month |
 
-Berdasarkan hasil di atas, **Random Forest dengan `n_estimators = 50`** memberikan performa terbaik. Penambahan estimator hingga 100 tidak menghasilkan peningkatan yang signifikan, sementara Linear Regression menunjukkan performa terendah.
+**Reconciliation.** Each ICP month is read from the decree (text layer or OCR) and from the
+announcement, and the values are compared. A month is accepted when sources agree, flagged when it
+rests on a single source, and blocked when sources conflict. The reconciled local dataset covers
+2019-01 to 2026-09 (93 months, no gaps): 86 months confirmed by two sources, 6 by the announcement
+only and 1 by OCR only. The process corrected four values in the original CSV and filled 14
+missing months. Evidence and policy: [docs/DATA_RECONCILIATION.md](docs/DATA_RECONCILIATION.md).
 
-Nilai error yang relatif tinggi dipengaruhi oleh beberapa faktor, antara lain:
+**Principles.** Missing months are shown as gaps and never interpolated; partial months never enter
+a dataset; official values, estimates and forecasts are labelled differently in the data and the
+UI; every forecast records its origin month, issue date, model version, dataset versions and the
+source of each input (observed, user scenario, or last value held). Sources and licences:
+[docs/DATA_SOURCES.md](docs/DATA_SOURCES.md), [docs/DATA_DICTIONARY.md](docs/DATA_DICTIONARY.md).
 
-- Jumlah data yang terbatas
-- Fluktuasi harga yang ekstrem pada periode tertentu
-- Penggunaan fitur yang masih sederhana (hanya `lag_1`)
+## Machine learning and evaluation
 
----
+Several transparent methods are compared: persistence (last official value), benchmark plus
+average spread rules, a non-negative benchmark blend, ridge regression and gradient boosting. Each
+is evaluated with a **rolling-origin backtest** (69 origins, 2020-12 to 2026-08) for horizons of
+1-6 months, in two situations:
 
-### 4.3 Model Terpilih
+- **observed**: the target month's benchmark averages are known (a month that has ended but whose
+  ICP is not yet published);
+- **hold-last**: benchmarks are unknown and held at their last value (a genuinely future month
+  without a user scenario).
 
-Model yang dipilih pada tahap ini adalah **Random Forest (`n_estimators = 50`)** karena memberikan hasil paling optimal berdasarkan evaluasi kuantitatif.
+Mean absolute error in USD per barrel, on the comparison set common to all methods:
 
-Penggunaan model yang lebih kompleks seperti ARIMAX dan LSTM belum dilakukan pada tahap ini karena keterbatasan jumlah data yang dapat menyebabkan *overfitting* dan hasil yang tidak stabil. Model tersebut direncanakan untuk diimplementasikan pada tahap selanjutnya ketika data yang tersedia lebih memadai.
+| Method | Observed, 1 month | Observed, 3 months | Hold-last, 1 month | Hold-last, 3 months |
+|---|---|---|---|---|
+| Persistence (baseline) | 6.09 | 10.66 | 6.09 | 10.66 |
+| WTI + average spread (previous baseline) | 2.00 | 2.01 | 6.17 | 10.25 |
+| **Brent + 6-month spread (production v5)** | **0.85** | **1.00** | 6.12 | 10.60 |
+| Gradient boosting (previous production family) | 2.35 | 3.66 | 6.16 | 10.64 |
 
----
+How to read this:
 
-### 4.4 Cara Menjalankan Pipeline
+- When the month's benchmarks are known, the selected rule explains ICP closely: about 0.85 USD/bbl
+  at one month versus 6.09 for persistence.
+- For future months without a benchmark view, **no method beats persistence**. The app therefore
+  presents future months as conditional on the benchmark assumption, and the forecast is only as
+  good as the scenario the user enters.
+- Prediction ranges are empirical quantiles of backtest errors. Out-of-sample 80 % coverage is
+  0.96-1.00 in the observed situation but drops to 0.65 at three months in the hold-last situation,
+  so the future-month ranges understate risk in volatile periods.
+- Promotion to production requires, among other gates, beating persistence when benchmarks are
+  known, staying within 10 % of persistence without them, and not being more than 5 % worse than the
+  current production model; the gates and model cards are described in
+  [docs/FORECASTING_METHODOLOGY.md](docs/FORECASTING_METHODOLOGY.md).
 
-#### a. Persiapan Data
+The history is short (monthly data from 2019) and dominated by regime changes such as 2020 and
+2022, so these figures describe this period, not a general accuracy level.
+
+## Repository structure
+
+```
+apps/web/            React single-page app (pages, components, i18n, brand assets in public/)
+apps/gateway/        Cloudflare Worker: static assets, /api gateway, internal D1/KV data plane
+backend/icp_api/     FastAPI application: routers, services, storage adapters, security, CLI
+backend/tests/       API, storage, jobs, accounts and product tests
+pipeline/icp_ml/     Data sources and parsers, features, forecasting methods, backtest, training,
+                     registry, model bundle; configs/training.yaml
+pipeline/tests/      Pipeline tests
+packages/contracts/  OpenAPI document and generated TypeScript types
+infra/               D1 migrations, Docker image, monitoring profile, Render notes (not in use)
+data/                Original ICP CSV, DVC pointers for raw files, seed CSVs for benchmarks and FX
+docs/                Architecture, data, methodology, API, security, deployment, operations, reports
+scripts/             Cross-platform setup, dev, smoke test, contract check, secret scan, staging helper
+legacy/              The previous Streamlit application and course evidence (reference only)
+```
+
+## Getting started
+
+### Prerequisites
+
+- Node.js 22.12 or newer
+- Python 3.10, 3.11 or 3.12
+- Optional: Docker, and Tesseract OCR for scanned ESDM decrees
+
+### Install and run locally
+
+`data/raw/wti.csv` is tracked with DVC and no public DVC remote is configured, so a fresh clone uses
+the WTI file shipped in `data/seed/` instead:
 
 ```bash
-python prepare_data.py
+npm install
+SEED_WTI_PATH=data/seed/wti.csv npm run setup     # PowerShell: $env:SEED_WTI_PATH="data/seed/wti.csv"; npm run setup
+npm run dev                                       # API on :8000, web app on http://localhost:5173
 ```
 
-#### b. Menjalankan Training dan Pencatatan Eksperimen
+`npm run setup` creates the Python virtual environment, generates local secrets into `.env` and
+`apps/gateway/.dev.vars` (both gitignored), applies the database migrations, seeds the datasets,
+trains and promotes a first model (about 1-3 minutes), generates the contract types and builds the
+web app. `npm run setup -- --skip-train` skips the training step.
+
+A fresh setup seeds ICP from the original repository CSV (2019-01 to 2026-03, including the values
+later corrected). To build the reconciled official series, run the ESDM ingestion; it downloads
+and parses the decree archive, can take a long time and needs Tesseract for scanned decrees:
 
 ```bash
-python train.py
+node scripts/py.mjs -m icp_api.cli ingest icp --full
 ```
 
-#### c. Membuka MLflow UI
+Other useful commands:
+
+| Command | Purpose |
+|---|---|
+| `npm run dev:edge` | Backend plus the production build behind the real Worker (`wrangler dev`, port 8787) |
+| `npm run stop` | Stop the dev stack |
+| `npm run smoke -- <url>` | Smoke test against a running stack (default `http://127.0.0.1:8787`) |
+| `node scripts/py.mjs -m icp_api.cli ingest benchmarks` / `fx` | Refresh benchmark and FX data from the public sources |
+| `node scripts/py.mjs -m icp_ml.cli backtest` | Rolling-origin backtest of every configured method |
+| `npm run mlflow:ui` | MLflow UI on port 5000 |
+
+The operator token for the Platform Operations area is in `.env` (`ADMIN_API_TOKENS`); use the
+operator tab on the sign-in page ("Masuk sebagai operator"). Business users register an organisation from the
+landing page.
+
+### Staging deployment (Quick Tunnel)
+
+Staging needs a Cloudflare account, the D1 database and KV namespace configured in
+`apps/gateway/wrangler.jsonc`, and the staging variables in a local, gitignored env file. With those
+in place:
 
 ```bash
-mlflow ui --backend-store-uri sqlite:///mlflow.db --port 5000 --workers 1
+npm run staging:backend     # starts the backend container, opens a Quick Tunnel, deploys the Worker
 ```
 
-Lalu buka browser dan akses: `http://127.0.0.1:5000`
+Keep the process running. The tunnel hostname is stored only in a gitignored local file and passed
+to Wrangler at deploy time; a plain `wrangler deploy --env staging` deploys a placeholder backend
+URL. The full runbook, free-tier limits and the alternatives that were evaluated are in
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and [docs/HOSTING_REPORT_2026-10.md](docs/HOSTING_REPORT_2026-10.md).
 
----
-
-### 4.5 Kesimpulan
-
-Integrasi MLflow berhasil mendukung proses pelacakan eksperimen secara sistematis. Setiap run tercatat dengan lengkap beserta parameter, metrik, dan artefak visualisasi, sehingga memudahkan perbandingan antar model.
-
-Pendekatan ini memungkinkan:
-
-- Pelacakan eksperimen secara transparan dan reproducible
-- Perbandingan model yang terstruktur berdasarkan metrik kuantitatif
-- Fondasi yang kuat untuk pengembangan model lebih lanjut dalam pipeline MLOps
-
----
-
-## 5. Model Registry and Inference (LK-07)
-
-Model **ICP_Price_Model** versi 4 (*n_estimators = 100*) saat ini berada pada stage **Production** di MLflow Model Registry. Meskipun versi 3 (*n_estimators = 50*) menghasilkan RMSE yang lebih rendah (7.14 vs 7.78), versi 4 dipromosikan ke Production untuk mensimulasikan alur *lifecycle* model secara penuh dalam MLflow—mencakup proses registrasi, versioning bertahap, dan stage transition (*None → Staging → Production*). Versi 3 dipertahankan pada stage **Staging** sebagai kandidat model.
-
-| Version | `n_estimators` | Stage | RMSE |
-|---------|---------------|-------|------|
-| v3 | 50 | Staging | 7.14 |
-| **v4** | **100** | **Production** | **7.78** |
-
-Proses inferensi dijalankan melalui perintah:
+## Testing and quality
 
 ```bash
-python infer.py
+npm test          # pytest, plus Vitest for the web app and the gateway
+npm run check     # lint, type checks, OpenAPI contract drift, all tests, builds, secret scan
 ```
 
-Model dimuat secara langsung dari MLflow Model Registry menggunakan URI `models:/ICP_Price_Model/Production` melalui fungsi `mlflow.pyfunc.load_model`, tanpa bergantung pada file model lokal. Pendekatan ini memastikan sistem inferensi selalu menggunakan versi model yang aktif di Production secara otomatis.
+Last full run (`npm run check`, 2026-10-17): ruff, mypy and ESLint clean; contract in sync;
+**96 Python tests, 27 web tests and 20 gateway tests passed**; web and Worker builds succeeded;
+secret scan without findings.
 
-Penggunaan model berbasis *time series* seperti ARIMAX atau LSTM belum diterapkan pada tahap ini mengingat keterbatasan jumlah data (±18 bulan), yang berpotensi mengakibatkan *overfitting* pada model temporal yang lebih kompleks.
+The tests cover the API, storage adapters (SQLite and a simulated D1 protocol), the gateway's
+internal data plane, accounts and entitlements, forecasting semantics, prediction equality between
+MLflow and bundle mode, and the web app's session flows (sign-in, deep links, sign-out, session
+expiry, offline errors). Browser checks with headless Chrome were run locally against all main
+pages at desktop and mobile widths. The tests run against local stores and simulated services;
+apart from the staging checks listed under [Live demo](#live-demo), they do not exercise the
+deployed environment.
 
----
+## Security and configuration
 
-## 6. [LK-09] Orkestrasi Layanan ML Terintegrasi Menggunakan Docker Compose
+- Secrets are never committed. Local secrets are generated into `.env` and
+  `apps/gateway/.dev.vars`; staging secrets are set with `wrangler secret put` and kept in a
+  gitignored local folder. `.env.example` and `.dev.vars.example` contain placeholders only.
+- The browser never sees a backend URL or secret. The gateway adds a shared secret that the backend
+  requires; the Worker's internal D1/KV routes reject requests without it.
+- Users authenticate with server-side sessions; roles, plans and organisation boundaries are
+  enforced by the backend. Operator access uses separate tokens.
+- A secret scan runs as part of `npm run check`.
 
-Seluruh layanan pada sistem MLOps dijalankan menggunakan Docker Compose sehingga seluruh container dapat di-*orchestrate* secara otomatis dalam satu environment.
+No formal security audit or penetration test has been carried out. See
+[docs/SECURITY.md](docs/SECURITY.md).
 
----
+## Known limitations
 
-### 6.1 Menjalankan Sistem dengan Docker Compose
+**Current deployment**
+- The backend runs on a personal machine behind a Quick Tunnel, which Cloudflare describes as
+  having no uptime guarantee and as intended for testing. The API is offline whenever that machine
+  or process is.
+- Free-tier quotas apply (for example Workers KV allows 1,000 writes per day; every report,
+  forecast export and dataset version uses writes). Limits stop the service rather than incur cost.
+- The public market snapshot takes about five seconds on staging because of many storage round
+  trips through the Worker.
+- Continuous training through GitHub Actions is not active: the staging backend serves a bundle
+  and refuses training jobs.
 
-Untuk menjalankan seluruh sistem:
+**Product**
+- No payment integration; plans are changed by an operator.
+- No e-mail delivery: alerts are in-app only, and invitations and password resets are handed over
+  manually.
+- Monthly API quotas are counted but not enforced.
+- No multi-factor authentication and no account self-deletion.
+- Future-month forecasts depend on user-supplied benchmark scenarios (see the evaluation above).
 
-```bash
-docker compose up -d
-```
+**Operational and production-readiness gaps**
+- No persistent, always-on backend host; no alerting, SLA or incident process.
+- No load testing, no formal security review, and no legal review of the terms and privacy pages.
 
-Perintah tersebut akan menjalankan:
+Further detail: [docs/COMMERCIAL_READINESS.md](docs/COMMERCIAL_READINESS.md).
 
-- **Container Streamlit** sebagai aplikasi inference
-- **Container MLflow Tracking Server**
-- **Container PostgreSQL** sebagai backend metadata store
+## Roadmap
 
----
+1. Move the backend to a persistent host so the staging API no longer depends on a personal machine.
+2. Reduce storage round trips for the market snapshot and other read-heavy endpoints.
+3. Add uptime monitoring, alerting and structured log retention.
+4. Security hardening: MFA, account lockout policy, an external review.
+5. Load testing of the gateway and backend.
+6. Complete the missing product pieces: e-mail delivery, enforced API quotas, payment integration.
+7. Volatility-aware prediction ranges for future months.
 
-### 6.2 Memeriksa Status Container
+## Documentation
 
-Gunakan perintah berikut untuk memastikan seluruh container berjalan dengan baik:
+| Topic | Documents |
+|---|---|
+| Architecture and storage | [ARCHITECTURE](docs/ARCHITECTURE.md), [STORAGE](docs/STORAGE.md), [ENVIRONMENTS](docs/ENVIRONMENTS.md) |
+| Data | [DATA_SOURCES](docs/DATA_SOURCES.md), [DATA_DICTIONARY](docs/DATA_DICTIONARY.md), [DATA_RECONCILIATION](docs/DATA_RECONCILIATION.md) |
+| Forecasting | [FORECASTING_METHODOLOGY](docs/FORECASTING_METHODOLOGY.md) |
+| API and security | [API](docs/API.md), [SECURITY](docs/SECURITY.md) |
+| Deployment and operations | [DEPLOYMENT](docs/DEPLOYMENT.md), [OPERATIONS](docs/OPERATIONS.md), [MIGRATION](docs/MIGRATION.md) |
+| Product readiness and legal | [COMMERCIAL_READINESS](docs/COMMERCIAL_READINESS.md), [LEGAL_NOTICES](docs/LEGAL_NOTICES.md), [ASSET_INVENTORY](docs/ASSET_INVENTORY.md) |
+| Project reports | [Release](docs/RELEASE_REPORT_2026-10.md), [Frontend](docs/FRONTEND_IMPROVEMENT_REPORT_2026-10.md), [Hosting](docs/HOSTING_REPORT_2026-10.md), [UX v3](docs/UX_V3_REPORT_2026-10.md) |
+| History | [Original course-project README](docs/history/course-milestones-README.md) |
 
-```bash
-docker compose ps
-```
+## License and attribution
 
-Container yang berjalan dengan benar akan memiliki status `running` or `healthy`.
+The source code is released under the [MIT License](LICENSE).
 
----
+Third-party material keeps its own terms:
 
-### 6.3 Akses Service
+- **Photographs** on the landing page come from Wikimedia Commons under CC BY 4.0, CC BY-SA 4.0
+  and CC BY-SA 2.0; authors and links are listed in [docs/ASSET_INVENTORY.md](docs/ASSET_INVENTORY.md)
+  and credited in the app.
+- **Data**: EIA series are public domain; the World Bank Pink Sheet is CC BY 4.0 and requires
+  attribution; ICP values are published by ESDM and JISDOR rates by Bank Indonesia. See
+  [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) and [docs/LEGAL_NOTICES.md](docs/LEGAL_NOTICES.md).
+- **Libraries** are used under their own licences (for example React and Recharts under MIT,
+  Lucide icons under ISC).
 
-Setelah seluruh container berjalan, layanan dapat diakses melalui:
-
-| Service | URL |
-| :--- | :--- |
-| Streamlit App | http://localhost:8501 |
-| MLflow Tracking Server | http://localhost:5000 |
-
----
-
-### 6.4 Hasil Orkestrasi
-
-Docker Compose berhasil mengintegrasikan layanan Streamlit, MLflow, dan PostgreSQL dalam satu environment terorkestrasi. Aplikasi Streamlit berhasil melakukan inference model menggunakan model yang diambil dari MLflow Model Registry melalui komunikasi antar container.
-
----
-
-## 7. [LK-10] FastAPI Model Serving & Horizontal Scaling
-
-### 7.1 Mengakses Endpoint API
-
-Pastikan seluruh layanan sudah berjalan:
-
-```bash
-docker compose up -d
-```
-
-Endpoint yang tersedia:
-
-| Method | Endpoint | Fungsi |
-|---------|-----------|---------|
-| GET | `/health` | Memeriksa status layanan model serving |
-| POST | `/predict` | Mengirim data inferensi untuk prediksi harga ICP |
-| GET | `/docs` | Swagger API documentation |
-
-Base URL:
-
-```text
-http://localhost:8000
-```
-
-Contoh pengecekan health endpoint:
-
-```bash
-curl http://localhost:8000/health
-```
-
-Contoh request prediksi:
-
-```bash
-curl -X POST http://localhost:8000/predict \
--H "Content-Type: application/json" \
--d '{
-"wti_price":72,
-"wti_lag_1":71,
-"wti_rolling_mean_3":71.5,
-"lag_1":70,
-"lag_3":68,
-"lag_6":65,
-"rolling_mean_3":69
-}'
-```
-
-Alternatif pengujian menggunakan Postman:
-
-1. Buat request `GET`
-```
-http://localhost:8000/health
-```
-
-2. Buat request `POST`
-```
-http://localhost:8000/predict
-```
-
-Body → Raw → JSON:
-
-```json
-{
-  "wti_price":72,
-  "wti_lag_1":71,
-  "wti_rolling_mean_3":71.5,
-  "lag_1":70,
-  "lag_3":68,
-  "lag_6":65,
-  "rolling_mean_3":69
-}
-```
-
----
-
-### 7.2 Menambah Jumlah Replika Secara Dinamis
-
-Melakukan horizontal scaling layanan model serving:
-
-```bash
-docker compose up -d --scale model-api=3
-```
-
-Memverifikasi replika yang berjalan:
-
-```bash
-docker compose ps
-```
-
-Output akan menunjukkan beberapa instance container:
-
-```
-model-api-1
-model-api-2
-model-api-3
-```
-
-Menambah replika lain secara dinamis:
-
-```bash
-docker compose up -d --scale model-api=5
-```
-
-Docker Compose akan membuat instance tambahan tanpa mengubah layanan lain yang sedang berjalan.
-
----
+The application provides information only and is not investment advice. Official ICP values are
+set by the Ministry of Energy and Mineral Resources of the Republic of Indonesia.

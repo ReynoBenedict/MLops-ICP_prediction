@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 64" width="320" height="64" role="img" aria-label="ICP Intelligence - intelijen harga minyak mentah Indonesia">
+  <rect width="64" height="64" rx="14" fill="#123A5C"/>
+  <rect x="13" y="38" width="8" height="13" rx="2.5" fill="#FFFFFF" opacity="0.92"/>
+  <rect x="27" y="29" width="8" height="22" rx="2.5" fill="#FFFFFF" opacity="0.92"/>
+  <rect x="41" y="20" width="8" height="31" rx="2.5" fill="#FFFFFF" opacity="0.92"/>
+  <path d="M11 33 L26 23 L36 27 L52 12" fill="none" stroke="#D99A2B" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M44 11 L53 11 L53 20" fill="none" stroke="#D99A2B" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="80" y="31" font-family="Inter, Segoe UI, system-ui, sans-serif" font-size="24" font-weight="700" fill="#123A5C" letter-spacing="-0.5">ICP Intelligence</text>
+  <text x="80" y="52" font-family="Inter, Segoe UI, system-ui, sans-serif" font-size="13" font-weight="500" fill="#5D6779" letter-spacing="0.4">Intelijen harga minyak mentah Indonesia</text>
+</svg>

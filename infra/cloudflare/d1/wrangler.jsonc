@@ -1,0 +1,19 @@
+// Wrangler configuration used ONLY to manage the D1 schema (the gateway Worker does not bind D1;
+// the Python backend reaches D1 through the D1 REST API). Replace the placeholder before use:
+//   npx wrangler d1 create icp-metadata                       -> prints the database_id
+//   npx wrangler d1 migrations apply icp-metadata --remote -c infra/cloudflare/d1/wrangler.jsonc
+// Local verification (no Cloudflare account needed):
+//   npx wrangler d1 migrations apply icp-metadata --local -c infra/cloudflare/d1/wrangler.jsonc
+{
+  "$schema": "../../../node_modules/wrangler/config-schema.json",
+  "name": "icp-d1-schema",
+  "compatibility_date": "2026-09-30",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "icp-metadata-staging",
+      "database_id": "15fece89-2034-4f83-bc45-a308023e16f4",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

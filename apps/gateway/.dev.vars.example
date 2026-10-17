@@ -1,0 +1,2 @@
+# Copy to .dev.vars for `wrangler dev` (gitignored). Must equal GATEWAY_SHARED_SECRET in the root .env.
+GATEWAY_SHARED_SECRET=<same-value-as-backend-GATEWAY_SHARED_SECRET>

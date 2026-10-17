@@ -1,0 +1,93 @@
+// Cloudflare Worker configuration for the ICP gateway (web app + /api proxy + internal data plane).
+// Nothing here is deployed by the repository's scripts. See docs/DEPLOYMENT.md before running
+// `wrangler deploy --env staging|production`.
+//
+// Zero-cost topology (docs/DEPLOYMENT.md): the Worker also binds D1 (`DB`) and KV (`OBJECTS`) and
+// exposes them to the Python backend under /api/internal/* behind the shared secret, so the
+// backend needs no Cloudflare API token. All of this stays inside the Workers Free plan
+// (Workers 100k req/day, D1 5M reads + 100k writes/day, KV 100k reads + 1k writes/day; hard stops,
+// no charges). Bindings are per environment and are NOT inherited from the top level.
+//
+// Production values are placeholders (<...>) until those resources are created.
+// Secrets are NOT stored here: set GATEWAY_SHARED_SECRET with
+//   npx wrangler secret put GATEWAY_SHARED_SECRET --env staging|production
+// For local `wrangler dev`, put it in apps/gateway/.dev.vars (gitignored; created by `npm run setup`).
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "icp-gateway-local",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-30",
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
+  "assets": {
+    "directory": "../web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // The Worker runs only for API paths; everything else is served directly as static assets.
+    "run_worker_first": ["/api/*"]
+  },
+  // Local development: the backend started by `npm run dev:edge`.
+  "vars": {
+    "ENVIRONMENT": "local",
+    "BACKEND_URL": "http://127.0.0.1:8000",
+    "MAX_BODY_BYTES": "2000000",
+    "UPSTREAM_TIMEOUT_MS": "30000"
+  },
+  // Edge rate limits (period must be 10 or 60 seconds). namespace_id values are chosen by you and must
+  // be unique positive integers within the Cloudflare account; change them if they collide.
+  "ratelimits": [
+    { "name": "API_RATE_LIMITER", "namespace_id": "41001", "simple": { "limit": 300, "period": 60 } },
+    { "name": "FORECAST_RATE_LIMITER", "namespace_id": "41002", "simple": { "limit": 20, "period": 60 } }
+  ],
+  "env": {
+    "staging": {
+      "name": "icp-gateway-staging",
+      "vars": {
+        "ENVIRONMENT": "staging",
+        // Backend origin. The staging backend runs on the operator's machine behind a Cloudflare Quick
+        // Tunnel whose hostname changes on every start, so it is NOT stored here: `npm run
+        // staging:backend` keeps it in var/staging-backend-url.txt (gitignored) and deploys with
+        // `--var BACKEND_URL:<url>`. A plain `wrangler deploy --env staging` keeps this placeholder and
+        // the gateway answers 503 GATEWAY_MISCONFIGURED for /api/v1/* (assets and data plane still work).
+        "BACKEND_URL": "https://<staging-backend-origin>",
+        "MAX_BODY_BYTES": "2000000",
+        // Render Free spins down after 15 min idle and needs up to ~60 s to wake: allow the first
+        // request after an idle period to succeed instead of timing out at the edge.
+        "UPSTREAM_TIMEOUT_MS": "90000"
+      },
+      "ratelimits": [
+        { "name": "API_RATE_LIMITER", "namespace_id": "41011", "simple": { "limit": 300, "period": 60 } },
+        { "name": "FORECAST_RATE_LIMITER", "namespace_id": "41012", "simple": { "limit": 20, "period": 60 } }
+      ],
+      // Created with `npx wrangler d1 create icp-metadata-staging` / `npx wrangler kv namespace create icp-objects-staging`
+      // (free). Schema: `npx wrangler d1 migrations apply icp-metadata-staging --remote -c infra/cloudflare/d1/wrangler.jsonc`.
+      "d1_databases": [
+        { "binding": "DB", "database_name": "icp-metadata-staging", "database_id": "15fece89-2034-4f83-bc45-a308023e16f4" }
+      ],
+      "kv_namespaces": [
+        { "binding": "OBJECTS", "id": "067677c60b6946949ed2ff3cf518ea7a" }
+      ]
+    },
+    "production": {
+      "name": "icp-gateway",
+      "vars": {
+        "ENVIRONMENT": "production",
+        "BACKEND_URL": "https://<render-production-service>.onrender.com",
+        "MAX_BODY_BYTES": "2000000",
+        "UPSTREAM_TIMEOUT_MS": "90000"
+      },
+      "ratelimits": [
+        { "name": "API_RATE_LIMITER", "namespace_id": "41021", "simple": { "limit": 300, "period": 60 } },
+        { "name": "FORECAST_RATE_LIMITER", "namespace_id": "41022", "simple": { "limit": 20, "period": 60 } }
+      ],
+      // Create separate production resources (`wrangler d1 create icp-metadata`, `wrangler kv namespace
+      // create icp-objects`) and fill in the ids; `wrangler deploy --env production` is refused until then.
+      "d1_databases": [
+        { "binding": "DB", "database_name": "icp-metadata", "database_id": "<D1_PRODUCTION_DATABASE_ID>" }
+      ],
+      "kv_namespaces": [
+        { "binding": "OBJECTS", "id": "<KV_PRODUCTION_NAMESPACE_ID>" }
+      ]
+      // "routes": [{ "pattern": "<your-custom-domain>", "custom_domain": true }]
+    }
+  }
+}

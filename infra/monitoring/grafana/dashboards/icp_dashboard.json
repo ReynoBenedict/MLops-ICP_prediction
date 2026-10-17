@@ -1,0 +1,59 @@
+{
+  "title": "ICP Platform - API & pipeline",
+  "uid": "icp-platform",
+  "schemaVersion": 39,
+  "version": 2,
+  "editable": true,
+  "time": { "from": "now-6h", "to": "now" },
+  "refresh": "30s",
+  "tags": ["icp", "mlops"],
+  "panels": [
+    {
+      "id": 1, "type": "timeseries", "title": "Requests per second by route",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [{ "expr": "sum by (route) (rate(icp_http_requests_total[5m]))", "legendFormat": "{{route}}" }],
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] }
+    },
+    {
+      "id": 2, "type": "timeseries", "title": "Error ratio (5xx / all)",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [{ "expr": "sum(rate(icp_http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(icp_http_requests_total[5m])), 1e-9)", "legendFormat": "5xx ratio" }],
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0 }, "overrides": [] }
+    },
+    {
+      "id": 3, "type": "timeseries", "title": "Latency p50 / p95",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [
+        { "expr": "histogram_quantile(0.5, sum by (le) (rate(icp_http_request_duration_seconds_bucket[5m])))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(icp_http_request_duration_seconds_bucket[5m])))", "legendFormat": "p95" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 4, "type": "timeseries", "title": "Forecast runs per hour by outcome",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [{ "expr": "sum by (status) (increase(icp_forecast_runs_total[1h]))", "legendFormat": "{{status}}" }],
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] }
+    },
+    {
+      "id": 5, "type": "bargauge", "title": "Predicted ICP distribution (USD/bbl, last 24h)",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [{ "expr": "sum by (le) (increase(icp_prediction_value_usd_bucket[24h]))", "legendFormat": "<= {{le}}", "format": "heatmap" }],
+      "options": { "orientation": "vertical", "displayMode": "basic" }
+    },
+    {
+      "id": 6, "type": "stat", "title": "Background jobs by final status (24h)",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "targets": [{ "expr": "sum by (job_type, status) (increase(icp_jobs_total[24h]))", "legendFormat": "{{job_type}} {{status}}" }]
+    }
+  ],
+  "templating": {
+    "list": [{ "name": "DS_PROMETHEUS", "type": "datasource", "query": "prometheus", "label": "Prometheus" }]
+  }
+}

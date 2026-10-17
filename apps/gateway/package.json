@@ -1,0 +1,20 @@
+{
+  "name": "@icp/gateway",
+  "version": "2.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker: serves the web app (static assets) and proxies /api/* to the Python backend.",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "build": "wrangler deploy --dry-run --env=\"\" --outdir dist/local",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run",
+    "build:staging": "wrangler deploy --dry-run --env staging --outdir dist/staging",
+    "build:production": "wrangler deploy --dry-run --env production --outdir dist/production"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20260930.2",
+    "wrangler": "4.150.0"
+  }
+}

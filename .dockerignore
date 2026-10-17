@@ -1,37 +1,26 @@
-# Git
 .git
-.gitignore
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-.env
+.github
+.idea
 .venv
-env/
-venv/
-build/
-dist/
-*.egg-info/
-
-# Testing
-.pytest_cache/
-.ruff_cache/
-htmlcov/
-.coverage
-
-# DVC
-.dvc/
-.dvcignore
-
-# Project specific
-notebooks/
-reports/
-docs/
-*.log
-*.pdf
-*.csv
-!data/**/*.csv
-# mlruns/      # Keep if you want local history inside container, but usually ignored
-# mlflow.db    # Keep if needed for local inference demonstration
-
+venv
+node_modules
+apps
+packages
+legacy
+notebooks
+docs
+var
+.env
+.env.*
+**/.dev.vars
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+.dvc/cache
+.dvc/tmp
+data/processed
+data/raw/*.pdf
+**/dist
+**/.wrangler

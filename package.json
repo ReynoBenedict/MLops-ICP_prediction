@@ -1,0 +1,45 @@
+{
+  "name": "icp-platform",
+  "private": true,
+  "description": "ICP forecasting platform monorepo: React web app, Cloudflare Worker gateway, FastAPI backend, ML pipeline.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "workspaces": [
+    "apps/web",
+    "apps/gateway",
+    "packages/contracts"
+  ],
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "dev": "node scripts/dev.mjs",
+    "dev:edge": "node scripts/dev.mjs --edge",
+    "stop": "node scripts/stop.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "staging:backend": "node scripts/staging-backend.mjs",
+    "api": "node scripts/py.mjs -m icp_api.cli serve --reload",
+    "bootstrap": "node scripts/py.mjs -m icp_api.cli bootstrap",
+    "mlflow:ui": "node scripts/mlflow-ui.mjs",
+    "backup": "node scripts/py.mjs -m icp_api.cli backup",
+    "contracts": "node scripts/py.mjs -m icp_api.cli export-openapi && npm run generate -w @icp/contracts",
+    "contracts:check": "node scripts/contracts-check.mjs",
+    "build": "npm run build -w @icp/web && npm run build -w @icp/gateway",
+    "lint": "npm run lint:py && npm run lint -w @icp/web && npm run lint -w @icp/gateway",
+    "lint:py": "node scripts/py.mjs -m ruff check pipeline backend && node scripts/py.mjs -m ruff format --check pipeline backend",
+    "format": "node scripts/py.mjs -m ruff format pipeline backend && node scripts/py.mjs -m ruff check --fix pipeline backend",
+    "typecheck": "node scripts/py.mjs -m mypy && npm run typecheck -w @icp/contracts && npm run typecheck -w @icp/web && npm run typecheck -w @icp/gateway",
+    "test": "npm run test:py && npm run test -w @icp/web && npm run test -w @icp/gateway",
+    "test:py": "node scripts/py.mjs -m pytest",
+    "check": "npm run lint && npm run typecheck && npm run contracts:check && npm run test && npm run build && node scripts/secret-scan.mjs",
+    "secret-scan": "node scripts/secret-scan.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "eslint": "10.11.0",
+    "globals": "17.12.0",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.71.0",
+    "vitest": "5.0.3"
+  }
+}

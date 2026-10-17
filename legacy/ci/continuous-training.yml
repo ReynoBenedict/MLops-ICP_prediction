@@ -1,0 +1,219 @@
+name: LK-12 Continuous Training
+
+on:
+  # Trigger manual untuk simulasi alert (Skenario A dan B)
+  workflow_dispatch:
+    inputs:
+      trigger_reason:
+        description: "Alasan retraining: manual / performance_degradation / data_drift"
+        required: true
+        default: manual
+        type: choice
+        options:
+          - manual
+          - performance_degradation
+          - data_drift
+      rmse_observed:
+        description: "Nilai RMSE yang memicu alert (Skenario A, opsional)"
+        required: false
+        default: ""
+
+  # Jadwal retraining mingguan (Skenario C)
+  schedule:
+    - cron: "0 17 28-31 * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ct-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+  MLFLOW_TRACKING_URI: "sqlite:///mlflow.db"
+
+jobs:
+  # Catat informasi trigger sebelum pipeline berjalan
+  log-trigger:
+    name: "Log Trigger"
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cetak konteks trigger
+        run: |
+          echo "=================================="
+          echo "  LK-12 CONTINUOUS TRAINING"
+          echo "=================================="
+          echo "  Event         : ${{ github.event_name }}"
+          echo "  Trigger reason: ${{ inputs.trigger_reason || 'scheduled' }}"
+          echo "  RMSE observed : ${{ inputs.rmse_observed || 'N/A' }}"
+          echo "  Run ID        : ${{ github.run_id }}"
+          echo "  Timestamp     : $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+          echo "=================================="
+
+      - name: Tulis ct_trigger_event.json
+        run: |
+          python - <<'EOF'
+          import json, os
+          from datetime import datetime, timezone
+          event = {
+              "event": "ct_trigger",
+              "timestamp": datetime.now(timezone.utc).isoformat(),
+              "triggered_by": os.environ.get("GITHUB_EVENT_NAME", "unknown"),
+              "trigger_reason": "${{ inputs.trigger_reason || 'scheduled' }}",
+              "rmse_observed": "${{ inputs.rmse_observed || 'N/A' }}",
+              "rmse_threshold": 10.0,
+              "drift_threshold_psi": 0.20,
+              "run_id": os.environ.get("GITHUB_RUN_ID", "unknown"),
+          }
+          with open("ct_trigger_event.json", "w") as f:
+              json.dump(event, f, indent=2)
+          print(json.dumps(event, indent=2))
+          EOF
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ct-trigger-event-${{ github.run_id }}
+          path: ct_trigger_event.json
+          retention-days: 30
+
+  # Validasi kode sebelum training
+  lint:
+    name: "Ruff Check"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install ruff
+      - run: ruff check . --output-format=github
+
+  # Smoke test untuk memastikan sintaks aplikasi valid
+  smoke-test:
+    name: "Smoke Test"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Validasi sintaks
+        run: |
+          set -e
+          python -m py_compile app.py
+          find pages -name "*.py" -exec python -m py_compile {} \;
+          echo "[OK] Smoke test passed."
+
+  # Pipeline retraining: persiapan data, training, registrasi, promosi
+  continuous-training:
+    name: "Retraining Pipeline"
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [log-trigger, lint, smoke-test]
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      MLFLOW_TRACKING_URI: "sqlite:///mlflow.db"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # Ambil data WTI terbaru sebelum prepare_data (wti.csv tidak ada di Git)
+      - name: "Fetch WTI data"
+        run: |
+          set -e
+          python -m src.data_ingestion.fetch_wti
+          echo "[OK] wti.csv tersedia di data/raw/"
+
+      # Persiapan data
+      - name: "[1/4] Prepare data"
+        run: |
+          set -e
+          python -m src.data_processing.prepare_data
+
+      # Simulasi data drift jika trigger dipilih (harus setelah prepare_data)
+      - name: "Simulasi data drift (Skenario B)"
+        if: ${{ github.event.inputs.trigger_reason == 'data_drift' }}
+        run: |
+          set -e
+          echo "[INFO] Trigger: data_drift — menjalankan simulasi drift..."
+          python scripts/simulate_drift_trigger.py
+          echo "[OK] Simulasi drift selesai."
+
+      # Training ulang dan registrasi model
+      - name: "[2/4] Train models"
+        run: |
+          set -e
+          echo "Trigger: ${{ inputs.trigger_reason || github.event_name }}"
+          python -m src.training.train
+
+      - name: "[3/4] Register best model"
+        run: |
+          set -e
+          python -m src.training.register_model
+
+      # Audit model kandidat sebelum promosi
+      - name: "[4/4] Audit and promote"
+        run: |
+          set -e
+          echo "Aturan: kandidat dipromosikan hanya jika RMSE lebih rendah dari Production"
+          python audit_and_promote.py
+
+      - name: Tampilkan metrics.json
+        if: always()
+        run: cat metrics.json 2>/dev/null || echo "(metrics.json tidak ditemukan)"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ct-pipeline-artifacts-${{ github.run_id }}
+          path: |
+            metrics.json
+            ct_trigger_event.json
+            data/processed/clean_data_shifted.csv
+            reports/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  # Gate akhir pipeline CT
+  ct-summary:
+    name: "CT Gate"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [lint, smoke-test, continuous-training]
+    if: always()
+    steps:
+      - name: Evaluasi hasil pipeline
+        run: |
+          echo "lint              : ${{ needs.lint.result }}"
+          echo "smoke-test        : ${{ needs.smoke-test.result }}"
+          echo "continuous-training: ${{ needs.continuous-training.result }}"
+          if [[ "${{ needs.lint.result }}" == "success" && \
+                "${{ needs.smoke-test.result }}" == "success" && \
+                "${{ needs.continuous-training.result }}" == "success" ]]; then
+            echo "[PASS] CT pipeline selesai."
+          else
+            echo "[FAIL] Satu atau lebih stage gagal."
+            exit 1
+          fi

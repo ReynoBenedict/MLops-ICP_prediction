@@ -1,0 +1,53 @@
+[
+ {
+  "asset": "apps/web/public/img/hero-refinery.jpg (+ .webp)",
+  "placement": "Landing page hero (file name kept for the web app; subject is a tanker, alt text says so)",
+  "source_title": "File:Kapal Tanker Pertamina di Teluk Sibolga.jpg",
+  "source_page": "https://commons.wikimedia.org/wiki/File:Kapal_Tanker_Pertamina_di_Teluk_Sibolga.jpg",
+  "downloaded_variant": "original",
+  "downloaded_file_sha256": "fdc3d00aef820cdb60d6cc7058a98fc9a910f59e764b78c660c6ad3a4ad0b70c",
+  "creator": "Nafisathallah",
+  "license": "CC BY 4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0",
+  "attribution_required": true,
+  "share_alike": false,
+  "modifications": "resized to 1920x1280, re-encoded JPEG q82 / WebP q80, colours unchanged",
+  "description": "Pertamina oil tanker crossing Sibolga Bay, North Sumatra",
+  "photo_date": "2025-02-08",
+  "retrieved": "2026-10-16"
+ },
+ {
+  "asset": "apps/web/public/img/editorial-tanker.jpg (+ .webp)",
+  "placement": "Landing page / onboarding editorial image",
+  "source_title": "File:Plaju leaving Benoa (1).jpg",
+  "source_page": "https://commons.wikimedia.org/wiki/File:Plaju_leaving_Benoa_(1).jpg",
+  "downloaded_variant": "original",
+  "downloaded_file_sha256": "f5176465fbb35f408789b9c6c95a1e9b08c04121a15cc1b33db9cfedad7844cf",
+  "creator": "Sabung.hamster (Wikimedia Commons user)",
+  "license": "CC BY-SA 4.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/4.0",
+  "attribution_required": true,
+  "share_alike": true,
+  "modifications": "resized to 1400x937, re-encoded JPEG q82 / WebP q80, colours unchanged",
+  "description": "Pertamina oil tanker 'Plaju' leaving Benoa, Bali",
+  "photo_date": "2017-01-16",
+  "retrieved": "2026-10-16"
+ },
+ {
+  "asset": "apps/web/public/img/editorial-port.jpg (+ .webp)",
+  "placement": "Landing page editorial image (ports & logistics)",
+  "source_title": "File:KURAU-PERTAMINA 59 (IMO- 9004932), Benoa Harbour, Denpasar, Bali, August 19 2012. (7892224776).jpg",
+  "source_page": "https://commons.wikimedia.org/wiki/File:KURAU-PERTAMINA_59_(IMO-_9004932),_Benoa_Harbour,_Denpasar,_Bali,_August_19_2012._(7892224776).jpg",
+  "downloaded_variant": "Commons 1920px thumbnail of the original",
+  "downloaded_file_sha256": "d68f62ac5865d7a6efe939d313dbaee1c9b4258ed9522ee350eff083766af1d3",
+  "creator": "Andrew Thomas (Shrewsbury, UK)",
+  "license": "CC BY-SA 2.0",
+  "license_url": "https://creativecommons.org/licenses/by-sa/2.0",
+  "attribution_required": true,
+  "share_alike": true,
+  "modifications": "resized to 1400x922, re-encoded JPEG q82 / WebP q80, colours unchanged",
+  "description": "Oil products tanker KURAU / PERTAMINA 59 with storage tanks, Benoa Harbour, Bali",
+  "photo_date": "2012-08-19",
+  "retrieved": "2026-10-16"
+ }
+]

@@ -1,219 +1,102 @@
-name: LK-12 Continuous Training
+# Continuous training (CT) against a DEPLOYED backend, through the public gateway.
+#
+# Training never runs on the CI runner (a throwaway store would never reach the serving system).
+# This workflow drives the backend's job API:
+#   1. refreshes the inputs - oil benchmarks (WTI/Brent/Dubai), USD/IDR (JISDOR) and the official
+#      ICP series (ESDM decrees + announcements; only verified months are accepted),
+#   2. reads the real feature-drift report (PSI) of the production model,
+#   3. starts a training job with auto_promote=true - the backend backtests every method, registers
+#      the winner and promotes it only if every validation gate passes (beats naive persistence,
+#      not worse than production, no-scenario error not worse than naive, loads and predicts),
+#   4. waits for the job and fails the workflow if it fails.
+#
+# Required repository configuration (not present until deployment):
+#   vars.ICP_API_BASE_URL  e.g. https://<gateway-host>   (the Cloudflare Worker, not the origin URL)
+#   secrets.ICP_ADMIN_TOKEN  an admin token configured in ADMIN_API_TOKENS on the backend
+name: Continuous training
 
 on:
-  # Trigger manual untuk simulasi alert (Skenario A dan B)
+  schedule:
+    - cron: "0 1 5,12 * *" # 5th and 12th of each month, 01:00 UTC (ESDM publishes ICP early in the month)
   workflow_dispatch:
     inputs:
       trigger_reason:
-        description: "Alasan retraining: manual / performance_degradation / data_drift"
-        required: true
-        default: manual
+        description: Why retraining is requested
         type: choice
-        options:
-          - manual
-          - performance_degradation
-          - data_drift
-      rmse_observed:
-        description: "Nilai RMSE yang memicu alert (Skenario A, opsional)"
-        required: false
-        default: ""
-
-  # Jadwal retraining mingguan (Skenario C)
-  schedule:
-    - cron: "0 0 * * 0"
+        options: [scheduled, data_drift, performance_degradation, manual]
+        default: manual
+      skip_data_refresh:
+        description: Skip the data refresh steps
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 concurrency:
-  group: ct-${{ github.ref }}
+  group: continuous-training
   cancel-in-progress: false
 
-env:
-  PYTHONPATH: ${{ github.workspace }}
-  MLFLOW_TRACKING_URI: "sqlite:///mlflow.db"
-
 jobs:
-  # Catat informasi trigger sebelum pipeline berjalan
-  log-trigger:
-    name: "Log Trigger"
+  retrain:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Cetak konteks trigger
-        run: |
-          echo "=================================="
-          echo "  LK-12 CONTINUOUS TRAINING"
-          echo "=================================="
-          echo "  Event         : ${{ github.event_name }}"
-          echo "  Trigger reason: ${{ inputs.trigger_reason || 'scheduled' }}"
-          echo "  RMSE observed : ${{ inputs.rmse_observed || 'N/A' }}"
-          echo "  Run ID        : ${{ github.run_id }}"
-          echo "  Timestamp     : $(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-          echo "=================================="
-
-      - name: Tulis ct_trigger_event.json
-        run: |
-          python - <<'EOF'
-          import json, os
-          from datetime import datetime, timezone
-          event = {
-              "event": "ct_trigger",
-              "timestamp": datetime.now(timezone.utc).isoformat(),
-              "triggered_by": os.environ.get("GITHUB_EVENT_NAME", "unknown"),
-              "trigger_reason": "${{ inputs.trigger_reason || 'scheduled' }}",
-              "rmse_observed": "${{ inputs.rmse_observed || 'N/A' }}",
-              "rmse_threshold": 10.0,
-              "drift_threshold_psi": 0.20,
-              "run_id": os.environ.get("GITHUB_RUN_ID", "unknown"),
-          }
-          with open("ct_trigger_event.json", "w") as f:
-              json.dump(event, f, indent=2)
-          print(json.dumps(event, indent=2))
-          EOF
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ct-trigger-event-${{ github.run_id }}
-          path: ct_trigger_event.json
-          retention-days: 30
-
-  # Validasi kode sebelum training
-  lint:
-    name: "Ruff Check"
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-      - run: pip install ruff
-      - run: ruff check . --output-format=github
-
-  # Smoke test untuk memastikan sintaks aplikasi valid
-  smoke-test:
-    name: "Smoke Test"
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    needs: lint
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-      - run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      - name: Validasi sintaks
-        run: |
-          set -e
-          python -m py_compile app.py
-          find pages -name "*.py" -exec python -m py_compile {} \;
-          echo "[OK] Smoke test passed."
-
-  # Pipeline retraining: persiapan data, training, registrasi, promosi
-  continuous-training:
-    name: "Retraining Pipeline"
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: [log-trigger, lint, smoke-test]
+    timeout-minutes: 90
     env:
-      PYTHONPATH: ${{ github.workspace }}
-      MLFLOW_TRACKING_URI: "sqlite:///mlflow.db"
-
+      BASE: ${{ vars.ICP_API_BASE_URL }}
+      TOKEN: ${{ secrets.ICP_ADMIN_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-
-      - run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
-      # Ambil data WTI terbaru sebelum prepare_data (wti.csv tidak ada di Git)
-      - name: "Fetch WTI data"
+      - name: Check configuration
         run: |
-          set -e
-          python -m src.data_ingestion.fetch_wti
-          echo "[OK] wti.csv tersedia di data/raw/"
-
-      # Persiapan data
-      - name: "[1/4] Prepare data"
-        run: |
-          set -e
-          python -m src.data_processing.prepare_data
-
-      # Simulasi data drift jika trigger dipilih (harus setelah prepare_data)
-      - name: "Simulasi data drift (Skenario B)"
-        if: ${{ github.event.inputs.trigger_reason == 'data_drift' }}
-        run: |
-          set -e
-          echo "[INFO] Trigger: data_drift — menjalankan simulasi drift..."
-          python scripts/simulate_drift_trigger.py
-          echo "[OK] Simulasi drift selesai."
-
-      # Training ulang dan registrasi model
-      - name: "[2/4] Train models"
-        run: |
-          set -e
-          echo "Trigger: ${{ inputs.trigger_reason || github.event_name }}"
-          python -m src.training.train
-
-      - name: "[3/4] Register best model"
-        run: |
-          set -e
-          python -m src.training.register_model
-
-      # Audit model kandidat sebelum promosi
-      - name: "[4/4] Audit and promote"
-        run: |
-          set -e
-          echo "Aturan: kandidat dipromosikan hanya jika RMSE lebih rendah dari Production"
-          python audit_and_promote.py
-
-      - name: Tampilkan metrics.json
-        if: always()
-        run: cat metrics.json 2>/dev/null || echo "(metrics.json tidak ditemukan)"
-
-      - name: Upload artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ct-pipeline-artifacts-${{ github.run_id }}
-          path: |
-            metrics.json
-            ct_trigger_event.json
-            data/processed/clean_data_shifted.csv
-            reports/
-          retention-days: 30
-          if-no-files-found: ignore
-
-  # Gate akhir pipeline CT
-  ct-summary:
-    name: "CT Gate"
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    needs: [lint, smoke-test, continuous-training]
-    if: always()
-    steps:
-      - name: Evaluasi hasil pipeline
-        run: |
-          echo "lint              : ${{ needs.lint.result }}"
-          echo "smoke-test        : ${{ needs.smoke-test.result }}"
-          echo "continuous-training: ${{ needs.continuous-training.result }}"
-          if [[ "${{ needs.lint.result }}" == "success" && \
-                "${{ needs.smoke-test.result }}" == "success" && \
-                "${{ needs.continuous-training.result }}" == "success" ]]; then
-            echo "[PASS] CT pipeline selesai."
-          else
-            echo "[FAIL] Satu atau lebih stage gagal."
+          if [ -z "$BASE" ] || [ -z "$TOKEN" ]; then
+            echo "::error::Set vars.ICP_API_BASE_URL and secrets.ICP_ADMIN_TOKEN (see docs/DEPLOYMENT.md)."
             exit 1
           fi
+
+      - name: Define helpers
+        run: |
+          cat > "$RUNNER_TEMP/icp.sh" <<'EOF'
+          api() { curl -sS --fail-with-body -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" "$@"; }
+          run_job() {  # $1 = JSON body; waits for a terminal status, exits non-zero unless succeeded
+            id=$(api -X POST "$BASE/api/v1/jobs" -d "$1" | jq -r .id)
+            echo "job $id"
+            for _ in $(seq 1 360); do
+              job=$(api "$BASE/api/v1/jobs/$id")
+              status=$(echo "$job" | jq -r .status)
+              case "$status" in
+                succeeded) echo "$job" | jq '{status, result}'; return 0 ;;
+                failed|cancelled) echo "$job" | jq '{status, error_code, error_message}'; return 1 ;;
+              esac
+              sleep 10
+            done
+            echo "::error::job $id did not finish in time"; return 1
+          }
+          EOF
+
+      - name: Refresh oil benchmarks (WTI, Brent, Dubai)
+        if: ${{ !inputs.skip_data_refresh }}
+        run: |
+          . "$RUNNER_TEMP/icp.sh"
+          run_job '{"job_type":"ingest_benchmarks","params":{}}'
+
+      - name: Refresh USD/IDR (Bank Indonesia JISDOR)
+        if: ${{ !inputs.skip_data_refresh }}
+        run: |
+          . "$RUNNER_TEMP/icp.sh"
+          run_job '{"job_type":"ingest_fx","params":{}}'
+
+      - name: Refresh official ICP (ESDM)
+        if: ${{ !inputs.skip_data_refresh }}
+        run: |
+          . "$RUNNER_TEMP/icp.sh"
+          run_job '{"job_type":"ingest_icp","params":{"news_pages":6}}'
+
+      - name: Drift report (informational)
+        run: |
+          . "$RUNNER_TEMP/icp.sh"
+          api "$BASE/api/v1/models/drift" | jq '{status, max_psi, current_period, note}' || echo "drift report unavailable"
+
+      - name: Train and promote if validated
+        run: |
+          . "$RUNNER_TEMP/icp.sh"
+          echo "trigger: ${{ inputs.trigger_reason || 'scheduled' }}"
+          run_job '{"job_type":"train","params":{"auto_promote":true}}'

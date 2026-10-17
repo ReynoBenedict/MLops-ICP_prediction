@@ -1,0 +1,11 @@
+PASS  offline backend on /ringkasan: explained, retry offered, no endless skeleton, no false empty state - {"unavailable":true,"retry":true,"skeletons":0,"noForecastClaim":false}
+PASS  offline backend on /harga: explained, retry offered, no endless skeleton, no false empty state - {"unavailable":true,"retry":true,"skeletons":0,"noForecastClaim":false}
+PASS  offline backend on /proyeksi: explained, retry offered, no endless skeleton, no false empty state - {"unavailable":true,"retry":true,"skeletons":0,"noForecastClaim":false}
+PASS  recovers when the backend is back
+PASS  prefers-reduced-motion disables chart and page animation - []
+PASS  archive asks for confirmation, focuses Batal; Escape cancels and returns focus - {"created":201,"dlg":{"found":true,"open":true,"focus":"Batal"},"esc":{"closed":true,"focusBack":"Arsipkan: Uji arsip UX v3","stillListed":true}}
+PASS  confirmed archive: server first, then list update and feedback - {"toast":"Skenario \"Uji arsip UX v3\" diarsipkan.","stillListed":false}
+PASS  no console errors or exceptions during the run
+
+console:
+

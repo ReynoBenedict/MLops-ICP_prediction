@@ -1,0 +1,41 @@
+# Reproducible training / backtest configuration for the ICP forecasting methods.
+# The fully resolved config (plus its SHA-256) is logged to every MLflow training run.
+experiment_name: icp-price-forecasting
+model_name: ICP_Price_Model
+random_seed: 42
+
+# Refuse to train when fewer complete feature rows exist (gaps remove rows; see features.py).
+min_feature_rows: 30
+
+# Candidate methods. "default" = icp_ml.methods.DEFAULT_METHODS: persistence, benchmark+spread
+# rules (WTI/Brent/Dubai, several windows), a non-negative benchmark blend, ridge and gradient
+# boosting. A list may mix default names and inline specs:
+#   - spread_brent_6m
+#   - { name: ridge_small, family: ridge, params: { alpha: 5 }, features: [brent_price, icp_lag_1] }
+methods: default
+
+# Rolling-origin backtest: for every origin (last official ICP month available to the forecaster)
+# each method is refitted on history <= origin and asked for the next `horizons` months.
+#   observed  - the target month's benchmark averages are known (elapsed month, ICP not yet published)
+#   hold_last - benchmarks beyond the origin are held at the last known value (true future, no scenario)
+backtest:
+  horizons: [1, 2, 3, 4, 5, 6]
+  min_train_rows: 24
+  first_origin: null
+  modes: [observed, hold_last]
+
+# The winner minimises `metric` averaged over `horizons` in `mode`, computed on the (origin,
+# horizon) pairs every method produced. Ties and near-ties favour simpler (rule-based) methods.
+selection:
+  mode: observed
+  horizons: [1, 2, 3]
+  metric: mae
+
+# Prediction intervals are empirical quantiles of the backtest errors per mode and horizon.
+interval_levels: [0.5, 0.8, 0.95]
+
+# Gates evaluated before a registered version may receive the production alias.
+promotion:
+  require_beats_naive_baseline: true   # primary score < naive persistence on the same rows
+  max_regression_pct: 5.0              # vs the current production version (different windows: indicative)
+  max_hold_last_vs_naive_pct: 10.0     # without a scenario the method may not be clearly worse than naive
