@@ -1,13 +1,25 @@
 /** Akun & Organisasi: profile, password, members, API keys, plan & usage. */
 import type { ApiKeyCreated, ApiKeyInfo, InviteResponse, MeResponse, OrganizationDetail, UserPublic } from "../api/types";
 import { Check, KeyRound, Minus, Settings, ShieldCheck, UserPlus, Users } from "lucide-react";
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
+import { useLocation } from "react-router-dom";
 import { api } from "../api/client";
 import { useResource } from "../api/hooks";
 import { useAuth } from "../auth";
-import { Badge, Button, Callout, ErrorState, GateNotice, PageHeader, Panel, Skeleton, StatusBadge } from "../components/ui";
-import { dateTime } from "../format";
+import { useToast } from "../components/toast";
+import { Badge, Button, Callout, ErrorState, PageHeader, Panel, Skeleton, StatusBadge } from "../components/ui";
+import { dateTime, fmtNum } from "../format";
 import { useT, type Key } from "../i18n";
+
+/** Readable device label from a user agent ("Chrome di Windows"); scripts and unknown agents get a plain label. */
+export function deviceLabel(ua: string | null | undefined, t: ReturnType<typeof useT>["t"]): string {
+  if (!ua) return t("acct.device.unknown");
+  if (/python|curl|httpx|urllib|okhttp|node-fetch|axios|postman|wget|go-http/i.test(ua)) return t("acct.device.script");
+  const browser = /Edg\//.test(ua) ? "Edge" : /OPR\//.test(ua) ? "Opera" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : null;
+  const os = /Windows/.test(ua) ? "Windows" : /Android/.test(ua) ? "Android" : /iPhone|iPad|iOS/.test(ua) ? "iOS" : /Mac OS X|Macintosh/.test(ua) ? "macOS" : /Linux/.test(ua) ? "Linux" : null;
+  if (browser && os) return t("acct.device.on", { browser, os });
+  return browser ?? os ?? t("acct.device.unknown");
+}
 
 function useAct() {
   const [busy, setBusy] = useState<string | null>(null);
@@ -18,7 +30,8 @@ function useAct() {
 
 function Profile({ me, reload }: { me: MeResponse; reload: () => void }) {
   const { t, intl } = useT();
-  const { refresh, signOut } = useAuth();
+  const { refresh, signOut, principal } = useAuth();
+  const { show } = useToast();
   const [name, setName] = useState(me.user.name);
   const [cur, setCur] = useState(""); const [nw, setNw] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
@@ -35,14 +48,14 @@ function Profile({ me, reload }: { me: MeResponse; reload: () => void }) {
         </form>
       </Panel>
       <Panel title={t("acct.security")} icon={ShieldCheck} id="keamanan">
-        <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); void act("pw", async () => { await api("/auth/password", { method: "POST", json: { current_password: cur, new_password: nw } }); setMsg(t("acct.passwordChanged")); await signOut(); }); }}>
-          {me.user.must_change_password && <Callout tone="warn">{t("shell.mustChangePassword")}</Callout>}
+        <form className="stack-sm" onSubmit={(e: FormEvent) => { e.preventDefault(); void act("pw", async () => { await api("/auth/password", { method: "POST", json: { current_password: cur, new_password: nw } }); show(t("acct.passwordChanged"), "good"); await signOut(); }); }}>
+          {(me.user.must_change_password || principal.mustChangePassword) && <Callout tone="warn">{t("shell.mustChangePassword")}</Callout>}
           <label className="field"><span className="field-label">{t("acct.currentPassword")}</span><input className="input" type="password" autoComplete="current-password" value={cur} onChange={(e) => setCur(e.target.value)} required /></label>
           <label className="field"><span className="field-label">{t("acct.newPassword")}</span><input className="input" type="password" autoComplete="new-password" value={nw} onChange={(e) => setNw(e.target.value)} required minLength={10} /><span className="field-hint">{t("auth.passwordHint")}</span></label>
           <div><Button type="submit" variant="primary" loading={busy === "pw"} disabled={nw.length < 10}>{t("acct.changePassword")}</Button></div>
           <ErrorState error={error} compact />
           <div className="section-title mt-3">{t("acct.sessions")}</div>
-          <ul className="source-list">{me.sessions.filter((s) => !s.revoked_at).slice(0, 5).map((s) => <li key={s.id}><span className="src-icon"><KeyRound size={13} /></span><span className="xs">{dateTime(s.created_at, intl)} · {s.user_agent?.slice(0, 60) ?? "-"}</span></li>)}</ul>
+          <ul className="source-list">{me.sessions.filter((s) => !s.revoked_at).slice(0, 5).map((s) => <li key={s.id}><span className="src-icon"><KeyRound size={13} aria-hidden="true" /></span><span className="xs">{deviceLabel(s.user_agent, t)} · {dateTime(s.last_seen_at ?? s.created_at, intl)}</span></li>)}</ul>
         </form>
       </Panel>
     </div>
@@ -62,7 +75,7 @@ function Members({ org, reload }: { org: OrganizationDetail; reload: () => void 
     <Panel title={t("acct.members")} icon={Users} subtitle={t("acct.seatLimit", { plan: org.entitlements.label_id, n: org.entitlements.seats })}>
       <div className="stack">
         {canAdmin && (
-          <form className="row" style={{ alignItems: "flex-end" }} onSubmit={(e: FormEvent) => { e.preventDefault(); void act("invite", async () => { setInvited(await api<InviteResponse>("/org/members", { method: "POST", json: form })); setForm({ email: "", name: "", role: "analyst" }); members.reload(); reload(); }); }}>
+          <form className="row invite-form" style={{ alignItems: "flex-end" }} onSubmit={(e: FormEvent) => { e.preventDefault(); void act("invite", async () => { setInvited(await api<InviteResponse>("/org/members", { method: "POST", json: form })); setForm({ email: "", name: "", role: "analyst" }); members.reload(); reload(); }); }}>
             <label className="field grow"><span className="field-label">{t("auth.email")}</span><input className="input" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required /></label>
             <label className="field grow"><span className="field-label">{t("auth.fullName")}</span><input className="input" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></label>
             <label className="field"><span className="field-label">{t("acct.role")}</span><select className="select" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as typeof form.role })}>
@@ -110,7 +123,7 @@ function ApiKeys({ org }: { org: OrganizationDetail }) {
   const { busy, error, act } = useAct();
   return (
     <Panel title={t("acct.apiKeys")} icon={KeyRound} subtitle={t("acct.apiHow")}>
-      {!org.entitlements.api_access ? <Callout tone="info">{t("acct.apiNotInPlan")}</Callout> : !hasRole("admin") ? <Callout tone="info">{t("ops.lockedBody")}</Callout> : (
+      {!org.entitlements.api_access ? <Callout tone="info">{t("acct.apiNotInPlan")}</Callout> : !hasRole("admin") ? <Callout tone="info">{t("acct.apiAdminOnly")}</Callout> : (
         <div className="stack">
           <form className="row" style={{ alignItems: "flex-end" }} onSubmit={(e: FormEvent) => { e.preventDefault(); void act("key", async () => { setCreated(await api<ApiKeyCreated>("/org/api-keys", { method: "POST", json: { name } })); setName(""); keys.reload(); }); }}>
             <label className="field grow"><span className="field-label">{t("acct.keyName")}</span><input className="input" value={name} onChange={(e) => setName(e.target.value)} required maxLength={80} /></label>
@@ -132,7 +145,7 @@ function ApiKeys({ org }: { org: OrganizationDetail }) {
 }
 
 function PlanPanel({ org, reload }: { org: OrganizationDetail; reload: () => void }) {
-  const { t } = useT();
+  const { t, intl } = useT();
   const { hasRole } = useAuth();
   const [name, setName] = useState(org.name);
   const { busy, error, act } = useAct();
@@ -141,7 +154,7 @@ function PlanPanel({ org, reload }: { org: OrganizationDetail; reload: () => voi
     [true, t("landing.plan.seats", { n: ent.seats })], [true, t("landing.plan.horizon", { n: ent.forecast_horizon_max })],
     [ent.scenarios, t("landing.plan.scenarios", { n: ent.saved_scenarios_max })], [ent.reports_pdf, t("landing.plan.reportsPdf")],
     [ent.reports_excel, t("landing.plan.reportsExcel")], [ent.alerts, t("landing.plan.alerts", { n: ent.alert_rules_max })],
-    [ent.api_access, ent.api_access ? t("landing.plan.api", { n: ent.api_requests_per_month }) : t("landing.plan.noApi")],
+    [ent.api_access, ent.api_access ? t("landing.plan.api", { n: fmtNum(ent.api_requests_per_month, intl, 0) }) : t("landing.plan.noApi")],
   ];
   const usage = org.usage_this_month;
   return (
@@ -153,41 +166,58 @@ function PlanPanel({ org, reload }: { org: OrganizationDetail; reload: () => voi
             {hasRole("admin") && <div><Button type="submit" size="sm" loading={busy === "rename"}>{t("acct.rename")}</Button></div>}
           </form>
           <div className="row"><Badge tone="brand">{ent.label_id}</Badge><StatusBadge status={org.status} /></div>
-          <p className="small muted">{ent.price_note_id}. {t("acct.planChange")}</p>
+          <p className="small muted">{ent.price_note_id}.</p>
           <ErrorState error={error} compact />
         </div>
         <div><div className="section-title">{t("acct.entitlements")}</div>
-          <ul className="plan" style={{ border: "none", padding: 0 }}>{feats.map(([on, l], i) => <li key={i} className={on ? "" : "off"}>{on ? <Check size={15} /> : <Minus size={15} />}{l}</li>)}</ul></div>
+          <ul className="check-list">{feats.map(([on, l], i) => <li key={i} className={on ? "" : "off"}>{on ? <Check size={15} aria-hidden="true" /> : <Minus size={15} aria-hidden="true" />}{l}</li>)}</ul></div>
         <div><div className="section-title">{t("acct.usage")}</div>
           <dl className="dl small">{["forecast.run", "scenario.run", "scenario.compare", "report.generate", "api.request"].map((k) => <span key={k} style={{ display: "contents" }}><dt>{t(`acct.usage.${k}` as Key)}</dt><dd>{usage[k] ?? 0}</dd></span>)}</dl>
           <div className="xs muted mt-2">{t("acct.members")}: {org.active_members}/{ent.seats} · {t("nav.scenarios")}: {org.saved_scenarios}/{ent.saved_scenarios_max} · {t("alert.rules")}: {org.alert_rules}/{ent.alert_rules_max}</div></div>
       </div>
+      <Callout tone="info" title={t("acct.upgradeTitle")}>{t("acct.upgradeBody")}</Callout>
       <div className="plan-grid mt-4">
-        {org.plans.map((p) => <div key={p.code} className={`plan${p.code === org.plan ? " current" : ""}`}><h3>{p.label_id}</h3><div className="price-note">{p.price_note_id}</div>
-          <ul><li><Check size={14} />{t("landing.plan.seats", { n: p.seats })}</li><li><Check size={14} />{t("landing.plan.horizon", { n: p.forecast_horizon_max })}</li><li className={p.api_access ? "" : "off"}>{p.api_access ? <Check size={14} /> : <Minus size={14} />}{p.api_access ? t("landing.plan.api", { n: p.api_requests_per_month }) : t("landing.plan.noApi")}</li></ul></div>)}
+        {org.plans.map((p) => <div key={p.code} className={`plan${p.code === org.plan ? " current" : ""}`}><h3>{p.label_id}{p.code === org.plan && <> <Badge tone="brand">{t("acct.currentPlan")}</Badge></>}</h3><div className="price-note">{p.price_note_id}</div>
+          <ul><li><Check size={14} aria-hidden="true" />{t("landing.plan.seats", { n: p.seats })}</li><li><Check size={14} aria-hidden="true" />{t("landing.plan.horizon", { n: p.forecast_horizon_max })}</li><li className={p.api_access ? "" : "off"}>{p.api_access ? <Check size={14} aria-hidden="true" /> : <Minus size={14} aria-hidden="true" />}{p.api_access ? t("landing.plan.api", { n: fmtNum(p.api_requests_per_month, intl, 0) }) : t("landing.plan.noApi")}</li></ul></div>)}
       </div>
     </Panel>
   );
 }
 
+/** Scroll to the section named in the hash (#keamanan, #paket) once it has rendered. */
+function useHashTarget(ready: boolean) {
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (!ready || !hash) return;
+    const el = document.getElementById(decodeURIComponent(hash.slice(1)));
+    if (!el) return;
+    try { el.scrollIntoView({ block: "start" }); } catch { /* jsdom */ }
+    el.querySelector<HTMLElement>("input")?.focus({ preventScroll: true });
+  }, [ready, hash]);
+}
+
 export default function AccountPage() {
   const { t } = useT();
-  const { isUser, isOperator } = useAuth();
-  const me = useResource((s) => isUser ? api<MeResponse>("/auth/me", { signal: s }) : Promise.resolve(null), [isUser]);
-  const org = useResource((s) => isUser ? api<OrganizationDetail>("/org", { signal: s }) : Promise.resolve(null), [isUser]);
-  if (!isUser) {
-    return <div className="page"><PageHeader eyebrow={t("acct.eyebrow")} icon={Settings} title={t("acct.title")} description={t("acct.desc")} />
-      {isOperator ? <Callout tone="info">{t("acct.youOperator")}</Callout> : <GateNotice title={t("common.signinRequired")} signin />}</div>;
-  }
+  // Customer-only route (the router keeps guests and operators out).
+  const { principal } = useAuth();
+  // A temporary password blocks every organisation endpoint: load only the profile until it is replaced.
+  const restricted = principal.mustChangePassword;
+  const me = useResource((s) => api<MeResponse>("/auth/me", { signal: s }), []);
+  const org = useResource((s) => restricted ? Promise.resolve(null) : api<OrganizationDetail>("/org", { signal: s }), [restricted]);
+  const loaded = !!me.data && (restricted || !!org.data);
+  useHashTarget(loaded);
   return (
     <div className="page">
       <PageHeader eyebrow={t("acct.eyebrow")} icon={Settings} title={t("acct.title")} description={t("acct.desc")} />
+      {restricted && <Callout tone="warn">{t("acct.passwordFirst")}</Callout>}
       {(me.error || org.error) && <ErrorState error={me.error ?? org.error} onRetry={() => { me.reload(); org.reload(); }} />}
-      {!me.data || !org.data ? ((me.loading || org.loading) && !me.error && !org.error ? <Skeleton height={300} /> : null) : (<>
-        <Profile me={me.data} reload={me.reload} />
-        <PlanPanel org={org.data} reload={org.reload} />
-        <Members org={org.data} reload={org.reload} />
-        <ApiKeys org={org.data} />
+      {!loaded ? ((me.loading || org.loading) && !me.error && !org.error ? <Skeleton height={300} /> : null) : (<>
+        <Profile me={me.data!} reload={me.reload} />
+        {org.data && <>
+          <PlanPanel org={org.data} reload={org.reload} />
+          <Members org={org.data} reload={org.reload} />
+          <ApiKeys org={org.data} />
+        </>}
       </>)}
     </div>
   );

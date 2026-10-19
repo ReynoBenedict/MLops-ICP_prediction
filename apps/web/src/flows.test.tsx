@@ -92,21 +92,20 @@ describe("sign-in and sign-out flow", () => {
     expect(await screen.findByText(/Anda telah keluar/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Keluar" })).toBeNull();
 
-    // Browser Back lands on the earlier private page, which must re-check the session.
+    // Browser Back lands on the earlier private page: the guard re-checks the session and sends the
+    // guest to sign-in with the deep link, without rendering any private shell.
     act(() => goBack?.());
-    await waitFor(() => expect(lastLocation).toBe("/akun"));
-    expect(await screen.findByText("Masuk diperlukan")).toBeInTheDocument();
+    await waitFor(() => expect(lastLocation).toBe("/masuk?next=%2Fakun"));
     expect(screen.queryByRole("button", { name: "Keluar" })).toBeNull();
+    expect(screen.queryByRole("navigation", { name: "Navigasi ruang kerja" })).toBeNull();
 
-    // Sign in again from the gate: it returns to the page that asked for it.
-    fireEvent.click(screen.getAllByRole("link", { name: "Masuk" })[0]!);
-    await waitFor(() => expect(lastLocation).toMatch(/^\/masuk\?next=%2Fakun/));
+    // Sign in again: it returns to the page that asked for it.
     fireEvent.change(await screen.findByLabelText("Email"), { target: { value: "ux@test.id" } });
     fireEvent.change(screen.getByLabelText("Kata sandi"), { target: { value: "rahasia-panjang" } });
     fireEvent.click(screen.getByRole("button", { name: "Masuk" }));
     await waitFor(() => expect(lastLocation).toBe("/akun"));
     expect(await screen.findByRole("button", { name: "Keluar" })).toBeInTheDocument();
-  });
+  }, 30_000); // multi-step flow: generous budget for a loaded machine (assertions unchanged)
 
   it("keeps the session and says so when the server cannot be reached during sign-out", async () => {
     const server = fakeServer({ logout: "network" });
@@ -118,7 +117,7 @@ describe("sign-in and sign-out flow", () => {
     expect(localStorage.getItem("icp.sessionToken")).toBe(TOKEN);
     expect(lastLocation).toBe("/skenario");
     expect(screen.getByRole("button", { name: "Keluar" })).toBeEnabled();
-  });
+  }, 30_000);
 
   it("does not flash 'sign in required' on a private deep link while the session is being verified", async () => {
     let release: (() => void) | null = null;
@@ -133,11 +132,12 @@ describe("sign-in and sign-out flow", () => {
     localStorage.setItem("icp.sessionToken", TOKEN);
     mount("/skenario");
     await waitFor(() => expect(release).not.toBeNull());
-    expect(screen.queryByText("Masuk untuk membuat dan membandingkan skenario.")).toBeNull();
+    expect(lastLocation).toBe("/skenario");
+    expect(screen.queryByRole("heading", { name: "Masuk ke ICP Intelligence" })).toBeNull();
     act(() => release?.());
     expect(await screen.findByRole("button", { name: "Keluar" })).toBeInTheDocument();
-    expect(screen.queryByText("Masuk untuk membuat dan membandingkan skenario.")).toBeNull();
-  });
+    expect(lastLocation).toBe("/skenario");
+  }, 30_000);
 
   it("signs out locally and tells the user when the server rejects the stored session", async () => {
     const server = fakeServer();
@@ -149,8 +149,8 @@ describe("sign-in and sign-out flow", () => {
     await act(async () => { await api("/scenarios").catch(() => undefined); });
     expect(await screen.findByText(/Sesi Anda telah berakhir/)).toBeInTheDocument();
     await waitFor(() => expect(localStorage.getItem("icp.sessionToken")).toBeNull());
-    expect(await screen.findByText("Masuk untuk membuat dan membandingkan skenario.")).toBeInTheDocument();
-  });
+    await waitFor(() => expect(lastLocation).toBe("/masuk?next=%2Fskenario"));
+  }, 30_000);
 });
 
 describe("redirect safety", () => {

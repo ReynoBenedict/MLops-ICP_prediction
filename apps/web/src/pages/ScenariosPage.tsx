@@ -13,10 +13,10 @@ import { MARKERS, SERIES_COLORS, TimeSeriesChart, type SeriesSpec } from "../com
 import { ForecastRunView, methodLabel, type Level } from "../components/forecast";
 import { IllScenarios } from "../components/illustrations";
 import { useToast } from "../components/toast";
-import { Badge, Button, Callout, ConfirmDialog, EmptyState, ErrorState, GateNotice, KindChip, PageHeader, Panel, Skeleton, Stat, focusHeading } from "../components/ui";
+import { Badge, Button, Callout, ConfirmDialog, EmptyState, ErrorState, KindChip, PageHeader, Panel, Skeleton, Stat, focusHeading, scrollToResult } from "../components/ui";
 import { dateOnly, fmtNum, fmtSigned, NA, nextPeriods, period } from "../format";
 import { useT, type Key } from "../i18n";
-import { emptyScenario, ScenarioEditor, type ScenarioMap } from "./ForecastPage";
+import { emptyScenario, ScenarioEditor, scenarioFor, type ScenarioMap } from "./ForecastPage";
 
 const COLORS = [SERIES_COLORS.s1, SERIES_COLORS.s2, SERIES_COLORS.s3, SERIES_COLORS.s4];
 
@@ -32,6 +32,7 @@ function ScenarioForm({ origin, initial, onDone, onCancel, maxHorizon }: { origi
   const [description, setDescription] = useState(initial?.description ?? "");
   const [horizon, setHorizon] = useState(initial?.horizon ?? 3);
   const [inputs, setInputs] = useState<ScenarioMap>(initial ? toMap(initial.inputs) : emptyScenario());
+  const [inputsValid, setInputsValid] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const periods = useMemo(() => nextPeriods(origin, horizon), [origin, horizon]);
@@ -40,10 +41,10 @@ function ScenarioForm({ origin, initial, onDone, onCancel, maxHorizon }: { origi
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (busy) return; // no double submission while the server is answering
+    if (busy || !inputsValid) return; // no double submission while the server is answering
     setBusy(true); setError(null);
     try {
-      const body = { name, description: description || null, horizon, inputs };
+      const body = { name, description: description || null, horizon, inputs: scenarioFor(inputs, periods) };
       if (initial) await api(`/scenarios/${initial.id}`, { method: "POST", json: body });
       else await api("/scenarios", { method: "POST", json: body });
       setBusy(false);
@@ -59,9 +60,10 @@ function ScenarioForm({ origin, initial, onDone, onCancel, maxHorizon }: { origi
           <div className="horizon-pick" role="group" aria-label={t("forecast.horizon")}>{[1, 2, 3, 4, 5, 6].map((h) => <button key={h} type="button" aria-pressed={horizon === h} disabled={h > maxHorizon} onClick={() => setHorizon(h)}>{h}</button>)}</div></div>
       </div>
       <div><div className="section-title">{t("scen.inputs")}</div><p className="small muted" style={{ marginBottom: 8 }}>{t("scen.inputsHelp")}</p>
-        <ScenarioEditor periods={periods} value={inputs} onChange={setInputs} /></div>
+        <ScenarioEditor periods={periods} value={inputs} onChange={setInputs} onValidity={setInputsValid} /></div>
+      {!inputsValid && <span className="field-error" role="alert">{t("forecast.scenarioInvalid")}</span>}
       <ErrorState error={error} />
-      <div className="row"><Button type="submit" variant="primary" loading={busy} disabled={!name.trim()}>{initial ? t("scen.update") : t("scen.create")}</Button><Button type="button" variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button></div>
+      <div className="row"><Button type="submit" variant="primary" loading={busy} disabled={!name.trim() || !inputsValid}>{initial ? t("scen.update") : t("scen.create")}</Button><Button type="button" variant="ghost" onClick={onCancel}>{t("common.cancel")}</Button></div>
     </form>
   );
 }
@@ -113,10 +115,10 @@ function CompareView({ cmp, history }: { cmp: ScenarioCompareResponse; history: 
 
 export default function ScenariosPage() {
   const { t, locale, intl } = useT();
+  // Customer-only route (the router keeps guests and operators out).
   const { isUser, isOperator, principal, hasRole } = useAuth();
-  const allowed = isUser || isOperator;
   const org = useResource((s) => isUser ? api<OrganizationDetail>("/org", { signal: s }) : Promise.resolve(null), [isUser]);
-  const list = useResource((s) => allowed ? api<ScenarioList>("/scenarios", { query: { limit: 50 }, signal: s }) : Promise.resolve(null), [allowed]);
+  const list = useResource((s) => api<ScenarioList>("/scenarios", { query: { limit: 50 }, signal: s }), []);
   const history = useResource((s) => api<HistoryResponse>("/data/history", { signal: s }), []);
   const latest = useResource((s) => api<ForecastRunList>("/forecasts", { query: { limit: 1 }, signal: s }).catch(() => null), []);
   const [editing, setEditing] = useState<Scenario | "new" | null>(null);
@@ -139,18 +141,9 @@ export default function ScenariosPage() {
     if (!cmp && !runResult) return;
     const el = resultsRef.current;
     if (!el) return;
-    try { el.scrollIntoView({ behavior: "smooth", block: "start" }); } catch { /* jsdom */ }
+    scrollToResult(el);
     focusHeading(el);
   }, [cmp, runResult]);
-
-  if (!allowed) {
-    return (
-      <div className="page">
-        <PageHeader eyebrow={t("scen.eyebrow")} icon={SlidersHorizontal} title={t("scen.title")} description={t("scen.desc")} />
-        <GateNotice title={t("scen.signin")} signin>{t("landing.f3.body")}</GateNotice>
-      </div>
-    );
-  }
   const act = async (key: string, fn: () => Promise<void>) => { setBusy(key); setError(null); try { await fn(); } catch (e) { setError(e); } finally { setBusy(null); } };
 
   const results = cmp ? (
@@ -175,6 +168,7 @@ export default function ScenariosPage() {
         </>} />
       {ent && <p className="small muted">{t("scen.limit", { plan: ent.label_id, n: ent.saved_scenarios_max, used: org.data?.saved_scenarios ?? items.length })}</p>}
       {isUser && ent && !ent.scenarios && <Callout tone="warn">{t("scen.noPlan")}</Callout>}
+      {isUser && !hasRole("analyst") && <Callout tone="info">{t("scen.viewerNote")}</Callout>}
       <ErrorState error={error} />
 
       {editing && origin && (

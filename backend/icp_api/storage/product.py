@@ -392,9 +392,17 @@ class ProductRepository(MetadataRepository):
 
     # -- forecasts (tenant views) ------------------------------------------------------------
     def list_org_forecasts(
-        self, org_id: str, limit: int, cursor: str | None, status: str | None = None
+        self,
+        org_id: str,
+        limit: int,
+        cursor: str | None,
+        status: str | None = None,
+        include_system: bool = False,
     ) -> Page:
-        where, params = ["org_id = ?"], [org_id]
+        """An organisation's runs; ``include_system`` adds the published (succeeded) system forecasts."""
+        own = "org_id = ?"
+        where = [f"({own} OR (workflow = 'system' AND status = 'succeeded'))" if include_system else own]
+        params: list[Any] = [org_id]
         if status:
             where.append("status = ?")
             params.append(status)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
@@ -22,7 +22,7 @@ from icp_api.schemas import (
     ImportResponse,
     IngestionRunList,
 )
-from icp_api.security import Principal, rate_limit, require_admin
+from icp_api.security import Principal, rate_limit, require_admin, require_user
 from icp_api.storage.repository import InvalidCursor
 from icp_ml.schema import DATASETS
 
@@ -31,6 +31,8 @@ router = APIRouter(
     responses=ERRORS,
     dependencies=[Depends(rate_limit("default", "rate_limit_default_per_minute"))],
 )
+SIGNED_IN = Depends(require_user("viewer"))  # customer workspace (members and operators)
+OPERATOR_ONLY = Depends(require_admin)  # internal operational detail
 MAX_IMPORT_BYTES = 1_000_000
 DatasetQuery = Query("icp", description=f"One of: {', '.join(DATASETS)}")
 
@@ -41,7 +43,7 @@ def _dataset(name: str) -> str:
     return name
 
 
-@router.get("/data/summary", response_model=DataSummary, tags=["data"])
+@router.get("/data/summary", response_model=DataSummary, tags=["data"], dependencies=[SIGNED_IN])
 def summary(request: Request) -> DataSummary:
     return DataSummary.model_validate(container(request).datasets.summary())
 
@@ -51,16 +53,28 @@ def history(
     request: Request,
     start: str | None = Query(None, pattern=PERIOD_PATTERN),
     end: str | None = Query(None, pattern=PERIOD_PATTERN),
+    principal: Principal = Depends(require_user("viewer")),
 ) -> HistoryResponse:
-    return HistoryResponse(points=container(request).datasets.history(start, end))  # type: ignore[arg-type]
+    """Monthly history. Members see at most their plan's ``history_years`` (ending at the latest
+    official ICP month); earlier ``start`` values are clipped and the response says so."""
+    c = container(request)
+    years = principal.plan.history_years if principal.is_user else 0
+    floor = c.datasets.history_floor(years) if years else None
+    if floor and end and end < floor:
+        points: list[dict[str, Any]] = []
+    else:
+        points = c.datasets.history(max(start, floor) if start and floor else (start or floor), end)
+    return HistoryResponse.model_validate(
+        {"points": points, "history_years": years or None, "earliest_period": floor}
+    )
 
 
-@router.get("/data/quality", response_model=DataQualityResponse, tags=["data"])
+@router.get("/data/quality", response_model=DataQualityResponse, tags=["data"], dependencies=[OPERATOR_ONLY])
 def quality(request: Request, dataset: str = DatasetQuery) -> DataQualityResponse:
     return DataQualityResponse.model_validate(container(request).datasets.quality(_dataset(dataset)))
 
 
-@router.get("/data/evidence", response_model=EvidenceResponse, tags=["data"])
+@router.get("/data/evidence", response_model=EvidenceResponse, tags=["data"], dependencies=[SIGNED_IN])
 def evidence(
     request: Request, dataset: str = DatasetQuery, period: str | None = Query(None, pattern=PERIOD_PATTERN)
 ) -> EvidenceResponse:
@@ -68,13 +82,15 @@ def evidence(
     return EvidenceResponse.model_validate({"dataset": dataset, "period": period, "items": items})
 
 
-@router.get("/datasets/active", response_model=ActiveDatasets, tags=["datasets"])
+@router.get("/datasets/active", response_model=ActiveDatasets, tags=["datasets"], dependencies=[SIGNED_IN])
 def active(request: Request) -> ActiveDatasets:
     prov = container(request).datasets.all_provenance()
     return ActiveDatasets(datasets={k: DatasetProvenance.model_validate(v) for k, v in prov.items()})
 
 
-@router.get("/datasets/versions", response_model=DatasetVersionList, tags=["datasets"])
+@router.get(
+    "/datasets/versions", response_model=DatasetVersionList, tags=["datasets"], dependencies=[OPERATOR_ONLY]
+)
 def list_versions(
     request: Request,
     dataset: str | None = Query(None),
@@ -90,7 +106,9 @@ def list_versions(
     return DatasetVersionList.model_validate({"items": page.items, "next_cursor": page.next_cursor})
 
 
-@router.get("/datasets/ingestions", response_model=IngestionRunList, tags=["datasets"])
+@router.get(
+    "/datasets/ingestions", response_model=IngestionRunList, tags=["datasets"], dependencies=[OPERATOR_ONLY]
+)
 def list_ingestions(
     request: Request,
     dataset: str | None = Query(None),
@@ -106,7 +124,12 @@ def list_ingestions(
     return IngestionRunList.model_validate({"items": page.items, "next_cursor": page.next_cursor})
 
 
-@router.get("/datasets/versions/{version_id}", response_model=DatasetVersion, tags=["datasets"])
+@router.get(
+    "/datasets/versions/{version_id}",
+    response_model=DatasetVersion,
+    tags=["datasets"],
+    dependencies=[OPERATOR_ONLY],
+)
 def get_version(request: Request, version_id: str) -> DatasetVersion:
     return DatasetVersion.model_validate(container(request).datasets.get_version(version_id))
 
@@ -116,8 +139,11 @@ def get_version(request: Request, version_id: str) -> DatasetVersion:
     tags=["datasets"],
     responses={200: {"content": {"text/csv": {}}}},
 )
-def download(request: Request, version_id: str) -> Response:
-    row, data = container(request).datasets.download(version_id)
+def download(
+    request: Request, version_id: str, principal: Principal = Depends(require_user("viewer"))
+) -> Response:
+    """Members may download the active version of each dataset; operators any version."""
+    row, data = container(request).datasets.download(version_id, active_only=not principal.is_operator)
     filename = f"{row['dataset']}_v{row['version']}_{row['sha256'][:12]}.csv"
     return Response(
         data,

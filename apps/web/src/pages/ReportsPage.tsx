@@ -12,7 +12,7 @@ import { useResource } from "../api/hooks";
 import { useAuth } from "../auth";
 import { IllAlerts, IllReports } from "../components/illustrations";
 import { useToast } from "../components/toast";
-import { Badge, Button, Callout, ConfirmDialog, EmptyState, ErrorState, GateNotice, PageHeader, Pager, Panel, Skeleton, StatusBadge, Tabs } from "../components/ui";
+import { Badge, Button, Callout, ConfirmDialog, EmptyState, ErrorState, PageHeader, Pager, Panel, Skeleton, StatusBadge, Tabs, scrollToResult } from "../components/ui";
 import { dateOnly, dateTime, period } from "../format";
 import { useT, type Key } from "../i18n";
 
@@ -25,7 +25,7 @@ function ReportsTab({ ent, initialKind, initialScenarios }: { ent: OrganizationD
   const { t, locale, intl } = useT();
   const { isOperator, hasRole } = useAuth();
   const { show } = useToast();
-  const [kind, setKind] = useState<Kind>(initialKind ?? "market_monthly");
+  const [kind, setKind] = useState<Kind>(initialKind === "scenario_comparison" && !hasRole("analyst") ? "market_monthly" : initialKind ?? "market_monthly");
   const [formats, setFormats] = useState<Fmt[]>(["pdf", "xlsx", "csv"]);
   const [forecastId, setForecastId] = useState("");
   const [scenarioIds, setScenarioIds] = useState<string[]>(initialScenarios);
@@ -41,7 +41,7 @@ function ReportsTab({ ent, initialKind, initialScenarios }: { ent: OrganizationD
 
   useEffect(() => {
     if (!created) return;
-    try { createdRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }); } catch { /* jsdom */ }
+    scrollToResult(createdRef.current, "nearest");
     createdRef.current?.querySelector<HTMLElement>("button, a")?.focus();
   }, [created]);
 
@@ -67,7 +67,8 @@ function ReportsTab({ ent, initialKind, initialScenarios }: { ent: OrganizationD
     catch (err) { setError(err); }
     finally { setDlBusy(null); }
   };
-  const downloads = (r: ReportRun) => <div className="row">{r.formats.map((f) => <Button key={f} size="sm" icon={Download} loading={dlBusy === `${r.id}:${f}`} disabled={!!dlBusy && dlBusy !== `${r.id}:${f}`} onClick={() => void dl(r, f)}>{f.toUpperCase()}</Button>)}</div>;
+  // Only formats included in the plan are offered (platform reports may carry more formats).
+  const downloads = (r: ReportRun) => <div className="row">{r.formats.filter((f) => allowed(f as Fmt)).map((f) => <Button key={f} size="sm" icon={Download} loading={dlBusy === `${r.id}:${f}`} disabled={!!dlBusy && dlBusy !== `${r.id}:${f}`} onClick={() => void dl(r, f)}>{f.toUpperCase()}</Button>)}</div>;
 
   return (
     <div className="layout-form-list">
@@ -76,8 +77,8 @@ function ReportsTab({ ent, initialKind, initialScenarios }: { ent: OrganizationD
           <div className="stack-sm">
             <span className="field-label">{t("rep.kind")}</span>
             {(["market_monthly", "forecast", "scenario_comparison", "data_provenance"] as Kind[]).map((k) => (
-              <label key={k} className="check"><input type="radio" name="kind" checked={kind === k} onChange={() => setKind(k)} />
-                <span><strong>{t(`rep.kind.${k}` as Key)}</strong><br /><span className="small muted">{t(`rep.kind.${k}.help` as Key)}</span></span></label>
+              <label key={k} className="check"><input type="radio" name="kind" checked={kind === k} onChange={() => setKind(k)} disabled={k === "scenario_comparison" && !hasRole("analyst")} />
+                <span><strong>{t(`rep.kind.${k}` as Key)}</strong><br /><span className="small muted">{k === "scenario_comparison" && !hasRole("analyst") ? t("rep.viewerComparison") : t(`rep.kind.${k}.help` as Key)}</span></span></label>
             ))}
           </div>
           {kind === "forecast" && (
@@ -187,6 +188,7 @@ function AlertsTab({ ent, used }: { ent: OrganizationDetail["entitlements"] | nu
               </label>
             ))}
             <div><Button type="submit" variant="primary" icon={BellPlus} loading={busy === "create"} disabled={!hasRole("analyst") || (!isOperator && !!ent && !ent.alerts)}>{t("alert.add")}</Button></div>
+            {!hasRole("analyst") && <p className="field-hint">{t("alert.viewerNote")}</p>}
             {notice && <Callout tone="good">{notice}</Callout>}
             <ErrorState error={error} compact />
           </form>
@@ -253,10 +255,8 @@ export default function ReportsPage() {
   const setTab = (v: "reports" | "alerts") => { const next = new URLSearchParams(params); if (v === "alerts") next.set("tab", "pemberitahuan"); else next.delete("tab"); setParams(next, { replace: true }); };
   const initialKind = KIND_PARAM[params.get("jenis") ?? ""] ?? null;
   const initialScenarios = (params.get("skenario") ?? "").split(",").map((s) => s.trim()).filter(Boolean).slice(0, 4);
+  // Customer-only route (the router keeps guests and operators out).
   const org = useResource((s) => isUser ? api<OrganizationDetail>("/org", { signal: s }) : Promise.resolve(null), [isUser]);
-  if (!isUser && !isOperator) {
-    return <div className="page"><PageHeader eyebrow={t("rep.eyebrow")} icon={FileText} title={t("rep.title")} description={t("rep.desc")} /><GateNotice title={t("common.signinRequired")} signin>{t("rep.desc")}</GateNotice></div>;
-  }
   return (
     <div className="page">
       <PageHeader eyebrow={t("rep.eyebrow")} icon={FileText} title={t("rep.title")} description={t("rep.desc")} />

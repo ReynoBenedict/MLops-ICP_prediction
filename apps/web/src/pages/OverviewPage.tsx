@@ -5,22 +5,26 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, nullOn404 } from "../api/client";
 import { useResource } from "../api/hooks";
-import { ForecastChart, type Level, methodLabel } from "../components/forecast";
+import { ForecastChart, ForecastTable, type Level, methodLabel } from "../components/forecast";
 import { IllNoForecast, MarkBarrel, MarkDecree, MarkFx } from "../components/illustrations";
 import { Callout, Delta, EmptyState, ErrorState, Kpi, PageHeader, Panel, Skeleton, StatusBadge } from "../components/ui";
-import { dateOnly, dateTime, fmtIdr, fmtNum, fmtUsd, period, rangeText, shiftPeriod } from "../format";
+import { dateOnly, dateTime, fmtIdr, fmtNum, fmtUsd, period, shiftPeriod } from "../format";
 
 const SOURCE_MARK = { icp: MarkDecree, brent: MarkBarrel, dubai: MarkBarrel, wti: MarkBarrel, usd_idr: MarkFx } as const;
 const SOURCE_KIND = { icp: "overview.sourceKind.decree", brent: "overview.sourceKind.market", dubai: "overview.sourceKind.market", wti: "overview.sourceKind.market", usd_idr: "overview.sourceKind.fx" } as const;
-import { useT } from "../i18n";
+import { useT, type Key } from "../i18n";
 import { seriesContext } from "../lib/market";
+import { loadInsights, NOT_IN_PLAN } from "../lib/plan";
+import { useAuth } from "../auth";
 
 export default function OverviewPage() {
   const { t, locale, intl } = useT();
   const summary = useResource((s) => api<DataSummary>("/data/summary", { signal: s }), []);
   const history = useResource((s) => api<HistoryResponse>("/data/history", { signal: s }), []);
   const latest = useResource((s) => nullOn404(api<ForecastRun>("/forecasts/latest", { signal: s })), []);
-  const insights = useResource((s) => api<InsightsResponse>("/insights", { signal: s }), []);
+  const { principal } = useAuth();
+  const insights = useResource((s) => loadInsights(principal, s), [principal.plan, principal.kind]);
+  const insightData: InsightsResponse | null = insights.data && insights.data !== NOT_IN_PLAN ? insights.data : null;
   const evidence = useResource((s) => api<EvidenceResponse>("/data/evidence", { query: { dataset: "icp" }, signal: s }), []);
   const [level] = useState<Level>("0.8");
 
@@ -36,8 +40,11 @@ export default function OverviewPage() {
     }
     return [...byPeriod.entries()].filter(([, st]) => ["single_source", "machine_extracted", "conflict", "pending"].includes(st)).map(([p]) => p).sort();
   }, [evidence.data]);
-  const topInsights = (insights.data?.insights ?? []).slice(0, 3);
+  const topInsights = (insightData?.insights ?? []).slice(0, 3);
   const chartHistory = useMemo(() => points.filter((p) => p.period >= shiftPeriod(ctx.latestPeriod ?? "2026-01", -59)), [points, ctx.latestPeriod]);
+  // The plan may clip history (e.g. 3 years): then the title says where the chart really starts.
+  const clipped = (history.data?.history_years ?? null) !== null && (history.data?.history_years ?? 99) < 5;
+  const firstPlotted = chartHistory.find((p) => p.icp_price != null)?.period ?? history.data?.earliest_period ?? null;
   const fresh = icp?.freshness;
 
   return (
@@ -64,12 +71,12 @@ export default function OverviewPage() {
           meta={s?.datasets.usd_idr?.period_end ? t("overview.fxMeta", { period: period(s.datasets.usd_idr.period_end, locale) }) : undefined} />
       </div>
 
-      <div className="grid split-main">
-        <Panel title={t("overview.chartTitle")} icon={Droplets}
+      <div className="grid split-main align-start">
+        <Panel title={clipped && firstPlotted ? t("overview.chartTitleSince", { period: period(firstPlotted, locale) }) : t("overview.chartTitle")} icon={Droplets}
           subtitle={latest.data?.result ? t("overview.chartSub", { date: dateOnly(latest.data.issue_date ?? null, intl) }) : undefined}>
           {history.loading && !history.data ? <Skeleton height={340} /> : history.error ? <ErrorState error={history.error} onRetry={history.reload} /> :
-            latest.data?.result ? <ForecastChart history={chartHistory} run={latest.data} level={level} showBrent /> : (
-              <ForecastChart history={chartHistory} level={level} showBrent run={{ id: "none", created_at: "", request_id: null, requested_by: "", status: "succeeded", horizon: 0,
+            latest.data?.result ? <ForecastChart history={chartHistory} run={latest.data} level={level} showBrent months={60} /> : (
+              <ForecastChart history={chartHistory} level={level} showBrent months={60} run={{ id: "none", created_at: "", request_id: null, requested_by: "", status: "succeeded", horizon: 0,
                 model_name: null, model_version: null, model_run_id: null, icp_dataset_version_id: null, wti_dataset_version_id: null,
                 last_observed_period: ctx.latestPeriod, forecast_origin: ctx.latestPeriod, params: {}, result: null, error_code: null, error_message: null, duration_ms: null, export_available: false }} />
             )}
@@ -101,7 +108,7 @@ export default function OverviewPage() {
                   {(["icp", "brent", "dubai", "wti", "usd_idr"] as const).map((k) => {
                     const d = s?.datasets[k];
                     const Mark = SOURCE_MARK[k];
-                    return d?.available ? <li key={k}><span className="src-icon"><Mark size={15} /></span><span><strong>{d.label_id}</strong> · {d.provider} · {period(d.period_end, locale)}<span className="xs muted" style={{ display: "block" }}>{t(SOURCE_KIND[k])}</span></span></li> : null;
+                    return d?.available ? <li key={k}><span className="src-icon"><Mark size={15} /></span><span><strong>{d.label_id}</strong> · {t(`provider.${k}` as Key)} · {period(d.period_end, locale)}<span className="xs muted" style={{ display: "block" }}>{t(SOURCE_KIND[k])}</span></span></li> : null;
                   })}
                 </ul>
               </div>
@@ -112,10 +119,12 @@ export default function OverviewPage() {
 
       <div className="grid split-main">
         <Panel title={t("overview.summaryTitle")} icon={Lightbulb} actions={<Link className="btn sm ghost" to="/insight">{t("overview.summaryMore")} <ArrowRight size={14} aria-hidden="true" /></Link>}>
-          {insights.loading && !insights.data ? <Skeleton height={120} /> : insights.error ? <ErrorState error={insights.error} compact /> : topInsights.length ? (
+          {insights.loading && !insights.data ? <Skeleton height={120} /> : insights.error ? <ErrorState error={insights.error} compact /> : insights.data === NOT_IN_PLAN ? (
+            <Callout tone="info" title={t("ins.notInPlanTitle")} action={<Link className="btn sm" to="/akun#paket">{t("forecast.plansLink")}</Link>}>{t("ins.notInPlanBody")}</Callout>
+          ) : topInsights.length ? (
             <div className="stack-sm">
               {topInsights.map((i) => <div key={i.id}><strong>{i.title}</strong><p className="small muted">{i.body}</p></div>)}
-              <p className="xs muted">{insights.data?.disclaimer}</p>
+              <p className="xs muted">{insightData?.disclaimer}</p>
             </div>
           ) : <EmptyState title={t("ins.empty")}>{t("ins.emptyBody")}</EmptyState>}
         </Panel>
@@ -132,16 +141,7 @@ export default function OverviewPage() {
         subtitle={latest.data?.result ? t("overview.forecastOrigin", { origin: period(latest.data.forecast_origin, locale), date: dateOnly(latest.data.issue_date ?? null, intl), method: methodLabel(latest.data.method, t) }) : undefined}
         actions={latest.data?.result ? <Link className="btn sm primary" to="/proyeksi">{t("overview.forecastOpen")}</Link> : undefined}>
         {latest.loading && latest.data === null ? <Skeleton height={80} /> : latest.error ? <ErrorState error={latest.error} onRetry={latest.reload} compact /> : latest.data?.result ? (
-          <div className="points-grid reveal">
-            {latest.data.result.points.slice(0, 6).map((p) => (
-              <div className="point-card" key={p.period}>
-                <strong>{period(p.period, locale)}</strong>
-                <span className={`badge ${p.kind === "future_forecast" ? "warn" : "info"}`}>{p.kind === "future_forecast" ? t("kind.future_forecast") : t("kind.estimate_awaiting_publication")}</span>
-                <div className="pc-val">{fmtUsd(p.prediction, intl)}</div>
-                {p.intervals["0.8"] && <div className="xs muted">{t("forecast.range", { level: "80 %" })}: {rangeText(fmtNum(p.intervals["0.8"][0], intl), fmtNum(p.intervals["0.8"][1], intl), locale)}</div>}
-              </div>
-            ))}
-          </div>
+          <div className="reveal"><ForecastTable points={latest.data.result.points.slice(0, 6)} level="0.8" compact /></div>
         ) : <EmptyState illustration={<IllNoForecast size={150} />} title={t("overview.noForecast")}>{t("overview.noForecastBody")}</EmptyState>}
       </Panel>
     </div>

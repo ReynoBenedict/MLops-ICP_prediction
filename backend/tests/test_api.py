@@ -32,19 +32,22 @@ def test_readiness_reports_real_dependency_state_before_model(client):
     assert checks["production_model"]["status"] == "degraded"  # honest: nothing promoted yet
 
 
-def test_forecast_without_model_is_503_and_recorded(client, admin):
-    r = client.post("/api/v1/forecasts", json={"horizon": 1})
+def test_forecast_without_model_is_503_and_recorded(client, admin, customer):
+    r = client.post("/api/v1/forecasts", json={"horizon": 1}, headers=customer)
     assert r.status_code == 503 and r.json()["error"]["code"] == "MODEL_UNAVAILABLE"
     assert r.json()["error"]["request_id"] == r.headers["x-request-id"]
-    # anonymous callers only see published system forecasts; operators see every run
-    assert client.get("/api/v1/forecasts").json()["items"] == []
+    # guests see no forecasts at all; members see their own runs (+ system forecasts); operators all
+    assert client.get("/api/v1/forecasts").status_code == 401
+    own = client.get("/api/v1/forecasts", params={"status": "failed"}, headers=customer).json()["items"]
+    assert own and own[0]["error_code"] == "MODEL_UNAVAILABLE" and own[0]["org_id"]
+    assert all(f["org_id"] == own[0]["org_id"] for f in own)
     failed = client.get("/api/v1/forecasts", params={"status": "failed"}, headers=admin).json()["items"]
     assert (
         failed and failed[0]["error_code"] == "MODEL_UNAVAILABLE" and failed[0]["export_available"] is False
     )
 
 
-def test_validation_errors_use_the_envelope(client):
+def test_validation_errors_use_the_envelope(client, customer):
     for body in (
         {"horizon": 0},
         {"horizon": 7},
@@ -53,7 +56,7 @@ def test_validation_errors_use_the_envelope(client):
         {"horizon": 1, "scenario": {"wti": {"2026-04": -1}}},
         {"horizon": 1, "scenario": {"gold": {"2026-04": 1}}},
     ):
-        r = client.post("/api/v1/forecasts", json=body)
+        r = client.post("/api/v1/forecasts", json=body, headers=customer)
         assert r.status_code == 422, body
         assert r.json()["error"]["code"] == "VALIDATION_ERROR"
     assert client.get("/api/v1/nope").json()["error"]["code"] == "NOT_FOUND"
@@ -121,10 +124,12 @@ def test_gateway_secret_and_rate_limit(env_dir, monkeypatch):
             "X-Gateway-Secret": "test-gateway-secret-0123456789abcdefghijkl",
             "CF-Connecting-IP": "203.0.113.9",
         }
-        codes = [c.get("/api/v1/data/summary", headers=h).status_code for _ in range(4)]
+        # a guest-accessible endpoint (the workspace endpoints now require sign-in)
+        url = "/api/v1/public/market-snapshot"
+        codes = [c.get(url, headers=h).status_code for _ in range(4)]
         assert codes == [200, 200, 200, 429]
         other = {**h, "CF-Connecting-IP": "203.0.113.10"}  # limits are per client
-        assert c.get("/api/v1/data/summary", headers=other).status_code == 200
+        assert c.get(url, headers=other).status_code == 200
 
 
 def test_settings_validation_for_deployments(monkeypatch):
@@ -152,6 +157,7 @@ def test_settings_accept_the_zero_cost_topology(monkeypatch):
         "CORS_ALLOWED_ORIGINS": "https://icp-gateway-staging.example.workers.dev",
         "RENDER": "true",
         "PORT": "10000",
+        "METRICS_TOKEN": "m" * 40,
     }
     for k, v in base.items():
         monkeypatch.setenv(k, v)
@@ -164,6 +170,11 @@ def test_settings_accept_the_zero_cost_topology(monkeypatch):
     with pytest.raises(ConfigError, match="MLFLOW_TRACKING_URI"):
         load_settings()
     monkeypatch.setenv("MODEL_SOURCE", "bundle")
+    # /metrics must be token-protected once deployed (it bypasses the gateway secret).
+    monkeypatch.setenv("METRICS_TOKEN", "")
+    with pytest.raises(ConfigError, match="METRICS_TOKEN"):
+        load_settings()
+    monkeypatch.setenv("METRICS_TOKEN", base["METRICS_TOKEN"])
     # The data plane needs the Worker origin and a strong secret; local stores stay forbidden when deployed.
     monkeypatch.setenv("GATEWAY_INTERNAL_URL", "")
     with pytest.raises(ConfigError, match="GATEWAY_INTERNAL_URL"):
@@ -183,24 +194,28 @@ def test_settings_accept_the_zero_cost_topology(monkeypatch):
 
 
 # --- data -------------------------------------------------------------------------------------
-def test_data_summary_history_quality_provenance(client):
-    s = client.get("/api/v1/data/summary").json()
+def test_data_summary_history_quality_provenance(client, customer, admin):
+    s = client.get("/api/v1/data/summary", headers=customer).json()
     icp = s["datasets"]["icp"]
     assert icp["available"] and icp["period_start"] == "2019-01" and icp["unit"] == "USD/bbl"
     assert "2024-07" in icp["missing_periods"] and icp["freshness"]["status"] in ("fresh", "lagging", "stale")
     assert 0.8 < s["relationships"]["wti"]["correlation"] <= 1
     assert s["datasets"]["brent"]["available"] is True and s["datasets"]["brent"]["provider"]
     assert s["icp_idr"]["icp_idr"] > 1_000_000 and s["icp_idr"]["period"] == icp["period_end"]
-    hist = client.get("/api/v1/data/history", params={"start": "2024-06", "end": "2024-08"}).json()["points"]
+    hist = client.get(
+        "/api/v1/data/history", params={"start": "2024-06", "end": "2024-08"}, headers=customer
+    ).json()["points"]
     assert [p["period"] for p in hist] == ["2024-06", "2024-07", "2024-08"] and hist[1]["icp_price"] is None
     assert (
         hist[1]["icp_idr"] is None and hist[0]["icp_idr"] > 1_000_000
     )  # no ICP -> no rupiah equivalent is invented
-    assert client.get("/api/v1/data/history", params={"start": "2024-13"}).status_code == 422
-    q = client.get("/api/v1/data/quality", params={"dataset": "icp"}).json()
+    assert (
+        client.get("/api/v1/data/history", params={"start": "2024-13"}, headers=customer).status_code == 422
+    )
+    q = client.get("/api/v1/data/quality", params={"dataset": "icp"}, headers=admin).json()
     assert q["report"]["ok"] and len(q["report"]["missing_periods"]) == 8
-    assert client.get("/api/v1/data/quality", params={"dataset": "gold"}).status_code == 422
-    act = client.get("/api/v1/datasets/active").json()["datasets"]
+    assert client.get("/api/v1/data/quality", params={"dataset": "gold"}, headers=admin).status_code == 422
+    act = client.get("/api/v1/datasets/active", headers=customer).json()["datasets"]
     assert (
         act["icp"]["active_version"]["source"] == "repository_seed"
         and act["icp"]["active_version"]["is_active"] is True
@@ -208,11 +223,11 @@ def test_data_summary_history_quality_provenance(client):
     assert act["usd_idr"]["active_version"]["source"] == "repository_seed" and act["usd_idr"][
         "label_id"
     ].startswith("Kurs USD/IDR")
-    ev = client.get("/api/v1/data/evidence", params={"dataset": "icp"}).json()
+    ev = client.get("/api/v1/data/evidence", params={"dataset": "icp"}, headers=customer).json()
     assert ev["dataset"] == "icp" and isinstance(ev["items"], list)
 
 
-def test_import_preview_guard_commit_and_download(client, admin):
+def test_import_preview_guard_commit_and_download(client, admin, customer):
     csv_new = b"month,year,icp_price\n4,2026,99.5\n"
     url = "/api/v1/datasets/icp/imports"
     assert client.post(url, content=csv_new, headers={"Content-Type": "text/csv"}).status_code == 401
@@ -244,7 +259,9 @@ def test_import_preview_guard_commit_and_download(client, admin):
         headers={**admin, "Content-Type": "text/csv"},
     )
     assert r.status_code == 409
-    versions_before = client.get("/api/v1/datasets/versions", params={"dataset": "icp"}).json()["items"]
+    versions_before = client.get(
+        "/api/v1/datasets/versions", params={"dataset": "icp"}, headers=admin
+    ).json()["items"]
     original = next(v for v in versions_before if v["is_active"])
     committed = client.post(
         url, params={"commit": "true"}, content=csv_new, headers={**admin, "Content-Type": "text/csv"}
@@ -254,20 +271,26 @@ def test_import_preview_guard_commit_and_download(client, admin):
     # Restore the original version so later tests use the repository data.
     act = client.post(f"/api/v1/datasets/versions/{original['id']}/activate", headers=admin)
     assert act.status_code == 200 and act.json()["is_active"]
-    dl = client.get(f"/api/v1/datasets/versions/{original['id']}/download")
+    dl = client.get(f"/api/v1/datasets/versions/{original['id']}/download", headers=customer)
     assert dl.status_code == 200 and dl.text.startswith("month,year,icp_price")
+    # members download only active versions; operators any version; guests nothing
+    inactive = committed["version"]["id"]
+    assert client.get(f"/api/v1/datasets/versions/{inactive}/download", headers=customer).status_code == 404
+    assert client.get(f"/api/v1/datasets/versions/{inactive}/download", headers=admin).status_code == 200
+    assert client.get(f"/api/v1/datasets/versions/{original['id']}/download").status_code == 401
     audit = client.get("/api/v1/audit", params={"action": "dataset.icp.import"}, headers=admin).json()[
         "items"
     ]
     assert {e["outcome"] for e in audit} >= {"success", "failure"}
 
 
-def test_dataset_pagination(client):
-    page = client.get("/api/v1/datasets/versions", params={"limit": 1}).json()
+def test_dataset_pagination(client, admin):
+    url = "/api/v1/datasets/versions"
+    page = client.get(url, params={"limit": 1}, headers=admin).json()
     assert len(page["items"]) == 1 and page["next_cursor"]
-    nxt = client.get("/api/v1/datasets/versions", params={"limit": 1, "cursor": page["next_cursor"]}).json()
+    nxt = client.get(url, params={"limit": 1, "cursor": page["next_cursor"]}, headers=admin).json()
     assert nxt["items"][0]["id"] != page["items"][0]["id"]
-    assert client.get("/api/v1/datasets/versions", params={"cursor": "garbage"}).status_code == 400
+    assert client.get(url, params={"cursor": "garbage"}, headers=admin).status_code == 400
 
 
 # --- jobs ---------------------------------------------------------------------------------------
@@ -311,8 +334,8 @@ def test_job_params_are_validated(client, admin):
 
 
 # --- model lifecycle --------------------------------------------------------------------------
-def test_training_registers_but_does_not_promote(client, trained_version):
-    models = client.get("/api/v1/models").json()
+def test_training_registers_but_does_not_promote(client, trained_version, customer, admin):
+    models = client.get("/api/v1/models", headers=customer).json()
     assert models["production_version"] is None
     v = next(m for m in models["versions"] if m["version"] == trained_version)
     assert v["metrics"]["mae"] > 0 and v["metrics"]["baseline_naive_last_mae"] > v["metrics"]["mae"]
@@ -323,13 +346,13 @@ def test_training_registers_but_does_not_promote(client, trained_version):
     }
     assert v["datasets"]["icp"]["version_id"].startswith("dsv_") and len(v["datasets"]["icp"]["sha256"]) == 64
     assert set(v["datasets"]) >= {"icp", "wti", "brent", "dubai", "usd_idr"}
-    detail = client.get(f"/api/v1/models/versions/{trained_version}").json()
+    detail = client.get(f"/api/v1/models/versions/{trained_version}", headers=customer).json()
     assert detail["holdout_predictions"] and {"period", "actual", "predicted"} <= set(
         detail["holdout_predictions"][0]
     )
     assert detail["intervals"]["observed"]["1"]["0.8"][0] < 0 < detail["intervals"]["observed"]["1"]["0.8"][1]
     assert detail["model_card"] and detail["backtest_metrics"]
-    runs = client.get("/api/v1/models/experiments/runs", params={"limit": 10}).json()["items"]
+    runs = client.get("/api/v1/models/experiments/runs", params={"limit": 10}, headers=admin).json()["items"]
     assert {r["candidate"] for r in runs} >= {
         "naive_last",
         "spread_wti_12m",
@@ -353,7 +376,7 @@ def test_validate_promote_forecast_export_rollback(client, admin, trained_versio
         headers=admin,
     )
     assert promo.status_code == 200, promo.text
-    assert client.get("/api/v1/models").json()["production_version"] == trained_version
+    assert client.get("/api/v1/models", headers=admin).json()["production_version"] == trained_version
     again = client.post(
         f"/api/v1/models/versions/{trained_version}/promote", json={"reason": "again please"}, headers=admin
     )
@@ -389,8 +412,9 @@ def test_validate_promote_forecast_export_rollback(client, admin, trained_versio
         p["intervals"]["0.8"][0] < p["prediction"] < p["intervals"]["0.8"][1] for p in pts if p["intervals"]
     )
     assert pts[0]["prediction_idr"] and pts[0]["fx_rate"] > 1000
-    exp = client.get(f"/api/v1/forecasts/{fc['id']}/export.csv")
+    exp = client.get(f"/api/v1/forecasts/{fc['id']}/export.csv", headers=admin)
     rows = list(csv.DictReader(io.StringIO(exp.text)))
+    assert exp.headers["cache-control"] == "private, no-store"
     assert (
         exp.status_code == 200
         and len(rows) == 4
@@ -398,7 +422,7 @@ def test_validate_promote_forecast_export_rollback(client, admin, trained_versio
         and rows[0]["kind"]
     )
     assert "attachment" in exp.headers["content-disposition"]
-    assert client.get(f"/api/v1/forecasts/{fc['id']}").json()["id"] == fc["id"]
+    assert client.get(f"/api/v1/forecasts/{fc['id']}", headers=admin).json()["id"] == fc["id"]
 
     beyond = client.post(
         "/api/v1/forecasts", json={"horizon": 2, "scenario": {"brent": {"2027-01": 70}}}, headers=admin
@@ -413,7 +437,7 @@ def test_validate_promote_forecast_export_rollback(client, admin, trained_versio
 
     ready = client.get("/health/ready").json()
     assert {c["name"]: c["status"] for c in ready["checks"]}["production_model"] == "ok"
-    drift = client.get("/api/v1/models/drift").json()
+    drift = client.get("/api/v1/models/drift", headers=admin).json()
     assert (
         drift["model_version"] == trained_version
         and set(drift["features"])
@@ -424,7 +448,7 @@ def test_validate_promote_forecast_export_rollback(client, admin, trained_versio
     # First promotion has no predecessor, so rollback is refused rather than guessed.
     rb = client.post("/api/v1/models/rollback", json={"reason": "test rollback"}, headers=admin)
     assert rb.status_code == 409 and rb.json()["error"]["code"] == "ROLLBACK_UNAVAILABLE"
-    hist = client.get("/api/v1/models/promotions").json()["items"]
+    hist = client.get("/api/v1/models/promotions", headers=admin).json()["items"]
     assert hist[0]["to_version"] == trained_version and hist[0]["actor"] == "tester"
 
 
@@ -433,9 +457,11 @@ def test_retrain_compare_promote_and_rollback(client, admin, trained_version):
     job = client.app.state.jobs.wait(r.json()["id"], 300)
     assert job["status"] == "succeeded", job
     v2 = str(job["result"]["registered_version"])
-    cmp = client.get("/api/v1/models/compare", params={"versions": f"{trained_version},{v2}"}).json()
+    cmp = client.get(
+        "/api/v1/models/compare", params={"versions": f"{trained_version},{v2}"}, headers=admin
+    ).json()
     assert [c["version"] for c in cmp] == [trained_version, v2]
-    assert client.get("/api/v1/models/compare", params={"versions": "1"}).status_code == 422
+    assert client.get("/api/v1/models/compare", params={"versions": "1"}, headers=admin).status_code == 422
     p = client.post(
         f"/api/v1/models/versions/{v2}/promote",
         json={"reason": "retrained on same data", "force": True},
@@ -449,13 +475,16 @@ def test_retrain_compare_promote_and_rollback(client, admin, trained_version):
         "validation": None,
         "forced": False,
     }
-    assert client.get("/api/v1/models").json()["production_version"] == trained_version
+    assert client.get("/api/v1/models", headers=admin).json()["production_version"] == trained_version
     actions = [e["action"] for e in client.get("/api/v1/audit", headers=admin).json()["items"]]
     assert "model.rollback" in actions and "model.promote" in actions
 
 
-def test_system_status_and_metrics(client):
-    st = client.get("/api/v1/system/status").json()
+def test_system_status_and_metrics(client, admin, customer):
+    assert client.get("/api/v1/system/status").status_code == 401
+    denied = client.get("/api/v1/system/status", headers=customer)
+    assert denied.status_code == 403 and denied.json()["error"]["code"] == "FORBIDDEN"
+    st = client.get("/api/v1/system/status", headers=admin).json()
     assert st["metadata_backend"] == "sqlite" and st["schema_version"] == st["expected_schema_version"]
     assert st["admin_enabled"] is True
     metrics = client.get("/metrics").text
@@ -487,15 +516,15 @@ def test_bundle_mode_serves_identical_forecasts_without_mlflow(client, admin, tr
     app = create_app(load_settings(), enable_jobs=True)
     assert app.state.container.models.bundle_mode
     with TestClient(app) as b:
-        st = b.get("/api/v1/system/status").json()
+        st = b.get("/api/v1/system/status", headers=admin).json()
         assert st["model_source"] == "bundle"
         checks = {ch["name"]: ch for ch in st["checks"]}
         assert checks["model_bundle"]["status"] == "ok" and checks["production_model"]["status"] == "ok"
 
-        models = b.get("/api/v1/models").json()
+        models = b.get("/api/v1/models", headers=admin).json()
         assert models["production_version"] == production
         assert [v["version"] for v in models["versions"]] == [production]
-        detail = b.get(f"/api/v1/models/versions/{production}").json()
+        detail = b.get(f"/api/v1/models/versions/{production}", headers=admin).json()
         assert detail["intervals"] and detail["holdout_predictions"] and detail["model_card"]
         assert b.get("/api/v1/models/experiments/runs", headers=admin).json()["items"] == []
 

@@ -1,10 +1,10 @@
-import type { ActiveDatasets, DataQualityResponse, DatasetVersionList, EvidenceResponse, HistoryResponse, ImportResponse, IngestionRunList, QualityReport } from "../../api/types";
+import type { ActiveDatasets, DataQualityResponse, DatasetVersion, DatasetVersionList, EvidenceResponse, HistoryResponse, ImportResponse, IngestionRunList, QualityReport } from "../../api/types";
 import { CalendarRange, CircleCheck, Database, Download, FileUp, Fingerprint, History, RotateCcw, ShieldCheck, Upload } from "lucide-react";
 import { useMemo, useState, type ChangeEvent } from "react";
-import { api, downloadUrl } from "../../api/client";
+import { api, downloadWithAuth } from "../../api/client";
 import { useResource } from "../../api/hooks";
 import { CoverageGrid } from "../../components/charts";
-import { Badge, Button, Callout, Delta, EmptyState, ErrorState, Kpi, PageHeader, Pager, Panel, Segmented, Skeleton, StatusBadge } from "../../components/ui";
+import { Badge, Button, Callout, ConfirmDialog, Delta, EmptyState, ErrorState, Kpi, PageHeader, Pager, Panel, Segmented, Skeleton, StatusBadge } from "../../components/ui";
 import { dateTime, fmtNum, issueLabel, period, shiftPeriod } from "../../format";
 import { useT } from "../../i18n";
 
@@ -93,14 +93,25 @@ export default function DataOpsPage() {
   const presence = useMemo(() => new Map((history.data?.points ?? []).map((p) => [p.period, p[key] != null])), [history.data, key]);
   const report = quality.data?.report;
   const refreshAll = () => { active.reload(); quality.reload(); versions.reload(); history.reload(); ingestions.reload(); evidence.reload(); };
-  const activate = async (id: string) => { setActionError(null); setActivating(id); try { await api(`/datasets/versions/${id}/activate`, { method: "POST" }); refreshAll(); } catch (e) { setActionError(e); } finally { setActivating(null); } };
+  // Activating a version changes the live data of every customer: always confirm first. The API takes
+  // no reason field yet; the action itself is written to the audit log by the server.
+  const [confirming, setConfirming] = useState<DatasetVersion | null>(null);
+  const activate = async (id: string) => { setActionError(null); setActivating(id); try { await api(`/datasets/versions/${id}/activate`, { method: "POST" }); refreshAll(); } catch (e) { setActionError(e); } finally { setActivating(null); setConfirming(null); } };
+  const [downloading, setDownloading] = useState<string | null>(null);
+  const download = async (ver: { id: string; dataset: string; version: number }) => {
+    if (downloading) return;
+    setActionError(null); setDownloading(ver.id);
+    try { await downloadWithAuth(`/datasets/versions/${ver.id}/download`, undefined, `${ver.dataset}_v${ver.version}.csv`); }
+    catch (e) { setActionError(e); }
+    finally { setDownloading(null); }
+  };
   const evidenceRows = useMemo(() => [...(evidence.data?.items ?? [])].sort((a, b) => b.period.localeCompare(a.period)).slice(0, 120), [evidence.data]);
 
   return (
     <div className="page">
       <PageHeader eyebrow={t("nav.ops")} icon={Database} title={t("ops.data.title")} description={t("ops.data.desc")}
         actions={<><Segmented label={t("ops.data.dataset")} value={dataset} onChange={(d) => { setDataset(d); setCursor(null); }} options={DATASETS.map((d) => ({ value: d, label: d }))} />
-          {v && <a className="btn" href={downloadUrl(`/datasets/versions/${v.id}/download`)} download><Download size={16} aria-hidden="true" />{t("common.downloadCsv")}</a>}</>} />
+          {v && <Button icon={Download} loading={downloading === v.id} onClick={() => void download(v)}>{t("common.downloadCsv")}</Button>}</>} />
       {active.error && <ErrorState error={active.error} onRetry={active.reload} />}
       <div className="grid cols-4">
         <Kpi label={t("ops.data.coverage")} icon={CalendarRange} iconTone="brand" value={v ? `${v.row_count}` : active.loading ? <Skeleton height={34} width={90} /> : "-"} unit={t("explorer.months", { n: "" }).trim()} meta={v ? `${period(v.period_start, locale)} – ${period(v.period_end, locale)}` : t("ops.data.noVersion")} />
@@ -133,7 +144,7 @@ export default function DataOpsPage() {
                   <td className="hide-sm">{ver.source.replaceAll("_", " ")}{ver.diff && <span className="sub">+{ver.diff.added.length} · ~{ver.diff.changed.length} · −{ver.diff.removed.length}</span>}</td>
                   <td><StatusBadge status={ver.quality.ok ? "passed" : "failed"} /></td>
                   <td className="hide-md">{dateTime(ver.created_at, intl)}<span className="sub">{ver.created_by}</span></td>
-                  <td className="num"><div className="row" style={{ justifyContent: "flex-end", flexWrap: "nowrap" }}><a className="btn sm ghost" href={downloadUrl(`/datasets/versions/${ver.id}/download`)} download aria-label={`${t("common.download")} v${ver.version}`}><Download size={15} /></a>{!ver.is_active && ver.quality.ok && <Button size="sm" onClick={() => activate(ver.id)} loading={activating === ver.id}>{t("ops.data.activate")}</Button>}</div></td>
+                  <td className="num"><div className="row" style={{ justifyContent: "flex-end", flexWrap: "nowrap" }}><Button size="sm" variant="ghost" icon={Download} loading={downloading === ver.id} onClick={() => void download(ver)} aria-label={`${t("common.download")} v${ver.version}`} />{!ver.is_active && ver.quality.ok && <Button size="sm" onClick={() => setConfirming(ver)} loading={activating === ver.id}>{t("ops.data.activate")}</Button>}</div></td>
                 </tr>))}</tbody></table></div>
           )}
           <Pager hasPrev={!!cursor} hasNext={!!versions.data?.next_cursor} onFirst={() => setCursor(null)} onNext={() => setCursor(versions.data?.next_cursor ?? null)} />
@@ -158,6 +169,11 @@ export default function DataOpsPage() {
         </Panel>
       </div>
       <ImportPanel onDone={refreshAll} />
+      <ConfirmDialog open={!!confirming} busy={!!confirming && activating === confirming.id}
+        title={t("ops.data.activateConfirmTitle", { v: confirming?.version ?? "", ds: confirming?.dataset ?? "" })} confirmLabel={t("ops.data.activateConfirm")}
+        onCancel={() => setConfirming(null)} onConfirm={() => { if (confirming) void activate(confirming.id); }}>
+        {confirming && t("ops.data.activateConfirmBody", { range: `${period(confirming.period_start, locale)} - ${period(confirming.period_end, locale)}`, rows: confirming.row_count })}
+      </ConfirmDialog>
     </div>
   );
 }

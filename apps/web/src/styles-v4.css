@@ -1,0 +1,126 @@
+/* ==========================================================================
+   v4 (2026-10): audience boundary layouts, scenario entry, compact forecast
+   table, accessibility and responsive fixes. Loaded after styles-brand.css.
+   ========================================================================== */
+
+.align-start { align-items: start; }
+.th-unit { font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--muted); white-space: nowrap; }
+.page.boot { padding: 28px var(--page-pad-x); }
+
+/* Contrast (WCAG AA 4.5:1): sidebar group labels, active language button, "off" plan features. */
+.nav-section { color: #9fb0c6; }
+.lang-toggle.dark button[aria-pressed="true"] { background: var(--brand); color: #fff; }
+.plan ul li.off, .check-list li.off { color: var(--muted); }
+.plan ul li.off svg, .check-list li.off svg { color: var(--muted); }
+
+/* Change chips: never wrap, and no good/bad colours for a price that is good or bad depending on the reader. */
+.delta { white-space: nowrap; }
+.delta.up, .delta.down { color: var(--ink-2); background: var(--neutral-soft); }
+
+/* Value-kind categories (not statuses). */
+.badge.cat-estimate { background: #eef3fb; color: #1f4f8f; border-color: #c7d7ee; }
+.badge.cat-forecast { background: #f2f0fb; color: #4a3fa6; border-color: #d6d0f2; }
+
+/* Single-marker check list (account entitlements). */
+.check-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; font-size: 13.5px; color: var(--ink-2); }
+.check-list li { display: flex; gap: 8px; align-items: flex-start; }
+.check-list li svg { flex: none; margin-top: 2px; color: var(--teal); }
+
+/* Auth pages: the compact brand row is only for layouts without the side panel. */
+.hide-desktop { display: none !important; }
+@media (max-width: 1100px) { .hide-desktop { display: flex !important; } }
+.auth-side-title { color: #fff; font-size: 30px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
+
+/* ---------- Signed-in shell ------------------------------------------------ */
+.sidebar { overflow-y: auto; }
+.sidebar-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.nav-group { display: flex; flex-direction: column; gap: 2px; }
+.user-name { color: #fff; font-weight: 600; font-size: 13.5px; }
+.user-meta, .env-meta { color: #b4c1d3; }
+.user-plan { color: #e4c27a; font-weight: 600; margin-top: 1px; }
+.env-meta { margin-top: 6px; }
+.nav-account a { font-size: 13.5px; }
+.console-band { display: flex; align-items: center; gap: 8px; max-width: 1680px; margin: -8px auto 18px; padding: 8px 14px; border-radius: 10px;
+  background: #fff7ea; border: 1px solid var(--warn-line); color: #7a3a04; font-size: 13px; font-weight: 600; }
+.app-operator .sidebar { background: #1d2430; }
+.app-operator .topbar { background: #1d2430; }
+.main:focus { outline: none; }
+
+/* Mobile top bar: one row, about 60 px. */
+@media (max-width: 900px) {
+  .topbar .brand-sub { display: none; }
+  .topbar-actions { gap: 8px; flex-wrap: nowrap; }
+}
+
+/* ---------- Public website --------------------------------------------------- */
+.public-main { display: block; }
+.public-main:focus { outline: none; }
+.landing-nav .brand-link { text-decoration: none; display: inline-flex; }
+.public-menu { display: flex; align-items: center; gap: 24px; flex: 1; justify-content: flex-end; }
+.public-menu .links { display: flex; gap: 20px; font-weight: 600; font-size: 14px; }
+.public-menu .links a { color: var(--ink-2); text-decoration: none; }
+.public-menu .links a:hover, .public-menu .links a.active { color: var(--navy); }
+.public-menu .links a.active { text-decoration: underline; text-underline-offset: 6px; }
+.public-actions { display: flex; align-items: center; gap: 8px; flex-wrap: nowrap; }
+.public-menu-btn { display: none; }
+@media (max-width: 900px) {
+  .landing-nav { flex-wrap: wrap; }
+  .public-menu-btn { display: inline-flex; }
+  .public-menu { display: none; width: 100%; flex-direction: column; align-items: stretch; gap: 14px; padding: 10px 0 6px; }
+  .public-menu.open { display: flex; }
+  .landing-nav .public-menu .links { display: flex; flex-direction: column; gap: 12px; }
+  .public-actions { flex-wrap: wrap; }
+}
+.footer-h { color: #fff; font-size: 13px; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 10px; }
+.footer-credit { color: #b4c1d3; }
+
+/* Landing: forecast teaser (no values; sign-in required). */
+.teaser { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding: 16px 18px; border: 1px solid var(--border); border-radius: 14px; background: #fff; }
+.teaser-icon { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: var(--teal-soft); color: var(--brand-strong); flex: none; }
+.teaser > .grow { flex: 1 1 240px; min-width: 0; }
+.teaser-title { font-size: 16px; color: var(--navy); margin-bottom: 2px; }
+
+/* Methodology page */
+.prose-wide { width: min(84ch, 100%); }
+.toc { border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px; background: var(--surface-sunken); margin: 18px 0 8px; }
+.toc ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: 15px; }
+.def-list { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px 16px; align-items: start; margin: 12px 0; }
+.def-list dd { margin: 0; font-size: 15px; }
+.method-page .process { margin-top: 12px; }
+@media (max-width: 560px) { .def-list { grid-template-columns: minmax(0, 1fr); } .def-list dd { margin-bottom: 8px; } }
+
+/* ---------- Scenario entry (one group per month, labelled inputs) ----------- */
+.assump { display: flex; flex-direction: column; gap: 8px; }
+.assump-head, .assump-row { display: grid; grid-template-columns: 110px repeat(4, minmax(0, 1fr)); gap: 8px 10px; align-items: start; }
+.assump-head { font-size: 12.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.assump-month { font-weight: 600; font-size: 13.5px; padding-top: 8px; }
+.assump-cell { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.assump-label { display: none; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
+.num-field { position: relative; }
+.num-field .input { height: 36px; font-size: 13.5px; padding-right: 64px; width: 100%; }
+.num-field .num-suffix { position: absolute; right: 10px; top: 50%; transform: translateY(-50%); font-size: 12.5px; color: var(--muted); pointer-events: none; }
+.num-field .input[aria-invalid="true"] { border-color: var(--bad); }
+@media (max-width: 1100px) {
+  .assump-head { display: none; }
+  .assump-row { grid-template-columns: repeat(2, minmax(0, 1fr)); border: 1px solid var(--border); border-radius: 12px; padding: 10px 12px; }
+  .assump-month { grid-column: 1 / -1; padding-top: 0; }
+  .assump-label { display: block; }
+}
+@media (max-width: 420px) { .assump-row { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- Tables ------------------------------------------------------------ */
+.forecast-table-wrap { border: 1px solid var(--border); border-radius: var(--r-card); }
+.forecast-table td, .forecast-table th { vertical-align: middle; }
+.table-sticky th:first-child, .table-sticky td:first-child { position: sticky; left: 0; z-index: 1; background: var(--surface); }
+.table-sticky thead th:first-child { background: var(--surface-sunken); z-index: 2; }
+@media (max-width: 900px) { .table-scroll.tall { max-height: none; } }
+
+/* ---------- Operations ---------------------------------------------------------- */
+.health-hero { grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr); align-items: center; }
+@media (max-width: 900px) { .health-hero { grid-template-columns: minmax(0, 1fr); } }
+
+/* Account: invite form stacks on phones. */
+@media (max-width: 560px) {
+  .invite-form { flex-direction: column; align-items: stretch !important; }
+  .invite-form .btn { width: 100%; }
+}

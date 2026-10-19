@@ -37,7 +37,6 @@ const ALLOWED_METHODS = new Set(["GET", "HEAD", "POST", "OPTIONS"]);
 const FORWARDED_REQUEST_HEADERS = ["accept", "content-type", "authorization", "if-none-match"];
 const DROPPED_RESPONSE_HEADERS = ["connection", "keep-alive", "transfer-encoding", "server", "x-powered-by", "via"];
 const REQUEST_ID = /^[A-Za-z0-9._:-]{8,128}$/;
-const EXPORT_PATH = /^\/api\/v1\/forecasts\/[A-Za-z0-9_]+\/export\.csv$/;
 const INTERNAL_PREFIX = "/api/internal/";
 const OBJECT_KEY = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,511}$/; // mirrors icp_api.storage.objects.validate_key
 const MAX_SQL_CHARS = 100_000;
@@ -241,7 +240,7 @@ export async function handleInternal(request: Request, env: Env, requestId: stri
   return errorResponse(404, "NOT_FOUND", "Unknown internal path.", requestId);
 }
 
-export async function handleApi(request: Request, env: Env, ctx: ExecutionContext, requestId: string): Promise<Response> {
+export async function handleApi(request: Request, env: Env, _ctx: ExecutionContext, requestId: string): Promise<Response> {
   const url = new URL(request.url);
 
   if (url.pathname === "/api/gateway/health") {
@@ -281,13 +280,7 @@ export async function handleApi(request: Request, env: Env, ctx: ExecutionContex
     return errorResponse(429, "RATE_LIMITED", "Too many requests. Slow down and retry later.", requestId, { "retry-after": "60" });
   }
 
-  // Immutable forecast exports can be served from the edge cache (anonymous GETs only).
-  const cacheable = request.method === "GET" && EXPORT_PATH.test(url.pathname) && !request.headers.has("authorization")
-    && typeof caches !== "undefined";
-  if (cacheable) {
-    const hit = await caches.default.match(request);
-    if (hit) return new Response(hit.body, { status: hit.status, headers: apiSecurityHeaders(new Headers(hit.headers), requestId) });
-  }
+  // No edge caching of API responses: forecast exports are tenant data (private, no-store).
 
   const target = new URL(url.pathname + url.search, env.BACKEND_URL);
   const headers = new Headers();
@@ -314,11 +307,7 @@ export async function handleApi(request: Request, env: Env, ctx: ExecutionContex
     return errorResponse(502, "UPSTREAM_REDIRECT", "Unexpected redirect from the backend.", requestId);
   }
 
-  const out = new Response(response.body, { status: response.status, headers: apiSecurityHeaders(new Headers(response.headers), requestId) });
-  if (cacheable && response.status === 200 && (response.headers.get("cache-control") ?? "").includes("public")) {
-    ctx.waitUntil(caches.default.put(request, out.clone()));
-  }
-  return out;
+  return new Response(response.body, { status: response.status, headers: apiSecurityHeaders(new Headers(response.headers), requestId) });
 }
 
 export default {

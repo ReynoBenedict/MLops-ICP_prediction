@@ -205,6 +205,14 @@ class HistoryPoint(BaseModel):
 
 class HistoryResponse(BaseModel):
     points: list[HistoryPoint]
+    history_years: int | None = Field(
+        None,
+        description="Plan history limit applied to this response in years (null = unlimited).",
+    )
+    earliest_period: str | None = Field(
+        None,
+        description="Earliest month the plan may see (YYYY-MM); earlier `start` values are clipped to it.",
+    )
 
 
 class DatasetSummary(BaseModel):
@@ -865,7 +873,11 @@ class OrganizationList(BaseModel):
 
 # --- product: snapshot, insights, scenarios, alerts, reports -----------------------------------
 class MarketSnapshot(BaseModel):
-    """Public, anonymous market snapshot for the landing page (no account required)."""
+    """Public, anonymous market snapshot for the landing page (no account required).
+
+    ``latest_forecast`` is a teaser only - ``{available, issue_date, forecast_origin, horizon}`` -
+    and never carries predicted values, intervals or method details (those require sign-in).
+    """
 
     icp_period: str | None
     icp_usd: float | None

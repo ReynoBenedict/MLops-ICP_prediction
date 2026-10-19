@@ -3,24 +3,13 @@
  * with data; no invented legal entity ("Operator layanan ICP Intelligence"). Reading width is
  * capped at about 70 characters, with a visible "last updated" line and legal links in the footer.
  */
-import { ArrowLeft } from "lucide-react";
-import { Link, NavLink } from "react-router-dom";
-import { Wordmark } from "../components/brand";
-import { LanguageToggle } from "../components/layout";
+import { PublicLayout } from "../components/layout";
 import { useT } from "../i18n";
 
 function Frame({ title, intro, children }: { title: string; intro: string; children: React.ReactNode }) {
   const { t } = useT();
   return (
-    <div className="landing legal-page">
-      <nav className="landing-nav" aria-label={t("landing.footer.terms")}>
-        <Link to="/" style={{ textDecoration: "none" }}><Wordmark size={30} /></Link>
-        <div className="links">
-          <NavLink to="/syarat" className={({ isActive }) => (isActive ? "active" : undefined)}>{t("landing.footer.terms")}</NavLink>
-          <NavLink to="/privasi" className={({ isActive }) => (isActive ? "active" : undefined)}>{t("landing.footer.privacy")}</NavLink>
-        </div>
-        <div className="row"><LanguageToggle /><Link className="btn sm" to="/"><ArrowLeft size={14} aria-hidden="true" />{t("shell.landing")}</Link></div>
-      </nav>
+    <PublicLayout className="legal-page">
       <article className="prose">
         <header className="legal-head">
           <h1>{title}</h1>
@@ -30,18 +19,7 @@ function Frame({ title, intro, children }: { title: string; intro: string; child
         {children}
         <p className="legal-contact">{t("legal.contact")}</p>
       </article>
-      <footer className="legal-foot">
-        <div className="inner">
-          <span>{t("landing.footer.operator")} {t("landing.footer.noAdvice")}</span>
-          <nav className="row" aria-label={t("landing.footer.terms")}>
-            <Link to="/">{t("shell.landing")}</Link>
-            <Link to="/syarat">{t("landing.footer.terms")}</Link>
-            <Link to="/privasi">{t("landing.footer.privacy")}</Link>
-            <Link to="/masuk">{t("shell.signin")}</Link>
-          </nav>
-        </div>
-      </footer>
-    </div>
+    </PublicLayout>
   );
 }
 

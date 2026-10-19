@@ -1,19 +1,18 @@
 /**
  * Shared forecast presentation: chart with history + forecast segment + 80 % band, assumption
- * table with per-benchmark sources, point cards, method/accuracy panel in business language.
- * Internal identifiers (run ids, method ids, dataset version ids) never reach the screen; they
- * stay in the CSV export for traceability.
+ * table with per-benchmark sources, a compact forecast table, method/accuracy panel in business
+ * language. Internal identifiers (run ids, method ids, model versions, dataset version ids) never
+ * reach the screen; they stay in the CSV export for traceability.
  */
 import type { ForecastPoint, ForecastRun, HistoryPoint, ModelVersion } from "../api/types";
-import { CircleHelp, Download } from "lucide-react";
-import { useMemo } from "react";
+import { ArrowRight, CircleHelp, Download } from "lucide-react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { downloadUrl } from "../api/client";
-import { dateOnly, fmtIdr, fmtNum, fmtUsd, monthRange, NA, period, rangeText, toCsv, downloadText } from "../format";
+import { downloadWithAuth } from "../api/client";
+import { dateOnly, fmtIdr, fmtNum, fmtUsd, fmtUsdRange, monthRange, NA, period, rangeText, toCsv, downloadText } from "../format";
 import { useT, type Key } from "../i18n";
 import { SERIES_COLORS, TimeSeriesChart, type Zone } from "./charts";
-import { IllIcpProcess } from "./illustrations";
-import { Badge, Button, Callout, KindChip, Panel, Segmented, Stat } from "./ui";
+import { Badge, Button, Callout, ErrorState, KindChip, Panel, Segmented, Stat } from "./ui";
 import { MetricBars } from "./charts";
 
 export type Level = "0.5" | "0.8" | "0.95";
@@ -72,9 +71,9 @@ export function buildForecastRows(history: HistoryPoint[], run: ForecastRun, lev
   return { rows, zones };
 }
 
-export function ForecastChart({ history, run, level, height = "md", showBrent }: { history: HistoryPoint[]; run: ForecastRun; level: Level; height?: "sm" | "md" | "lg"; showBrent?: boolean }) {
+export function ForecastChart({ history, run, level, height = "md", showBrent, months = 30 }: { history: HistoryPoint[]; run: ForecastRun; level: Level; height?: "sm" | "md" | "lg"; showBrent?: boolean; months?: number }) {
   const { t, locale } = useT();
-  const { rows, zones } = useMemo(() => buildForecastRows(history, run, level), [history, run, level]);
+  const { rows, zones } = useMemo(() => buildForecastRows(history, run, level, months), [history, run, level, months]);
   const series = [
     { key: "actual", label: t("forecast.chartActual"), color: SERIES_COLORS.icp, width: 2.25 },
     ...(showBrent ? [{ key: "brent", label: "Brent", color: SERIES_COLORS.brent, width: 1.5 }] : []),
@@ -94,23 +93,35 @@ export function LevelPicker({ level, onChange }: { level: Level; onChange: (l: L
     options={[{ value: "0.5", label: "50 %" }, { value: "0.8", label: "80 %" }, { value: "0.95", label: "95 %" }]} />;
 }
 
-export function PointCards({ points, level }: { points: ForecastPoint[]; level: Level }) {
+/**
+ * Compact forecast table (month, kind, central value, range, rupiah). Replaces one card per month:
+ * the central value often repeats, while the widening range is what changes.
+ */
+export function ForecastTable({ points, level, compact }: { points: ForecastPoint[]; level: Level; compact?: boolean }) {
   const { t, locale, intl } = useT();
+  const lvl = `${Math.round(Number(level) * 100)} %`;
   return (
-    <div className="points-grid">
-      {points.map((p) => {
-        const iv = p.intervals[level];
-        return (
-          <div className="point-card" key={p.period}>
-            <div className="row-between"><strong>{period(p.period, locale, true)}</strong><span className="xs muted">{t("forecast.step")} {p.step}</span></div>
-            <KindChip kind={p.kind} />
-            <div className="pc-val">{fmtUsd(p.prediction, intl)}<span className="xs muted" style={{ marginLeft: 6 }}>/bbl</span></div>
-            {iv && <div className="small muted">{t("forecast.range", { level: `${Math.round(Number(level) * 100)} %` })}: {rangeText(fmtNum(iv[0], intl), fmtNum(iv[1], intl), locale)}</div>}
-            {p.prediction_idr != null && <div className="small">{t("forecast.idr")}: <strong>{fmtIdr(p.prediction_idr, intl)}</strong> <span className="xs muted">({p.fx_source ? t(`fx.${p.fx_source}` as Key) : NA})</span></div>}
-            {p.conditional_on_scenario && <Badge tone="brand">{t("forecast.conditional")}</Badge>}
-          </div>
-        );
-      })}
+    <div className="table-scroll forecast-table-wrap">
+      <table className="table forecast-table">
+        <thead><tr>
+          <th>{t("common.month")}</th><th>{t("forecast.kindLegend")}</th>
+          <th className="num">{t("forecast.colPoint")} <span className="th-unit">USD/bbl</span></th>
+          <th className="num">{t("forecast.range", { level: lvl })} <span className="th-unit">USD/bbl</span></th>
+          {!compact && <th className="num">{t("forecast.idr")}</th>}
+        </tr></thead>
+        <tbody>{points.map((p) => {
+          const iv = p.intervals[level];
+          return (
+            <tr key={p.period}>
+              <td className="primary-cell nowrap">{period(p.period, locale, true)}</td>
+              <td><span className="row" style={{ gap: 6 }}><KindChip kind={p.kind} />{p.conditional_on_scenario && <Badge tone="brand">{t("forecast.conditional")}</Badge>}</span></td>
+              <td className="num strong nowrap"><span>{fmtUsd(p.prediction, intl)}</span></td>
+              <td className="num nowrap">{iv ? fmtUsdRange(iv[0], iv[1], intl, locale) : NA}</td>
+              {!compact && <td className="num nowrap">{p.prediction_idr != null ? <><span className="strong">{fmtIdr(p.prediction_idr, intl)}</span><span className="sub">{p.fx_source ? t(`fx.${p.fx_source}` as Key) : NA}</span></> : NA}</td>}
+            </tr>
+          );
+        })}</tbody>
+      </table>
     </div>
   );
 }
@@ -157,21 +168,52 @@ export function exportForecastCsv(run: ForecastRun): void {
     "p80_low", "p80_high", "brent_usd", "brent_source", "dubai_usd", "dubai_source", "wti_usd", "wti_source", "usd_idr", "usd_idr_source", "prediction_idr"], rows));
 }
 
-/** Business-language description of the active method and its backtest error. */
+/** Server CSV export (sent with the session credential) or a client-side CSV when no export exists. */
+export function ExportButton({ run }: { run: ForecastRun }) {
+  const { t } = useT();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const stamp = `${run.issue_date ?? run.created_at.slice(0, 10)}_${run.forecast_origin ?? "origin"}`;
+  const onClick = async () => {
+    if (!run.export_available) { exportForecastCsv(run); return; }
+    setBusy(true); setError(null);
+    try { await downloadWithAuth(`/forecasts/${run.id}/export.csv`, undefined, `icp-proyeksi_${stamp}.csv`); }
+    catch (e) { setError(e); }
+    finally { setBusy(false); }
+  };
+  return (
+    <>
+      <Button size="sm" icon={Download} loading={busy} onClick={() => void onClick()}>{t("forecast.exportCsv")}</Button>
+      {error ? <div style={{ flexBasis: "100%" }}><ErrorState error={error} compact /></div> : null}
+    </>
+  );
+}
+
+/** "2020-12..2026-08" -> number of months tested and the bounds. */
+function evalWindow(origins: string | null | undefined): { n: number; from: string; to: string } | null {
+  const m = /(\d{4}-\d{2})\.\.(\d{4}-\d{2})/.exec(origins ?? "");
+  if (!m || !m[1] || !m[2]) return null;
+  return { n: monthRange(m[1], m[2]).length, from: m[1], to: m[2] };
+}
+
+/** Business-language description of the active method and its tested error. */
 export function MethodPanel({ prod }: { prod: ModelVersion | null | undefined }) {
-  const { t, intl } = useT();
+  const { t, intl, locale } = useT();
   if (!prod) return null;
   const m = prod.metrics;
   const usd = (v: number | null | undefined) => fmtUsd(v, intl);
+  const win = evalWindow(prod.backtest_origins);
+  const fit = prod.fit_period?.split("..").at(-1) ?? null;
   return (
-    <Panel title={t("forecast.methodTitle")} icon={CircleHelp} subtitle={<>{methodLabel(prod.method, t)} · {prod.rule_based ? t("forecast.ruleBased") : t("forecast.statistical")} · {t("forecast.modelVersion", { v: prod.version })}</>}>
+    <Panel title={t("forecast.methodTitle")} icon={CircleHelp} subtitle={<>{methodLabel(prod.method, t)} · {prod.rule_based ? t("forecast.ruleBased") : t("forecast.statistical")}</>}
+      actions={<Link className="btn sm ghost" to="/metodologi">{t("forecast.methodologyLink")} <ArrowRight size={14} aria-hidden="true" /></Link>}>
       <div className="grid cols-2" style={{ alignItems: "start" }}>
         <div className="stack-sm">
           <p>{prod.description || methodPlain(prod.method_family, t)}</p>
           <div className="section-title" style={{ marginTop: 6 }}>{t("forecast.accuracyTitle")}</div>
           <p className="small">{t("forecast.accuracyBody", { mae: usd(m.mae), naive: usd(m.baseline_naive_last_mae) })}</p>
           {m.hold_last_h1_mae != null && <p className="small muted">{t("forecast.accuracyHold", { mae: usd(m.hold_last_h1_mae), naive: usd(m.baseline_naive_hold_last_h1_mae) })}</p>}
-          <p className="xs muted">{t("forecast.evalPeriod", { period: prod.backtest_origins ?? NA, fit: prod.fit_period?.split("..").at(-1) ?? NA })}</p>
+          {win && <p className="xs muted">{t("forecast.evalPeriod", { n: win.n, from: period(win.from, locale), to: period(win.to, locale), fit: period(fit, locale) })}</p>}
         </div>
         <div className="stack-sm">
           <div className="section-title">{t("forecast.baselineTitle")}</div>
@@ -194,21 +236,6 @@ export function MethodPanel({ prod }: { prod: ModelVersion | null | undefined })
   );
 }
 
-/** Three-step explainer of how an official ICP comes about (illustration + text). */
-export function ProcessExplainer() {
-  const { t } = useT();
-  return (
-    <div className="process">
-      <div className="process-ill"><IllIcpProcess size={220} /></div>
-      <ol className="process-steps">
-        <li>{t("forecast.process1")}</li>
-        <li>{t("forecast.process2")}</li>
-        <li>{t("forecast.process3")}</li>
-      </ol>
-    </div>
-  );
-}
-
 /** Complete view of one forecast run (used by the forecast page and scenario runs). */
 export function ForecastRunView({ run, history, level, onLevel, prod }: { run: ForecastRun; history: HistoryPoint[]; level: Level; onLevel: (l: Level) => void; prod?: ModelVersion | null }) {
   const { t, locale, intl } = useT();
@@ -222,7 +249,7 @@ export function ForecastRunView({ run, history, level, onLevel, prod }: { run: F
         <Stat label={t("forecast.origin")} value={period(res.forecast_origin, locale)} />
         <Stat label={t("forecast.issueDate")} value={dateOnly(res.issue_date, intl)} />
         <Stat label={t("forecast.horizon")} value={t("forecast.horizonMonths", { n: res.horizon })} hint={rangeText(period(res.points[0]?.period, locale), period(res.points.at(-1)?.period, locale), locale)} />
-        <Stat label={t("common.method")} value={methodLabel(res.method, t)} hint={run.model_version ? t("forecast.modelVersion", { v: run.model_version }) : undefined} />
+        <Stat label={t("common.method")} value={methodLabel(res.method, t)} />
       </div>
       {legacy && <Callout tone="warn">{t("forecast.legacyNote")}</Callout>}
       {res.warnings.length > 0 && <Callout tone="info" title={t("forecast.warnings")}>{res.warnings.join(" ")}</Callout>}
@@ -231,14 +258,10 @@ export function ForecastRunView({ run, history, level, onLevel, prod }: { run: F
           <span className="row" style={{ gap: 6 }} title={t("kind.estimate.help")}><KindChip kind="estimate_awaiting_publication" /><span className="xs muted hide-sm">{t("kind.estimate.short")}</span></span>
           <span className="row" style={{ gap: 6 }} title={t("kind.forecast.help")}><KindChip kind="future_forecast" /><span className="xs muted hide-sm">{t("kind.forecast.short")}</span></span>
         </div>
-        <div className="row"><LevelPicker level={level} onChange={onLevel} />
-          {run.export_available
-            ? <a className="btn sm" href={downloadUrl(`/forecasts/${run.id}/export.csv`)} download><Download size={16} aria-hidden="true" />{t("forecast.exportCsv")}</a>
-            : <Button size="sm" icon={Download} onClick={() => exportForecastCsv(run)}>{t("forecast.exportCsv")}</Button>}
-        </div>
+        <div className="row"><LevelPicker level={level} onChange={onLevel} /><ExportButton run={run} /></div>
       </div>
       <ForecastChart history={history} run={run} level={level} />
-      <PointCards points={res.points} level={level} />
+      <ForecastTable points={res.points} level={level} />
       <div>
         <div className="section-title">{t("forecast.assumptionsTitle")}</div>
         <p className="small muted" style={{ marginBottom: 8 }}>{t("forecast.assumptionsSub")}</p>
@@ -246,7 +269,7 @@ export function ForecastRunView({ run, history, level, onLevel, prod }: { run: F
       </div>
       <p className="xs muted">{t("forecast.intervalNote")} {datasets && t("forecast.dataVersionsNote", { list: datasets })}</p>
       {prod && <MethodPanel prod={prod} />}
-      {!prod && <p className="small"><Link to="/proyeksi">{t("forecast.methodTitle")}</Link></p>}
+      {!prod && <p className="small"><Link to="/metodologi">{t("forecast.methodologyLink")}</Link></p>}
     </div>
   );
 }

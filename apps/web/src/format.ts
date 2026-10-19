@@ -33,6 +33,11 @@ export function fmtUsd(v: number | null | undefined, intl: string, digits = 2): 
   return isNum(v) ? `USD ${fmtNum(v, intl, digits)}` : NA;
 }
 
+/** "USD 103,32 s.d. 121,85" (id) / "USD 103.32 to 121.85" (en): a range always carries its unit. */
+export function fmtUsdRange(lo: number | null | undefined, hi: number | null | undefined, intl: string, locale: Locale = "id"): string {
+  return isNum(lo) && isNum(hi) ? `USD ${rangeText(fmtNum(lo, intl), fmtNum(hi, intl), locale)}` : NA;
+}
+
 export function fmtIdr(v: number | null | undefined, intl: string, digits = 0): string {
   return isNum(v) ? `Rp ${fmtNum(v, intl, digits)}` : NA;
 }

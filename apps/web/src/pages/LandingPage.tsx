@@ -1,16 +1,33 @@
-/** Public landing page: positioning, live public market snapshot, how it works, honesty, plans, sources. */
+/**
+ * Public landing page: positioning, the public market snapshot (official values only), a sign-in
+ * teaser for the latest forecast, how it works, honesty, plans, sources. Forecast values are a
+ * signed-in feature: the teaser never renders predictions, even if an older API still sends them.
+ */
 import type { MarketSnapshot, PlanInfo } from "../api/types";
-import { ArrowRight, Check, CircleHelp, Minus } from "lucide-react";
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { ArrowRight, Check, CircleHelp, Lock, Minus } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { api } from "../api/client";
 import { useResource } from "../api/hooks";
-import { Wordmark } from "../components/brand";
 import { IllPipeline, IllScenarios, IllTimeline } from "../components/illustrations";
-import { LanguageToggle } from "../components/layout";
+import { PublicLayout } from "../components/layout";
 import { Delta, ErrorState, Kpi, Skeleton, StatusBadge } from "../components/ui";
-import { dateOnly, fmtIdr, fmtUsd, period } from "../format";
-import { useT, type Key } from "../i18n";
+import { dateOnly, fmtIdr, fmtNum, fmtUsd, period } from "../format";
+import { useT } from "../i18n";
+
+/** Teaser data from either snapshot shape: v4 `{available, issue_date, forecast_origin, horizon}` or the older one with points. */
+export function forecastTeaser(raw: unknown): { issueDate: string | null; origin: string | null; horizon: number | null } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const f = raw as { available?: unknown; issue_date?: unknown; forecast_origin?: unknown; horizon?: unknown; points?: unknown };
+  const available = f.available === true || (f.available === undefined && Array.isArray(f.points) && f.points.length > 0);
+  if (!available) return null;
+  const horizon = typeof f.horizon === "number" ? f.horizon : Array.isArray(f.points) ? f.points.length : null;
+  return {
+    issueDate: typeof f.issue_date === "string" ? f.issue_date : null,
+    origin: typeof f.forecast_origin === "string" ? f.forecast_origin : null,
+    horizon: horizon && horizon > 0 ? horizon : null,
+  };
+}
 
 function Photo({ base, alt, caption, eager }: { base: string; alt: string; caption?: string; eager?: boolean }) {
   const [failed, setFailed] = useState(false);
@@ -28,7 +45,7 @@ function Photo({ base, alt, caption, eager }: { base: string; alt: string; capti
   );
 }
 
-function PlanCard({ p, t }: { p: PlanInfo; t: ReturnType<typeof useT>["t"] }) {
+function PlanCard({ p, t, intl }: { p: PlanInfo; t: ReturnType<typeof useT>["t"]; intl: string }) {
   const feats: Array<[boolean, string]> = [
     [true, t("landing.plan.seats", { n: p.seats })],
     [true, t("landing.plan.horizon", { n: p.forecast_horizon_max })],
@@ -36,7 +53,7 @@ function PlanCard({ p, t }: { p: PlanInfo; t: ReturnType<typeof useT>["t"] }) {
     [p.reports_pdf, t("landing.plan.reportsPdf")],
     [p.reports_excel, t("landing.plan.reportsExcel")],
     [p.alerts, t("landing.plan.alerts", { n: p.alert_rules_max })],
-    [p.api_access, p.api_access ? t("landing.plan.api", { n: p.api_requests_per_month.toLocaleString() }) : t("landing.plan.noApi")],
+    [p.api_access, p.api_access ? t("landing.plan.api", { n: fmtNum(p.api_requests_per_month, intl, 0) }) : t("landing.plan.noApi")],
     [true, p.history_years ? t("landing.plan.history", { n: p.history_years }) : t("landing.plan.historyAll")],
   ];
   return (
@@ -53,25 +70,17 @@ export default function LandingPage() {
   const snap = useResource((s) => api<MarketSnapshot>("/public/market-snapshot", { signal: s, anonymous: true }), []);
   const plans = useResource((s) => api<PlanInfo[]>("/plans", { signal: s, anonymous: true }), []);
   const d = snap.data;
-  const fc = d?.latest_forecast as { issue_date?: string; points?: Array<{ period: string; kind: string; prediction: number }> } | null | undefined;
+  const teaser = forecastTeaser(d?.latest_forecast);
+  const { hash } = useLocation();
+  // In-page anchors (/#paket from other pages) once the target section has rendered.
+  useEffect(() => {
+    if (!hash) return;
+    const el = document.getElementById(decodeURIComponent(hash.slice(1)));
+    try { el?.scrollIntoView({ block: "start" }); } catch { /* jsdom */ }
+  }, [hash, plans.data]);
 
   return (
-    <div className="landing">
-      <nav className="landing-nav" aria-label="Landing">
-        <Wordmark size={34} />
-        <div className="links" aria-hidden="false">
-          <a href="#fitur">{t("landing.featuresTitle")}</a>
-          <a href="#metode">{t("landing.howTitle")}</a>
-          <a href="#paket">{t("landing.plansTitle")}</a>
-          <a href="#sumber">{t("landing.sourcesTitle")}</a>
-        </div>
-        <div className="row" style={{ gap: 8 }}>
-          <LanguageToggle />
-          <Link className="btn sm" to="/masuk">{t("shell.signin")}</Link>
-          <Link className="btn sm primary" to="/daftar">{t("shell.register")}</Link>
-        </div>
-      </nav>
-
+    <PublicLayout credits>
       <section className="landing-hero">
         <div>
           <div className="eyebrow">{t("landing.eyebrow")}</div>
@@ -79,7 +88,7 @@ export default function LandingPage() {
           <p className="lead">{t("landing.lead")}</p>
           <div className="hero-cta">
             <Link className="btn primary lg" to="/daftar">{t("landing.ctaPrimary")} <ArrowRight size={16} aria-hidden="true" /></Link>
-            <Link className="btn lg" to="/ringkasan">{t("landing.ctaSecondary")}</Link>
+            <Link className="btn lg" to="/metodologi">{t("landing.ctaSecondary")}</Link>
           </div>
         </div>
         <figure className="hero-media">
@@ -107,15 +116,19 @@ export default function LandingPage() {
               meta={d?.usd_idr ? `${t("landing.snapshotFx")}: ${fmtIdr(d.usd_idr, intl)}` : undefined} />
           </div>
           <p className="small muted mt-3">{t("landing.snapshotFootnote")}</p>
-          <div className="mt-3 small">
-            {fc?.points?.length ? (
-              <span>
-                <strong>{t("landing.snapshotForecast", { date: dateOnly(fc.issue_date ?? null, intl) })}:</strong>{" "}
-                {fc.points.slice(0, 3).map((p) => `${period(p.period, locale)} ${fmtUsd(p.prediction, intl)} (${t(`kind.${p.kind}` as Key)})`).join(" · ")}
-                {" "}<Link className="link-inline" to="/proyeksi">{t("overview.forecastOpen")} <ArrowRight size={13} aria-hidden="true" /></Link>
-              </span>
-            ) : d ? <span className="muted">{t("landing.snapshotNoForecast")}</span> : null}
-          </div>
+          {teaser ? (
+            <div className="teaser mt-4">
+              <span className="teaser-icon" aria-hidden="true"><Lock size={18} /></span>
+              <div className="grow">
+                <h3 className="teaser-title">{teaser.issueDate ? t("landing.teaserTitle", { date: dateOnly(teaser.issueDate, intl) }) : t("landing.teaserTitleNoDate")}</h3>
+                <p className="small muted">{teaser.horizon && teaser.origin ? t("landing.teaserBody", { n: teaser.horizon, origin: period(teaser.origin, locale, true) }) : t("landing.teaserBodyShort")}</p>
+              </div>
+              <div className="row">
+                <Link className="btn primary" to="/masuk?next=%2Fproyeksi">{t("shell.signin")}</Link>
+                <Link className="btn" to="/daftar?next=%2Fproyeksi">{t("shell.register")}</Link>
+              </div>
+            </div>
+          ) : d ? <p className="mt-3 small muted">{t("landing.snapshotNoForecast")}</p> : null}
         </section>
       </div>
 
@@ -156,7 +169,7 @@ export default function LandingPage() {
           <h2 id="paket-h">{t("landing.plansTitle")}</h2>
           <p className="lead">{t("landing.plansLead")}</p>
           <div className="plan-grid">
-            {plans.data ? plans.data.map((p) => <PlanCard key={p.code} p={p} t={t} />) : plans.loading ? [0, 1, 2, 3].map((i) => <Skeleton key={i} height={260} />) : null}
+            {plans.data ? plans.data.map((p) => <PlanCard key={p.code} p={p} t={t} intl={intl} />) : plans.loading ? [0, 1, 2, 3].map((i) => <Skeleton key={i} height={260} />) : null}
           </div>
           {plans.error && !plans.loading && <ErrorState error={plans.error} onRetry={plans.reload} compact />}
           <div className="mt-4"><Link className="btn primary" to="/daftar">{t("landing.plan.cta")} <ArrowRight size={16} aria-hidden="true" /></Link></div>
@@ -173,24 +186,6 @@ export default function LandingPage() {
         <figure><Photo base="editorial-tanker" alt={t("landing.photoTanker")} caption={`${t("landing.photoTanker")} · Sabung.hamster, CC BY-SA 4.0`} /></figure>
       </section>
 
-      <footer className="landing-footer">
-        <div className="inner">
-          <div>
-            <Wordmark dark size={30} />
-            <p className="mt-3">{t("landing.footer.operator")}</p>
-            <p className="mt-2">{t("landing.footer.noAdvice")}</p>
-            <p className="mt-2 xs" style={{ color: "#8fa0b6" }}><strong>{t("landing.photoCreditLabel")}:</strong> {t("landing.photoCredit")} {t("landing.illCredit")}</p>
-          </div>
-          <div>
-            <h4>ICP Intelligence</h4>
-            <ul><li><Link to="/ringkasan">{t("nav.overview")}</Link></li><li><Link to="/proyeksi">{t("nav.forecast")}</Link></li><li><Link to="/insight">{t("nav.insights")}</Link></li><li><Link to="/masuk">{t("shell.signin")}</Link></li></ul>
-          </div>
-          <div>
-            <h4>{t("landing.footer.terms")}</h4>
-            <ul><li><Link to="/syarat">{t("landing.footer.terms")}</Link></li><li><Link to="/privasi">{t("landing.footer.privacy")}</Link></li></ul>
-          </div>
-        </div>
-      </footer>
-    </div>
+    </PublicLayout>
   );
 }

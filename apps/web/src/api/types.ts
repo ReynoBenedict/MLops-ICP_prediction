@@ -39,5 +39,6 @@ export type SourceEvidence = S["SourceEvidence"];
 export type IngestionRunList = S["IngestionRunList"];
 export type IngestionRun = S["IngestionRun"];
 export type DatasetProvenance = S["DatasetProvenance"];
+export type DatasetVersion = S["DatasetVersion"];
 export type HorizonMetrics = S["HorizonMetrics"];
 export type BacktestMetricRow = S["BacktestMetricRow"];

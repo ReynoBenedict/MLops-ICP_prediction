@@ -2,10 +2,10 @@
 import type { ActiveDatasets, EvidenceResponse, HistoryResponse } from "../api/types";
 import { ChartLine, Database, Download, Fingerprint, Table2 } from "lucide-react";
 import { useMemo, useState } from "react";
-import { api, downloadUrl } from "../api/client";
+import { api, downloadWithAuth } from "../api/client";
 import { useResource } from "../api/hooks";
 import { CoverageGrid, SERIES_COLORS, TimeSeriesChart } from "../components/charts";
-import { Badge, Delta, ErrorState, KindChip, PageHeader, Panel, Segmented, Skeleton, StatusBadge } from "../components/ui";
+import { Badge, Button, Delta, ErrorState, KindChip, PageHeader, Panel, Segmented, Skeleton, StatusBadge } from "../components/ui";
 import { dateTime, downloadText, fmtIdr, fmtNum, period, rangeText, shiftPeriod, toCsv } from "../format";
 import { useT } from "../i18n";
 import { filterRange, gapZones, mean, spreadSeries, type Key } from "../lib/market";
@@ -16,14 +16,17 @@ const BENCH_KEY: Record<Bench, Key> = { brent: "brent_price", dubai: "dubai_pric
 const BENCH_LABEL: Record<Bench, string> = { brent: "Brent", dubai: "Dubai", wti: "WTI" };
 
 export default function ExplorerPage() {
-  const { t, locale, intl } = useT();
-  const [range, setRange] = useState<Range>(5);
+  const { t, td, locale, intl } = useT();
+  const [chosenRange, setRange] = useState<Range>(5);
   const [bench, setBench] = useState<Bench>("brent");
   const history = useResource((s) => api<HistoryResponse>("/data/history", { signal: s }), []);
   const active = useResource((s) => api<ActiveDatasets>("/datasets/active", { signal: s }), []);
   const evidence = useResource((s) => api<EvidenceResponse>("/data/evidence", { query: { dataset: "icp" }, signal: s }), []);
 
   const all = useMemo(() => history.data?.points ?? [], [history.data]);
+  const planYears = history.data?.history_years ?? null;
+  // A range longer than the plan's history would silently show less: fall back to "all available".
+  const range: Range = planYears !== null && chosenRange !== "all" && chosenRange > planYears ? "all" : chosenRange;
   const icpRange = useMemo(() => {
     const icpOnly = all.filter((p) => p.icp_price != null);
     if (!icpOnly.length) return [] as typeof all;
@@ -50,6 +53,13 @@ export default function ExplorerPage() {
   const icpProv = active.data?.datasets.icp;
   const presence = useMemo(() => new Map(all.filter((p) => p.period >= (icpProv?.active_version?.period_start ?? "")).map((p) => [p.period, p.icp_price != null])), [all, icpProv]);
 
+  const [dl, setDl] = useState<{ busy: string | null; error: unknown }>({ busy: null, error: null });
+  const downloadDataset = async (id: string, dataset: string, version: number) => {
+    if (dl.busy) return;
+    setDl({ busy: id, error: null });
+    try { await downloadWithAuth(`/datasets/versions/${id}/download`, undefined, `icp-intelligence_${dataset}_v${version}.csv`); setDl({ busy: null, error: null }); }
+    catch (e) { setDl({ busy: null, error: e }); }
+  };
   const exportCsv = () => downloadText("icp-eksplorasi.csv", toCsv(["period", "icp_usd", "brent_usd", "dubai_usd", "wti_usd", "usd_idr", "icp_idr", "mom_pct"],
     tableRows.map((r) => [r.period, r.icp_price ?? null, r.brent_price ?? null, r.dubai_price ?? null, r.wti_price ?? null, r.usd_idr ?? null, r.icp_idr ?? null, r.chg == null ? null : Number(r.chg.toFixed(2))])));
 
@@ -57,11 +67,12 @@ export default function ExplorerPage() {
     <div className="page">
       <PageHeader eyebrow={t("explorer.eyebrow")} icon={ChartLine} title={t("explorer.title")} description={t("explorer.desc")}
         actions={<>
-          <Segmented label={t("explorer.range")} value={range} onChange={setRange} options={[{ value: 1, label: t("explorer.years", { n: 1 }) }, { value: 3, label: t("explorer.years", { n: 3 }) }, { value: 5, label: t("explorer.years", { n: 5 }) }, { value: "all", label: t("common.all") }]} />
+          <Segmented label={t("explorer.range")} value={range} onChange={setRange} options={([1, 3, 5] as const).filter((n) => planYears === null || n <= planYears).map((n) => ({ value: n as Range, label: t("explorer.years", { n }) })).concat([{ value: "all", label: t("common.all") }])} />
           <Segmented label={t("explorer.compare")} value={bench} onChange={setBench} options={(["brent", "dubai", "wti"] as Bench[]).map((b) => ({ value: b, label: BENCH_LABEL[b] }))} />
           <button className="btn" onClick={exportCsv} disabled={!history.data}><Download size={16} aria-hidden="true" />{t("common.downloadCsv")}</button>
         </>} />
       {history.error && <ErrorState error={history.error} onRetry={history.reload} />}
+      {planYears !== null && history.data?.earliest_period && <p className="small muted">{t("history.clipped", { period: period(history.data.earliest_period, locale, true), n: planYears })}</p>}
 
       <Panel title={t("explorer.priceChart")} icon={ChartLine}>
         {history.loading && !history.data ? <Skeleton height={340} /> : !history.data ? <p className="muted small">{t("common.dataUnavailable")}</p> : (
@@ -85,11 +96,10 @@ export default function ExplorerPage() {
         </Panel>
       </div>
 
-      <div className="grid split-main">
-        <Panel title={t("explorer.tableTitle")} icon={Table2} subtitle={t("explorer.tableSub")} flush>
+      <Panel title={t("explorer.tableTitle")} icon={Table2} subtitle={t("explorer.tableSub")} flush>
           <div className="table-scroll tall">
-            <table className="table">
-              <thead><tr><th>{t("common.month")}</th><th className="num">ICP</th><th className="num">{t("common.change")}</th><th className="num hide-sm">Brent</th><th className="num hide-sm">Dubai</th><th className="num hide-md">WTI</th><th className="num hide-md">{t("explorer.fxRate")}</th><th className="num hide-sm">{t("common.idrPerBbl")} ({t("common.derived").toLowerCase()})</th><th className="hide-md">{t("common.status")}</th></tr></thead>
+            <table className="table table-sticky">
+              <thead><tr><th>{t("common.month")}</th><th className="num">ICP</th><th className="num">{t("common.change")}</th><th className="num">Brent</th><th className="num">Dubai</th><th className="num">WTI</th><th className="num">{t("explorer.fxRate")}</th><th className="num">{t("common.idrPerBbl")} ({t("common.derived").toLowerCase()})</th><th>{t("common.status")}</th></tr></thead>
               <tbody>{tableRows.map((r) => {
                 const ev = evidenceByPeriod.get(r.period);
                 return (
@@ -97,28 +107,30 @@ export default function ExplorerPage() {
                     <td className="primary-cell nowrap">{period(r.period, locale)}</td>
                     <td className="num">{r.icp_price == null ? <Badge tone="warn">{t("common.missing")}</Badge> : fmtNum(r.icp_price, intl)}</td>
                     <td className="num">{r.chg == null ? <span className="muted">-</span> : <Delta value={r.chg} />}</td>
-                    <td className="num hide-sm">{fmtNum(r.brent_price, intl)}</td><td className="num hide-sm">{fmtNum(r.dubai_price, intl)}</td>
-                    <td className="num hide-md">{fmtNum(r.wti_price, intl)}</td><td className="num hide-md">{fmtNum(r.usd_idr, intl, 0)}</td>
-                    <td className="num hide-sm">{r.icp_idr == null ? "-" : fmtIdr(r.icp_idr, intl)}</td>
-                    <td className="hide-md">{r.icp_price == null ? "" : ev ? <StatusBadge status={ev.status} /> : <KindChip kind="observed" />}</td>
+                    <td className="num">{fmtNum(r.brent_price, intl)}</td><td className="num">{fmtNum(r.dubai_price, intl)}</td>
+                    <td className="num">{fmtNum(r.wti_price, intl)}</td><td className="num">{fmtNum(r.usd_idr, intl, 0)}</td>
+                    <td className="num nowrap">{r.icp_idr == null ? "-" : fmtIdr(r.icp_idr, intl)}</td>
+                    <td>{r.icp_price == null ? "" : ev ? <StatusBadge status={ev.status} /> : <KindChip kind="observed" />}</td>
                   </tr>
                 );
               })}</tbody>
             </table>
           </div>
-        </Panel>
-        <div className="stack">
+      </Panel>
+      <div className="grid cols-2 align-start">
           <Panel title={t("explorer.provenance")} icon={Fingerprint} subtitle={t("explorer.provenanceSub")}>
             {active.loading && !active.data ? <Skeleton height={160} /> : active.error ? <ErrorState error={active.error} compact /> : (
               <div className="stack-sm">
                 {Object.values(active.data?.datasets ?? {}).map((d) => (
                   <div key={d.dataset} style={{ borderBottom: "1px solid var(--border)", paddingBottom: 10 }}>
-                    <div className="row-between"><strong>{d.label_id}</strong>{d.active_version && <a className="btn sm ghost" href={downloadUrl(`/datasets/versions/${d.active_version.id}/download`)} download aria-label={`${t("common.downloadCsv")} ${d.label_id}`}><Download size={14} /></a>}</div>
-                    <div className="xs muted">{t("explorer.provider")}: {d.provider}</div>
+                    <div className="row-between"><strong>{d.label_id}</strong>{d.active_version && (() => { const av = d.active_version; return <Button size="sm" variant="ghost" icon={Download} loading={dl.busy === av.id} disabled={!!dl.busy && dl.busy !== av.id}
+                      onClick={() => void downloadDataset(av.id, d.dataset, av.version)} aria-label={t("explorer.downloadDataset", { name: d.label_id })} title={t("explorer.downloadDataset", { name: d.label_id })} />; })()}</div>
+                    <div className="xs muted">{t("explorer.provider")}: {td("provider", d.dataset, d.provider)}</div>
                     <div className="xs muted">{t("explorer.definition")}: {locale === "id" && d.definition_id ? d.definition_id : d.definition}</div>
                     {d.active_version ? <div className="xs muted">{t("common.period")} {rangeText(period(d.active_version.period_start, locale), period(d.active_version.period_end, locale), locale)} · {t("common.updated").toLowerCase()} {dateTime(d.active_version.created_at, intl)} · <StatusBadge status={d.freshness.status} /></div> : <div className="xs muted">{t("ops.data.noVersion")}</div>}
                   </div>
                 ))}
+                {dl.error ? <ErrorState error={dl.error} compact /> : null}
                 <p className="xs muted">{t("explorer.aggregationNote")}</p>
               </div>
             )}
@@ -138,7 +150,6 @@ export default function ExplorerPage() {
               </div>
             ) : <Skeleton height={120} />}
           </Panel>
-        </div>
       </div>
     </div>
   );

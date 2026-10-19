@@ -23,7 +23,7 @@ export default function HealthPage() {
       {status.error ? <ErrorState error={status.error} onRetry={status.reload} /> : (
         <section className="panel"><div className="panel-body" style={{ paddingTop: 20 }}>
           {!st ? <Skeleton height={90} /> : (
-            <div className="grid" style={{ gridTemplateColumns: "minmax(260px, 1fr) minmax(0, 2fr)", alignItems: "center" }}>
+            <div className="grid health-hero">
               <div className="hero-status">
                 <span className={`hero-icon ${tone === "neutral" ? "warn" : tone}`}><HeroIcon size={26} aria-hidden="true" /></span>
                 <div><div className="small muted">{t("ops.health.overall")}</div>

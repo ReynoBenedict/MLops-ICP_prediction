@@ -2431,6 +2431,30 @@
       },
       "HistoryResponse": {
         "properties": {
+          "earliest_period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Earliest month the plan may see (YYYY-MM); earlier `start` values are clipped to it.",
+            "title": "Earliest Period"
+          },
+          "history_years": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Plan history limit applied to this response in years (null = unlimited).",
+            "title": "History Years"
+          },
           "points": {
             "items": {
               "$ref": "#/components/schemas/HistoryPoint"
@@ -3308,7 +3332,7 @@
         "type": "object"
       },
       "MarketSnapshot": {
-        "description": "Public, anonymous market snapshot for the landing page (no account required).",
+        "description": "Public, anonymous market snapshot for the landing page (no account required).\n\n``latest_forecast`` is a teaser only - ``{available, issue_date, forecast_origin, horizon}`` -\nand never carries predicted values, intervals or method details (those require sign-in).",
         "properties": {
           "brent_period": {
             "anyOf": [
@@ -8762,6 +8786,7 @@
     },
     "/api/v1/data/history": {
       "get": {
+        "description": "Monthly history. Members see at most their plan's ``history_years`` (ending at the latest\nofficial ICP month); earlier ``start`` values are clipped and the response says so.",
         "operationId": "history_api_v1_data_history_get",
         "parameters": [
           {
@@ -9984,6 +10009,7 @@
     },
     "/api/v1/datasets/versions/{version_id}/download": {
       "get": {
+        "description": "Members may download the active version of each dataset; operators any version.",
         "operationId": "download_api_v1_datasets_versions__version_id__download_get",
         "parameters": [
           {

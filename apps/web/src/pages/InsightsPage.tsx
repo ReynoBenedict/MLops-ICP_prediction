@@ -1,12 +1,11 @@
 /** Insight Pasar: rule-generated insights grouped by severity, with figures, sources and next steps. */
 import type { InsightsResponse } from "../api/types";
-import { ArrowRight, Database, Lightbulb } from "lucide-react";
-import { Link } from "react-router-dom";
-import { api } from "../api/client";
+import { Database, Lightbulb } from "lucide-react";
+import { loadInsights, NOT_IN_PLAN } from "../lib/plan";
 import { useResource } from "../api/hooks";
 import { useAuth } from "../auth";
 import { IllNoData } from "../components/illustrations";
-import { Badge, Callout, EmptyState, ErrorState, PageHeader, Skeleton } from "../components/ui";
+import { Badge, Callout, EmptyState, ErrorState, GateNotice, PageHeader, Skeleton } from "../components/ui";
 import { dateTime, fmtNum, period } from "../format";
 import { useT, type Key } from "../i18n";
 
@@ -15,7 +14,9 @@ const ORDER = ["warning", "notice", "info"] as const;
 export default function InsightsPage() {
   const { t, td, locale, intl } = useT();
   const { principal } = useAuth();
-  const ins = useResource((s) => api<InsightsResponse>("/insights", { signal: s }), [principal.kind]);
+  const res = useResource((s) => loadInsights(principal, s), [principal.kind, principal.plan]);
+  const notInPlan = res.data === NOT_IN_PLAN;
+  const ins = { ...res, data: res.data && res.data !== NOT_IN_PLAN ? (res.data as InsightsResponse) : null };
   const items = ins.data?.insights ?? [];
   const basisPeriod = (ins.data?.basis as { icp_period?: string } | undefined)?.icp_period;
 
@@ -24,7 +25,8 @@ export default function InsightsPage() {
       <PageHeader eyebrow={t("ins.eyebrow")} icon={Lightbulb} title={t("ins.title")} description={t("ins.desc")} />
       {ins.data && <div className="row small muted"><span>{t("ins.generatedAt", { date: dateTime(ins.data.generated_at, intl) })}</span>{basisPeriod && <span>· {t("ins.basis", { period: period(basisPeriod, locale, true) })}</span>}</div>}
       {ins.error && <ErrorState error={ins.error} onRetry={ins.reload} />}
-      {ins.loading && !ins.data ? <Skeleton height={300} /> : !items.length && ins.data ? (
+      {notInPlan ? <GateNotice title={t("ins.notInPlanTitle")} upgrade>{t("ins.notInPlanBody")}</GateNotice>
+        : ins.loading && !ins.data ? <Skeleton height={300} /> : !items.length && ins.data ? (
         <div className="panel"><EmptyState illustration={<IllNoData size={160} />} title={t("ins.empty")}>{t("ins.emptyBody")}</EmptyState></div>
       ) : (
         ORDER.map((sev) => {
@@ -53,7 +55,7 @@ export default function InsightsPage() {
           );
         })
       )}
-      {ins.data && <Callout tone="info" action={principal.kind === "public" ? <Link className="btn sm primary" to="/masuk?next=%2Finsight">{t("shell.signin")} <ArrowRight size={14} aria-hidden="true" /></Link> : undefined}>{ins.data.disclaimer}{principal.kind === "public" && ` ${t("ins.teaser")}`}</Callout>}
+      {ins.data && <Callout tone="info">{ins.data.disclaimer}</Callout>}
     </div>
   );
 }

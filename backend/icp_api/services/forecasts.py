@@ -19,6 +19,7 @@ from typing import Any
 
 from icp_api.errors import ApiError
 from icp_api.metrics import FORECAST_RUNS, PREDICTION_VALUE
+from icp_api.security import check_horizon
 from icp_api.services.datasets import DatasetService
 from icp_api.services.models import ModelService
 from icp_api.storage.objects import ObjectStore
@@ -100,13 +101,7 @@ class ForecastService:
             "scenario_id": scenario_id,
         }
         try:
-            if horizon > horizon_max:
-                raise ApiError(
-                    403,
-                    "PLAN_LIMIT",
-                    f"Horizon maksimal untuk akses ini adalah {horizon_max} bulan.",
-                    {"limit": horizon_max},
-                )
+            check_horizon(horizon, horizon_max)
             data = self.datasets.panel()
             record.update(
                 icp_dataset_version_id=data.versions["icp"]["id"],
@@ -220,11 +215,24 @@ class ForecastService:
             raise ApiError(404, "NOT_FOUND", "Forecast not found.")
         return row
 
+    def get_visible(self, forecast_id: str, org_id: str | None, operator: bool = False) -> dict[str, Any]:
+        """Tenant view of a forecast: the organisation's own runs or a published system forecast.
+
+        Other tenants' runs and legacy anonymous rows (no organisation, not a system run) are
+        reported as 404 so an id never reveals that a record exists. Operators see every run.
+        """
+        row = self.get(forecast_id)
+        if operator or row.get("workflow") == "system":
+            return row
+        if org_id is None or row.get("org_id") != org_id:
+            raise ApiError(404, "NOT_FOUND", "Forecast not found.")
+        return row
+
     def list(self, limit: int, cursor: str | None, status: str | None) -> Page:
         return self.repo.list_forecasts(limit, cursor, status)
 
-    def export(self, forecast_id: str) -> bytes:
-        row = self.get(forecast_id)
+    def export(self, forecast_id: str, org_id: str | None, operator: bool = False) -> bytes:
+        row = self.get_visible(forecast_id, org_id, operator)
         if row["status"] != "succeeded" or not row["export_object_key"]:
             raise ApiError(409, "EXPORT_UNAVAILABLE", "Only successful forecasts have an export.")
         return self.objects.get(row["export_object_key"])

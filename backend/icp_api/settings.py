@@ -189,6 +189,9 @@ class Settings:
                 )
             if any(len(t) < 32 for t in self.admin_tokens.values()):
                 problems.append("admin tokens must be at least 32 characters")
+            if len(self.metrics_token) < 32:
+                # /metrics bypasses the gateway secret (probes) and exposes prediction values.
+                problems.append("METRICS_TOKEN of >= 32 chars is required (protects /metrics)")
             if "*" in self.cors_allowed_origins:
                 problems.append("CORS_ALLOWED_ORIGINS must not contain '*'")
             if problems:

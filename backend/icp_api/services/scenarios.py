@@ -11,6 +11,7 @@ from typing import Any
 
 from icp_api.entitlements import plan
 from icp_api.errors import ApiError
+from icp_api.security import check_horizon
 from icp_api.services.forecasts import ForecastService
 from icp_api.storage.product import ProductRepository
 from icp_api.storage.repository import Page, new_id
@@ -22,6 +23,10 @@ class ScenarioService:
     def __init__(self, repo: ProductRepository, forecasts: ForecastService):
         self.repo = repo
         self.forecasts = forecasts
+
+    def _plan_horizon(self, org_id: str) -> int:
+        org = self.repo.get_organization(org_id)
+        return plan(org["plan"] if org else None).forecast_horizon_max
 
     def _shape(self, row: dict[str, Any]) -> dict[str, Any]:
         return {**row, "archived": bool(row.get("archived_at"))}
@@ -52,13 +57,7 @@ class ScenarioService:
                 f"Paket {p.label_id} mencakup maksimal {p.saved_scenarios_max} skenario tersimpan.",
                 {"limit": p.saved_scenarios_max, "plan": p.code},
             )
-        if horizon > p.forecast_horizon_max:
-            raise ApiError(
-                403,
-                "PLAN_LIMIT",
-                f"Paket {p.label_id} mendukung horizon maksimal {p.forecast_horizon_max} bulan.",
-                {"limit": p.forecast_horizon_max, "plan": p.code},
-            )
+        check_horizon(horizon, p.forecast_horizon_max, p.code)
         sid = new_id("scn")
         self.repo.insert_scenario(
             {
@@ -93,6 +92,8 @@ class ScenarioService:
     ) -> dict[str, Any]:
         self.get(org_id, scenario_id)
         clean = {k: v for k, v in fields.items() if v is not None}
+        if "horizon" in clean:
+            check_horizon(int(clean["horizon"]), self._plan_horizon(org_id))
         if "name" in clean:
             clean["name"] = clean["name"].strip()[:120]
         if "inputs" in clean:
@@ -118,7 +119,15 @@ class ScenarioService:
             f"user:{actor['id']}", "scenario.archive", "success", target=scenario_id, request_id=request_id
         )
 
-    def run(self, org_id: str, actor_name: str, scenario_id: str, request_id: str | None) -> dict[str, Any]:
+    def run(
+        self,
+        org_id: str,
+        actor_name: str,
+        scenario_id: str,
+        request_id: str | None,
+        horizon_max: int | None = None,
+    ) -> dict[str, Any]:
+        """Run a saved scenario; its horizon is checked against the plan as it is today."""
         sc = self.get(org_id, scenario_id)
         fc = self.forecasts.run(
             sc["horizon"],
@@ -128,6 +137,7 @@ class ScenarioService:
             workflow="scenario",
             org_id=org_id,
             scenario_id=scenario_id,
+            horizon_max=self._plan_horizon(org_id) if horizon_max is None else horizon_max,
         )
         self.repo.update_scenario(org_id, scenario_id, last_forecast_id=fc["id"])
         self.repo.record_usage(org_id, None, None, "scenario.run", request_id=request_id)
@@ -140,11 +150,13 @@ class ScenarioService:
         scenario_ids: list[str],
         request_id: str | None,
         horizon: int | None = None,
+        horizon_max: int | None = None,
     ) -> dict[str, Any]:
         """Run the baseline (no assumptions) and up to MAX_COMPARE scenarios on the same horizon and present them side by side."""
         ids = list(dict.fromkeys(scenario_ids))[:MAX_COMPARE]
         scenarios = [self.get(org_id, s) for s in ids]
         h = horizon or max([s["horizon"] for s in scenarios] or [3])
+        check_horizon(h, self._plan_horizon(org_id) if horizon_max is None else horizon_max)
         baseline = self.forecasts.run(h, {}, actor_name, request_id, workflow="scenario", org_id=org_id)
         runs = []
         for s in scenarios:

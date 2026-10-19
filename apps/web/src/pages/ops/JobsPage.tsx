@@ -3,7 +3,7 @@ import { Activity, Ban, Beaker, Bell, ChevronDown, ChevronRight, Database, Fuel,
 import { Fragment, useState, type ReactNode } from "react";
 import { api } from "../../api/client";
 import { useResource } from "../../api/hooks";
-import { Button, Callout, EmptyState, ErrorState, PageHeader, Pager, Panel, Skeleton, StatusBadge } from "../../components/ui";
+import { Button, Callout, ConfirmDialog, EmptyState, ErrorState, PageHeader, Pager, Panel, Skeleton, StatusBadge } from "../../components/ui";
 import { dateTime } from "../../format";
 import { useT, type Key } from "../../i18n";
 
@@ -45,13 +45,20 @@ export default function JobsPage() {
   const activeByType = new Map(items.filter((j) => j.status === "queued" || j.status === "running").map((j) => [j.job_type, j]));
   const run = async (key: string, fn: () => Promise<unknown>) => { setError(null); setSubmitting(key); try { await fn(); jobs.reload(); } catch (e) { setError(e); } finally { setSubmitting(null); } };
   const submit = (job_type: string, params: Record<string, unknown>) => run(job_type, () => api<Job>("/jobs", { method: "POST", json: { job_type, params } }));
+  // Jobs that change what every customer sees (a new production model, a new public forecast) are confirmed first.
+  const [pending, setPending] = useState<{ type: string; params: Record<string, unknown> } | null>(null);
+  const CONFIRM: Record<string, { title: Key; body: Key }> = {
+    train: { title: "ops.jobs.confirmTrainTitle", body: "ops.jobs.confirmTrainBody" },
+    refresh_forecast: { title: "ops.jobs.confirmRefreshTitle", body: "ops.jobs.confirmRefreshBody" },
+  };
+  const start = (type: string, params: Record<string, unknown>) => { if (CONFIRM[type]) setPending({ type, params }); else void submit(type, params); };
   const card = (type: string, Icon: LucideIcon, title: string, desc: string, params: Record<string, unknown>, children?: ReactNode) => {
     const activeJob = activeByType.get(type);
     return (
       <div key={type} className="health-tile" style={{ gap: 10, padding: 18 }}>
         <div className="row-between"><span className="health-name" style={{ textTransform: "none" }}><span className="kpi-icon brand"><Icon size={16} /></span>{title}</span>{activeJob && <StatusBadge status={activeJob.status} />}</div>
         <p className="small muted">{desc}</p>{children}
-        <div><Button variant="primary" icon={Play} loading={submitting === type} disabled={!!activeJob || !!submitting} onClick={() => submit(type, params)}>{activeJob ? t("ops.jobs.alreadyRunning") : t("ops.jobs.start")}</Button></div>
+        <div><Button variant="primary" icon={Play} loading={submitting === type} disabled={!!activeJob || !!submitting} onClick={() => start(type, params)}>{activeJob ? t("ops.jobs.alreadyRunning") : t("ops.jobs.start")}</Button></div>
       </div>
     );
   };
@@ -105,6 +112,12 @@ export default function JobsPage() {
         )}
         <Pager hasPrev={!!cursor} hasNext={!!jobs.data?.next_cursor} onFirst={() => setCursor(null)} onNext={() => setCursor(jobs.data?.next_cursor ?? null)} />
       </Panel>
+      <ConfirmDialog open={!!pending} danger={false} busy={!!pending && submitting === pending.type}
+        title={pending && CONFIRM[pending.type] ? t(CONFIRM[pending.type]!.title) : ""} confirmLabel={t("ops.jobs.confirmStart")}
+        onCancel={() => setPending(null)}
+        onConfirm={() => { const p = pending; if (!p) return; void submit(p.type, p.params).finally(() => setPending(null)); }}>
+        {pending && CONFIRM[pending.type] ? t(CONFIRM[pending.type]!.body) : null}
+      </ConfirmDialog>
     </div>
   );
 }

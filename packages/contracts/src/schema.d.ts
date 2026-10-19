@@ -319,7 +319,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** History */
+        /**
+         * History
+         * @description Monthly history. Members see at most their plan's ``history_years`` (ending at the latest
+         *     official ICP month); earlier ``start`` values are clipped and the response says so.
+         */
         get: operations["history_api_v1_data_history_get"];
         put?: never;
         post?: never;
@@ -455,7 +459,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Download */
+        /**
+         * Download
+         * @description Members may download the active version of each dataset; operators any version.
+         */
         get: operations["download_api_v1_datasets_versions__version_id__download_get"];
         put?: never;
         post?: never;
@@ -1852,6 +1859,16 @@ export interface components {
         };
         /** HistoryResponse */
         HistoryResponse: {
+            /**
+             * Earliest Period
+             * @description Earliest month the plan may see (YYYY-MM); earlier `start` values are clipped to it.
+             */
+            earliest_period?: string | null;
+            /**
+             * History Years
+             * @description Plan history limit applied to this response in years (null = unlimited).
+             */
+            history_years?: number | null;
             /** Points */
             points: components["schemas"]["HistoryPoint"][];
         };
@@ -2128,6 +2145,9 @@ export interface components {
         /**
          * MarketSnapshot
          * @description Public, anonymous market snapshot for the landing page (no account required).
+         *
+         *     ``latest_forecast`` is a teaser only - ``{available, issue_date, forecast_origin, horizon}`` -
+         *     and never carries predicted values, intervals or method details (those require sign-in).
          */
         MarketSnapshot: {
             /** Brent Period */

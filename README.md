@@ -39,6 +39,10 @@ sign-in and all other API features work only while the self-hosted backend is ru
 the app shows a "data service unavailable" message instead of figures. Anyone can register a
 trial organisation from the landing page.
 
+The staging deployment was last updated on 2026-10-17 and does not yet include the access model
+described below (public website, customer workspace and operations console with server-side
+enforcement); it takes effect there with the next deployment.
+
 When the backend was online on 2026-10-17, the following passed against the public URL: the
 repository smoke test (11 of 11 checks) and an end-to-end feature check (18 of 18: registration,
 sign-in, market summary, price history, forecast with a scenario, CSV export, saving and comparing
@@ -59,7 +63,16 @@ sign-out).
 | Platform operations | Operator area for dataset versions and source evidence, model evaluation and promotion, background jobs, system health, audit log, tenant administration |
 
 Feature availability depends on the plan (for example, the trial plan limits the forecast horizon
-to three months and report formats to PDF and CSV).
+to three months, price history to three years and report formats to PDF and CSV).
+
+**Access model.** Visitors see a public website: the landing page with a limited market snapshot
+(latest official ICP, benchmark and exchange-rate headline, data freshness), a methodology and
+data-sources page, plans, and sign-in or registration. Price history, forecasts, scenarios,
+insights, reports and account features require an organisation account. Platform operators use a
+separate operations console. The rules are enforced by the API, not only by the interface:
+unauthenticated requests are refused, other organisations' records are not found, and operators
+cannot act inside customer organisations. Details: [docs/SECURITY.md](docs/SECURITY.md),
+[docs/API.md](docs/API.md).
 
 ## Screenshots
 
@@ -278,14 +291,16 @@ npm test          # pytest, plus Vitest for the web app and the gateway
 npm run check     # lint, type checks, OpenAPI contract drift, all tests, builds, secret scan
 ```
 
-Last full run (`npm run check`, 2026-10-17): ruff, mypy and ESLint clean; contract in sync;
-**96 Python tests, 27 web tests and 20 gateway tests passed**; web and Worker builds succeeded;
-secret scan without findings.
+Last full run (`npm run check`, 2026-10-19): ruff, mypy and ESLint clean; contract in sync;
+**162 Python tests, 48 web tests and 20 gateway tests passed**; web and Worker builds succeeded;
+secret scan without findings. The Python suite includes a dedicated access-control suite (guest,
+customer roles, API keys, operators, cross-organisation ids, logout, temporary passwords, plan
+limits).
 
 The tests cover the API, storage adapters (SQLite and a simulated D1 protocol), the gateway's
 internal data plane, accounts and entitlements, forecasting semantics, prediction equality between
-MLflow and bundle mode, and the web app's session flows (sign-in, deep links, sign-out, session
-expiry, offline errors). Browser checks with headless Chrome were run locally against all main
+MLflow and bundle mode, and the web app's route boundaries and session flows (guest redirects,
+per-audience navigation, sign-in, deep links, sign-out, session expiry, offline errors). Browser checks with headless Chrome were run locally against all main
 pages at desktop and mobile widths. The tests run against local stores and simulated services;
 apart from the staging checks listed under [Live demo](#live-demo), they do not exercise the
 deployed environment.

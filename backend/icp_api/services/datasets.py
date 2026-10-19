@@ -137,8 +137,10 @@ class DatasetService:
             raise ApiError(404, "NOT_FOUND", "Dataset version not found.")
         return row
 
-    def download(self, version_id: str) -> tuple[dict[str, Any], bytes]:
+    def download(self, version_id: str, active_only: bool = False) -> tuple[dict[str, Any], bytes]:
         row = self.get_version(version_id)
+        if active_only and not row.get("is_active"):
+            raise ApiError(404, "NOT_FOUND", "Dataset version not found.")
         try:
             return row, self.objects.get(row["object_key"])
         except ObjectNotFound as exc:
@@ -229,6 +231,17 @@ class DatasetService:
             row["icp_idr"] = round(icp_v * fx_v, 0) if icp_v is not None and fx_v is not None else None
             out.append(row)
         return out
+
+    def history_floor(self, years: int) -> str | None:
+        """Earliest month a plan with ``years`` of history may see: the last official ICP month
+        minus ``12 * years - 1`` months (so exactly ``years`` years of ICP months are included)."""
+        icp = self.optional("icp")
+        if icp is None or years <= 0:
+            return None
+        observed = icp.series.dropna()
+        if observed.empty:
+            return None
+        return str(observed.index.max() - (12 * years - 1))
 
     def summary(self) -> dict[str, Any]:
         datasets: dict[str, Any] = {}

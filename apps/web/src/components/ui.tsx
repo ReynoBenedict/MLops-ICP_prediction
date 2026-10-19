@@ -13,7 +13,7 @@ import { ApiError } from "../api/client";
 import { useT } from "../i18n";
 import { IllUpgrade } from "./illustrations";
 
-export type Tone = "good" | "warn" | "bad" | "info" | "neutral" | "brand" | "outline";
+export type Tone = "good" | "warn" | "bad" | "info" | "neutral" | "brand" | "outline" | "cat-estimate" | "cat-forecast";
 
 /* ---------- Status vocabulary (one mapping for the whole app) --------------- */
 const STATUS_TONE: Record<string, Tone> = {
@@ -24,7 +24,7 @@ const STATUS_TONE: Record<string, Tone> = {
   down: "bad", not_ready: "bad", failed: "bad", significant: "bad", failure: "bad", denied: "bad", conflict: "bad", rejected: "bad",
 };
 const TONE_ICON: Record<Tone, LucideIcon> = {
-  good: CircleCheck, warn: TriangleAlert, bad: CircleX, info: Info, neutral: Minus, brand: Info, outline: Minus,
+  good: CircleCheck, warn: TriangleAlert, bad: CircleX, info: Info, neutral: Minus, brand: Info, outline: Minus, "cat-estimate": Minus, "cat-forecast": Minus,
 };
 
 export function statusTone(status: string): Tone {
@@ -67,6 +67,16 @@ export function Button({ variant = "secondary", size, icon: Icon, loading, child
 }
 
 /** Move keyboard/screen-reader focus to a result heading after an action (headings are not focusable by default). */
+export function prefersReducedMotion(): boolean {
+  try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch { return false; }
+}
+
+/** Scroll a result into view; instant (no animation) when the user prefers reduced motion. */
+export function scrollToResult(el: HTMLElement | null, block: ScrollLogicalPosition = "start"): void {
+  if (!el) return;
+  try { el.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block }); } catch { /* jsdom */ }
+}
+
 export function focusHeading(container: HTMLElement | null): void {
   const h = container?.querySelector<HTMLElement>("h2");
   if (!h) return;
@@ -139,7 +149,7 @@ export function Delta({ value, suffix = " %", digits = 1, title }: { value: numb
 }
 
 /* ---------- Feedback ------------------------------------------------------ */
-export function Callout({ tone = "info", title, children, icon, action }: { tone?: Exclude<Tone, "neutral" | "brand" | "outline">; title?: ReactNode; children?: ReactNode; icon?: LucideIcon; action?: ReactNode }) {
+export function Callout({ tone = "info", title, children, icon, action }: { tone?: Exclude<Tone, "neutral" | "brand" | "outline" | "cat-estimate" | "cat-forecast">; title?: ReactNode; children?: ReactNode; icon?: LucideIcon; action?: ReactNode }) {
   const Icon = icon ?? (tone === "info" ? Info : tone === "good" ? CircleCheck : tone === "warn" ? TriangleAlert : CircleAlert);
   return (
     <div className={`callout ${tone}`} role={tone === "bad" ? "alert" : undefined}>
@@ -300,8 +310,9 @@ export function KindChip({ kind }: { kind: "observed" | "derived" | "estimate_aw
   const map = {
     observed: { tone: "good" as Tone, label: t("common.observed") },
     derived: { tone: "neutral" as Tone, label: t("common.derived") },
-    estimate_awaiting_publication: { tone: "info" as Tone, label: t("kind.estimate_awaiting_publication") },
-    future_forecast: { tone: "warn" as Tone, label: t("kind.future_forecast") },
+    // Categories get their own neutral tokens: status colours (warn/bad) are reserved for problems.
+    estimate_awaiting_publication: { tone: "cat-estimate" as Tone, label: t("kind.estimate_awaiting_publication") },
+    future_forecast: { tone: "cat-forecast" as Tone, label: t("kind.future_forecast") },
     legacy_record: { tone: "outline" as Tone, label: t("kind.legacy_record") },
     scenario: { tone: "brand" as Tone, label: t("src.scenario") },
     assumed_hold_last: { tone: "warn" as Tone, label: t("src.assumed_hold_last") },

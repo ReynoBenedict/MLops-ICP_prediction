@@ -7,6 +7,7 @@ import { ToastProvider } from "./components/toast";
 import { I18nProvider, readLocale } from "./i18n";
 import "./styles.css";
 import "./styles-brand.css";
+import "./styles-v4.css";
 
 document.documentElement.lang = readLocale();
 

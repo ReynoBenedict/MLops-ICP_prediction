@@ -27,7 +27,7 @@ the default for staging. The paid-tier columns (D1 REST + R2 + Postgres/MLflow) 
 | `CORS_ALLOWED_ORIGINS` | Vite + wrangler dev origins | same | the gateway origin only (or empty: same-origin) | same |
 | `LOG_FORMAT` | `console` | `console` | `json` | `json` |
 | `EXPOSE_API_DOCS` | `true` | `true` | `true` | `false` |
-| `METRICS_TOKEN` | empty | empty | recommended | **set** |
+| `METRICS_TOKEN` | empty | empty | **set** (≥ 32 chars, required) | **set** (≥ 32 chars, required) |
 | `SEED_DIR` / `SEED_FROM_REPOSITORY` | `data/seed` / `true` (benchmarks + FX seeds, ICP/WTI from `data/raw`) | same | `false` (data comes from ingestion jobs) | `false` |
 | `EIA_API_KEY` | empty (EIA mirror used) | empty | recommended (free key) | recommended |
 | `SOURCE_CACHE_DIR` / `SOURCE_STATE_DIR` | `var/cache/sources` / `var/sources` | temp | persistent volume or leave default (re-downloadable) | same |

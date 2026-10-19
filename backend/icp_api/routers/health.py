@@ -15,7 +15,7 @@ from icp_api.container import Container
 from icp_api.errors import ApiError
 from icp_api.routers.common import container
 from icp_api.schemas import DependencyStatus, LiveResponse, ReadinessResponse, SystemStatus, WhoAmI
-from icp_api.security import authenticate
+from icp_api.security import authenticate, require_admin
 from icp_api.storage.migrations import current_version, expected_version
 
 router = APIRouter(tags=["health"])
@@ -129,12 +129,20 @@ async def ready(request: Request, response: Response) -> ReadinessResponse:
     status = _overall(checks)
     if status == "not_ready":
         response.status_code = 503
+    # Probes and the public only learn the overall and per-check status; dependency details
+    # (backends, schema/model versions, latencies) are for platform operators.
+    try:
+        is_operator = authenticate(request).is_operator
+    except ApiError:
+        is_operator = False
+    if not is_operator:
+        checks = [ch.model_copy(update={"detail": None, "latency_ms": None}) for ch in checks]
     return ReadinessResponse(
         status=status, environment=c.settings.app_env, version=__version__, checks=checks
     )
 
 
-@router.get("/api/v1/system/status", response_model=SystemStatus)
+@router.get("/api/v1/system/status", response_model=SystemStatus, dependencies=[Depends(require_admin)])
 async def system_status(request: Request) -> SystemStatus:
     c = container(request)
     checks, schema_version = await run_checks(c, getattr(request.app.state, "jobs", None))

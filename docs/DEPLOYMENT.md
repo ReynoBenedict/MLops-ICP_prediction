@@ -175,7 +175,7 @@ verified).
 | `MODEL_NAME`, `MODEL_ALIAS` | bundle/registry names | backend, operator CLI | no | Render env | default ok |
 | `ADMIN_API_TOKENS` | operator tokens | backend | **yes** | Render env | yes |
 | `CORS_ALLOWED_ORIGINS` | the gateway origin | backend | no | Render env | yes |
-| `METRICS_TOKEN` | protects `/metrics` | backend | **yes** | Render env | recommended |
+| `METRICS_TOKEN` | protects `/metrics` | backend | **yes** | container / host env | **yes** (≥ 32 chars; staging and production refuse to start without it) |
 | `PUBLIC_REGISTRATION_ENABLED` | self-service sign-up | backend | no | Render env | optional |
 | `EIA_API_KEY` | benchmark ingestion | backend | **yes** | Render env | optional |
 | `LOG_FORMAT`, `LOG_LEVEL`, `EXPOSE_API_DOCS` | logging / docs | backend | no | Render env | optional |

@@ -117,14 +117,25 @@ Full description: [FORECASTING_METHODOLOGY.md](FORECASTING_METHODOLOGY.md). In s
 
 Details: [SECURITY.md](SECURITY.md).
 
-- **Anonymous.** Public snapshot, limited insights, published system forecasts, forecasts up to
-  3 months without scenario (rate limited).
+- **Product areas.** Public website (`/`, `/metodologi`, `/masuk`, `/daftar`, `/syarat`,
+  `/privasi`; no app shell), customer workspace (`/ringkasan`, `/harga`, `/proyeksi`, `/skenario`,
+  `/insight`, `/laporan`, `/pemberitahuan`, `/akun`; guests are redirected to `/masuk?next=…`) and the
+  operations console (`/operasi/*`, operator tokens only, with a read-only product preview). The UI
+  guards mirror the server policy; they are not the security boundary.
+- **Anonymous.** Only `/plans`, `/public/market-snapshot` (latest official ICP, benchmark and FX
+  headline, freshness; the latest forecast appears only as "available since <date>", without values)
+  and the sign-in/registration endpoints. Every other `/api/v1` endpoint answers `401 AUTH_REQUIRED`.
+  The full matrix is in [API.md](API.md) and [SECURITY.md](SECURITY.md).
 - **Organisation members.** Session tokens (`icp_sess_…`, hashed at rest, 30-day expiry) or
   organisation API keys (`icp_live_…`); roles viewer < analyst < admin < owner; plan entitlements
   (horizon, scenarios, reports, alerts, API access, seats) enforced in `security.require_feature`
-  and the services. Tenant data is always scoped by `org_id`.
+  and the services, including plan horizon on every forecast-producing path and plan history
+  length. Tenant data is always scoped by `org_id`; object ids from another organisation answer
+  `404`. Members with an unchanged temporary password get `403 PASSWORD_CHANGE_REQUIRED`.
 - **Platform operators.** Bearer tokens from `ADMIN_API_TOKENS` (constant-time comparison, audited
-  failures) for training, ingestion, promotion/rollback, jobs, audit and tenant administration.
+  failures) for training, ingestion, promotion/rollback, jobs, audit, system status and tenant
+  administration. Operators cannot act inside customer organisations (scenarios, alerts, members,
+  API keys answer `403`); tenant administration goes through `/admin/organizations/*`.
 - **Gateway → backend.** A shared secret in `X-Gateway-Secret`; proxy IP headers are trusted only
   when it matches.
 - **Model serialization.** skops with an explicit trusted-type allow-list (scikit-learn tree

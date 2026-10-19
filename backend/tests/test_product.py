@@ -116,13 +116,11 @@ def test_members_roles_and_seat_limits(client, owner, admin):
     login = client.post("/api/v1/auth/login", json={"email": "analis@contoh.co.id", "password": temp}).json()
     ah = {"Authorization": f"Bearer {login['token']}"}
     assert login["user"]["must_change_password"] is True
-    # analysts cannot administer members
-    assert (
-        client.post(
-            "/api/v1/org/members", json={"email": "x@contoh.co.id", "name": "x", "role": "viewer"}, headers=ah
-        ).status_code
-        == 403
+    # until the temporary password is changed, everything except the account essentials is refused
+    gated = client.post(
+        "/api/v1/org/members", json={"email": "x@contoh.co.id", "name": "x", "role": "viewer"}, headers=ah
     )
+    assert gated.status_code == 403 and gated.json()["error"]["code"] == "PASSWORD_CHANGE_REQUIRED"
     assert (
         client.post(
             "/api/v1/auth/password", json={"current_password": temp, "new_password": PW + "x"}, headers=ah
@@ -132,6 +130,13 @@ def test_members_roles_and_seat_limits(client, owner, admin):
     assert (
         client.get("/api/v1/auth/me", headers=ah).status_code == 401
     )  # sessions revoked after password change
+    relog = client.post("/api/v1/auth/login", json={"email": "analis@contoh.co.id", "password": PW + "x"})
+    ah = {"Authorization": f"Bearer {relog.json()['token']}"}
+    # analysts cannot administer members
+    denied = client.post(
+        "/api/v1/org/members", json={"email": "x@contoh.co.id", "name": "x", "role": "viewer"}, headers=ah
+    )
+    assert denied.status_code == 403 and denied.json()["error"]["code"] == "FORBIDDEN"
     members = client.get("/api/v1/org/members", headers=h).json()
     assert {m["email"] for m in members} == {"owner@contoh.co.id", "analis@contoh.co.id"}
     uid = next(m["id"] for m in members if m["email"] == "analis@contoh.co.id")
@@ -143,10 +148,9 @@ def test_members_roles_and_seat_limits(client, owner, admin):
     orgs = client.get("/api/v1/admin/organizations", headers=admin).json()["items"]
     assert any(o["slug"].startswith("pt-contoh-energi") for o in orgs)
     assert client.get("/api/v1/admin/organizations", headers=h).status_code == 403
-    assert (
-        client.get("/api/v1/org/members", params={"org_id": owner["org"]["id"]}, headers=admin).status_code
-        == 200
-    )
+    # operators no longer act inside a tenant through the member endpoints (use /admin/organizations)
+    op = client.get("/api/v1/org/members", params={"org_id": owner["org"]["id"]}, headers=admin)
+    assert op.status_code == 403 and op.json()["error"]["code"] == "FORBIDDEN"
 
 
 def test_entitlements_are_enforced_server_side(client, owner, admin):
@@ -155,10 +159,13 @@ def test_entitlements_are_enforced_server_side(client, owner, admin):
     too_far = client.post("/api/v1/forecasts", json={"horizon": 6}, headers=h)
     assert too_far.status_code == 403 and too_far.json()["error"]["code"] == "PLAN_LIMIT"
     assert client.post("/api/v1/org/api-keys", json={"name": "ci"}, headers=h).status_code == 403
-    anon_scenario = client.post("/api/v1/forecasts", json={"horizon": 1, "scenario": {"brent": {}}})
-    assert anon_scenario.status_code == 201  # empty scenario = no scenario
-    anon_far = client.post("/api/v1/forecasts", json={"horizon": 4})
-    assert anon_far.status_code == 403
+    empty_scenario = client.post(
+        "/api/v1/forecasts", json={"horizon": 1, "scenario": {"brent": {}}}, headers=h
+    )
+    assert empty_scenario.status_code == 201  # empty scenario = no scenario
+    far = client.post("/api/v1/forecasts", json={"horizon": 4}, headers=h)
+    assert far.status_code == 403 and far.json()["error"]["code"] == "PLAN_LIMIT"
+    assert client.post("/api/v1/forecasts", json={"horizon": 1}).status_code == 401  # guests: sign in
     # upgrade by the operator, then the limits move
     up = client.post(
         f"/api/v1/admin/organizations/{owner['org']['id']}/plan",
@@ -193,9 +200,9 @@ def test_public_snapshot_insights_and_latest_forecast(client, admin, owner):
         and snap["icp_idr"] > 1_000_000
         and snap["freshness"]["status"]
     )
-    ins_anon = client.get("/api/v1/insights").json()
-    assert ins_anon["disclaimer"] and len(ins_anon["insights"]) <= 3
+    assert client.get("/api/v1/insights").status_code == 401  # insights are a signed-in feature
     ins = client.get("/api/v1/insights", headers=owner["headers"]).json()
+    assert ins["disclaimer"].count("Insight dihasilkan") == 1 and "Masuk untuk" not in ins["disclaimer"]
     kinds = {i["kind"] for i in ins["insights"]}
     assert "material_change" in kinds and all(i["generated"] for i in ins["insights"])
     assert all(
@@ -203,23 +210,33 @@ def test_public_snapshot_insights_and_latest_forecast(client, admin, owner):
         for i in ins["insights"]
         if i["kind"] != "forecast_change"
     )
-    before = client.get("/api/v1/forecasts/latest")  # may already exist: ingest/train post-hooks publish one
+    assert client.get("/api/v1/forecasts/latest").status_code == 401
+    before = client.get(
+        "/api/v1/forecasts/latest", headers=owner["headers"]
+    )  # may already exist: ingest/train post-hooks publish one
     before_id = before.json()["id"] if before.status_code == 200 else None
     r = client.post(
         "/api/v1/jobs", json={"job_type": "refresh_forecast", "params": {"horizon": 4}}, headers=admin
     )
     job = client.app.state.jobs.wait(r.json()["id"], 120)
     assert job["status"] == "succeeded", job
-    latest = client.get("/api/v1/forecasts/latest").json()
+    latest = client.get("/api/v1/forecasts/latest", headers=owner["headers"]).json()
     assert (
         latest["workflow"] == "system"
         and latest["requested_by"] == "system"
         and len(latest["result"]["points"]) == 4
     )
     assert latest["id"] != before_id and latest["id"] == job["result"]["forecast_id"]
-    assert client.get("/api/v1/public/market-snapshot").json()["latest_forecast"]["id"] == latest["id"]
-    anon_list = client.get("/api/v1/forecasts").json()["items"]
-    assert anon_list and all(f["workflow"] == "system" for f in anon_list)
+    teaser = client.get("/api/v1/public/market-snapshot").json()["latest_forecast"]
+    assert teaser == {
+        "available": True,
+        "issue_date": latest["issue_date"],
+        "forecast_origin": latest["forecast_origin"],
+        "horizon": 4,
+    }  # a teaser only: no predicted values for guests
+    listed = client.get("/api/v1/forecasts", headers=owner["headers"]).json()["items"]
+    assert latest["id"] in {f["id"] for f in listed}  # members see published system forecasts
+    assert all(f["workflow"] == "system" or f["org_id"] == owner["org"]["id"] for f in listed)
 
 
 def test_scenarios_alerts_and_reports(client, owner, admin):
@@ -280,7 +297,7 @@ def test_scenarios_alerts_and_reports(client, owner, admin):
     assert client.post(f"/api/v1/scenarios/{sid}/archive", headers=h).status_code == 204
 
     # alerts: rule creation evaluates immediately; events are tenant-scoped and de-duplicated
-    kinds = {k["kind"] for k in client.get("/api/v1/alerts/kinds").json()}
+    kinds = {k["kind"] for k in client.get("/api/v1/alerts/kinds", headers=h).json()}
     assert "icp_published" in kinds
     rule = client.post("/api/v1/alerts/rules", json={"kind": "icp_published"}, headers=h)
     assert rule.status_code == 201, rule.text
@@ -344,3 +361,6 @@ def test_scenarios_alerts_and_reports(client, owner, admin):
     # operators can generate platform reports without an organisation
     op = client.post("/api/v1/reports", json={"kind": "market_monthly", "formats": ["pdf"]}, headers=admin)
     assert op.status_code == 201 and op.json()["org_id"] is None
+    # ... which are not published to tenants
+    assert op.json()["id"] not in {r["id"] for r in client.get("/api/v1/reports", headers=h).json()["items"]}
+    assert client.get(f"/api/v1/reports/{op.json()['id']}", headers=h).status_code == 404

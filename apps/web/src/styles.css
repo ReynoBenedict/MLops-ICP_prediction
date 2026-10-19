@@ -124,7 +124,7 @@ code, .mono { font-family: var(--mono); font-size: 0.86em; }
 .env-card { border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px 12px; font-size: 12.5px; color: #a9b6c8; background: rgba(255,255,255,0.03); }
 .env-card .row { justify-content: space-between; }
 .user-card { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: rgba(255,255,255,0.05); }
-.avatar { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: #138a93; color: #fff; font-weight: 700; font-size: 12px; flex: none; }
+.avatar { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; background: #0f6b73; color: #fff; font-weight: 700; font-size: 12px; flex: none; }
 .sidebar .btn-ghost-dark { background: transparent; color: #c9d1dd; border: 1px solid rgba(255,255,255,0.14); }
 .sidebar .btn-ghost-dark:hover { background: rgba(255,255,255,0.08); color: #fff; }
 

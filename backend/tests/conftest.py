@@ -95,6 +95,27 @@ def admin() -> dict[str, str]:
     return {"Authorization": f"Bearer {ADMIN_TOKEN}"}
 
 
+CUSTOMER_PASSWORD = "Pelanggan-Uji-2026!"
+
+
+@pytest.fixture(scope="session")
+def customer(client: TestClient) -> dict[str, str]:
+    """Bearer header of a signed-in owner of a fresh trial organisation (the customer workspace
+    requires sign-in since access policy v4)."""
+    r = client.post(
+        "/api/v1/auth/register",
+        json={
+            "organization_name": "PT Pelanggan Uji",
+            "email": "pelanggan@pelanggan-uji.test",
+            "name": "Pelanggan",
+            "password": CUSTOMER_PASSWORD,
+            "accept_terms": True,
+        },
+    )
+    assert r.status_code == 201, r.text
+    return {"Authorization": f"Bearer {r.json()['token']}"}
+
+
 @pytest.fixture(scope="session")
 def trained_version(client: TestClient) -> str:
     """Train once per session through the real job API and return the registered version."""

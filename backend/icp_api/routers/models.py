@@ -18,7 +18,7 @@ from icp_api.schemas import (
     RollbackRequest,
     ValidationReport,
 )
-from icp_api.security import Principal, rate_limit, require_admin
+from icp_api.security import Principal, rate_limit, require_admin, require_user
 from icp_api.storage.repository import InvalidCursor
 
 router = APIRouter(
@@ -27,10 +27,12 @@ router = APIRouter(
     responses=ERRORS,
     dependencies=[Depends(rate_limit("default", "rate_limit_default_per_minute"))],
 )
+SIGNED_IN = Depends(require_user("viewer"))  # customer-facing model card
+OPERATOR_ONLY = Depends(require_admin)  # experiment, promotion and drift internals
 VERSION_PATTERN = r"^[0-9]{1,6}$"
 
 
-@router.get("", response_model=ModelList)
+@router.get("", response_model=ModelList, dependencies=[SIGNED_IN])
 def list_models(request: Request) -> ModelList:
     m = container(request).models
     versions = m.list_versions()
@@ -40,14 +42,14 @@ def list_models(request: Request) -> ModelList:
     )
 
 
-@router.get("/versions/{version}", response_model=ModelVersionDetail)
+@router.get("/versions/{version}", response_model=ModelVersionDetail, dependencies=[SIGNED_IN])
 def version_detail(request: Request, version: str) -> ModelVersionDetail:
     if not version.isdigit():
         raise ApiError(422, "VALIDATION_ERROR", "version must be numeric")
     return ModelVersionDetail.model_validate(container(request).models.version_detail(version))
 
 
-@router.get("/compare", response_model=list[ModelVersionDetail])
+@router.get("/compare", response_model=list[ModelVersionDetail], dependencies=[OPERATOR_ONLY])
 def compare(
     request: Request,
     versions: str = Query(
@@ -59,7 +61,7 @@ def compare(
     return [ModelVersionDetail.model_validate(m.version_detail(v)) for v in unique]
 
 
-@router.get("/experiments/runs", response_model=ExperimentRunList)
+@router.get("/experiments/runs", response_model=ExperimentRunList, dependencies=[OPERATOR_ONLY])
 def experiment_runs(
     request: Request, limit: int = LimitQuery, cursor: str | None = CursorQuery
 ) -> ExperimentRunList:
@@ -67,7 +69,7 @@ def experiment_runs(
     return ExperimentRunList.model_validate({"items": runs, "next_cursor": token})
 
 
-@router.get("/promotions", response_model=PromotionList)
+@router.get("/promotions", response_model=PromotionList, dependencies=[OPERATOR_ONLY])
 def promotions(request: Request, limit: int = LimitQuery, cursor: str | None = CursorQuery) -> PromotionList:
     try:
         page = container(request).models.promotions(limit, cursor)
@@ -76,7 +78,7 @@ def promotions(request: Request, limit: int = LimitQuery, cursor: str | None = C
     return PromotionList.model_validate({"items": page.items, "next_cursor": page.next_cursor})
 
 
-@router.get("/drift", response_model=DriftResponse)
+@router.get("/drift", response_model=DriftResponse, dependencies=[OPERATOR_ONLY])
 def drift(request: Request, recent_months: int = Query(12, ge=3, le=36)) -> DriftResponse:
     return DriftResponse.model_validate(container(request).models.drift(recent_months))
 

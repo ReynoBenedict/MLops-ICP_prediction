@@ -112,6 +112,7 @@ export async function api<T>(path: string, opts: RequestOptions = {}): Promise<T
     if (res.status === 401 && token) notifyAuthExpired();
     if (isErrorResponse(payload)) {
       const e = payload.error;
+      if (res.status === 403 && e.code === PASSWORD_CHANGE_CODE) notifyPasswordChange();
       throw new ApiError(res.status, e.code, e.message, e.request_id ?? requestId, e.details ?? {});
     }
     throw new ApiError(res.status, "HTTP_ERROR", `Unexpected response (HTTP ${res.status}).`, requestId);
@@ -128,6 +129,16 @@ function notifyAuthExpired(): void {
 }
 
 /**
+ * A member still using a temporary password gets 403 PASSWORD_CHANGE_REQUIRED from every endpoint
+ * except the password/profile ones. The auth layer listens and routes the member to /akun#keamanan.
+ */
+export const PASSWORD_CHANGE_CODE = "PASSWORD_CHANGE_REQUIRED";
+export const PASSWORD_CHANGE_EVENT = "icp:password-change-required";
+function notifyPasswordChange(): void {
+  try { window.dispatchEvent(new Event(PASSWORD_CHANGE_EVENT)); } catch { /* non-browser */ }
+}
+
+/**
  * Resolve to `null` only when the resource does not exist (404), so "nothing published yet" is
  * distinguishable from "server unreachable" (which must surface as an error, not as an empty state).
  */
@@ -138,12 +149,11 @@ export async function nullOn404<T>(p: Promise<T>): Promise<T | null> {
   }
 }
 
-/** URL for an anonymous, immutable download served through the same origin (dataset/forecast CSVs). */
-export function downloadUrl(path: string, query?: RequestOptions["query"]): string {
-  return buildUrl(path, query);
-}
-
-/** Download a protected file (reports) with the bearer token, then hand it to the browser. */
+/**
+ * Download a protected file (reports, forecast exports, dataset versions) with the bearer token,
+ * then hand it to the browser. Never use a plain <a href> for these: the request would carry no
+ * credential and the server answers 401.
+ */
 export async function downloadWithAuth(path: string, query: RequestOptions["query"], filename: string): Promise<void> {
   const headers: Record<string, string> = {};
   const token = getToken();
@@ -151,7 +161,11 @@ export async function downloadWithAuth(path: string, query: RequestOptions["quer
   const res = await fetch(buildUrl(path, query), { headers });
   if (!res.ok) {
     const payload: unknown = await res.json().catch(() => null);
-    if (isErrorResponse(payload)) throw new ApiError(res.status, payload.error.code, payload.error.message, payload.error.request_id ?? null);
+    if (res.status === 401 && token) notifyAuthExpired();
+    if (isErrorResponse(payload)) {
+      if (res.status === 403 && payload.error.code === PASSWORD_CHANGE_CODE) notifyPasswordChange();
+      throw new ApiError(res.status, payload.error.code, payload.error.message, payload.error.request_id ?? null);
+    }
     throw new ApiError(res.status, "HTTP_ERROR", `Unexpected response (HTTP ${res.status}).`, null);
   }
   const blob = await res.blob();

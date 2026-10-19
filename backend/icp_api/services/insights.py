@@ -45,6 +45,11 @@ def fmt_pct(v: float) -> str:
     return f"{v:+.1f}%".replace(".", ",")
 
 
+def fmt_dec(v: float, digits: int = 1) -> str:
+    """Plain decimal in Indonesian notation (comma decimal separator), e.g. 1,9."""
+    return f"{v:.{digits}f}".replace(".", ",")
+
+
 def fmt_idr(v: float) -> str:
     return f"Rp {v:,.0f}".replace(",", ".")
 
@@ -168,9 +173,7 @@ class InsightService:
                         f"Selisih ICP terhadap {label} {'melebar' if latest > mean else 'menyempit'} tidak biasa pada {fmt_period(str(last))}",
                         f"Pada {fmt_period(str(last))} ICP {('di atas' if latest >= 0 else 'di bawah')} {label} sebesar {fmt_usd(abs(latest))} per barel, "
                         f"sedangkan rata-rata 12 bulan sebelumnya {fmt_usd(abs(mean))} ({'di atas' if mean >= 0 else 'di bawah'}). "
-                        f"Penyimpangan ini setara {abs(z):.1f} simpangan baku dari pola setahun terakhir.".replace(
-                            ".", ",", 0
-                        ),
+                        f"Penyimpangan ini setara {fmt_dec(abs(z), 1)} simpangan baku dari pola setahun terakhir.",
                         str(last),
                         [
                             {

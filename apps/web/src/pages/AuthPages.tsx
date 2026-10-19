@@ -20,23 +20,29 @@ export function safeNext(raw: string | null): string | null {
   return raw;
 }
 
+/**
+ * Sign-in/registration frame. The brand panel is decorative context (no headings, so the page's
+ * first heading is the form's H1); the form column is the page's <main>.
+ */
 function AuthFrame({ children, side }: { children: React.ReactNode; side: React.ReactNode }) {
+  const { t } = useT();
   return (
     <div className="auth-page">
+      <a href="#main" className="skip-link">{t("shell.skip")}</a>
       <aside className="auth-side">
-        <Link to="/" style={{ textDecoration: "none" }}><Wordmark dark size={34} /></Link>
+        <Link to="/" style={{ textDecoration: "none" }} aria-label={t("brand.name")}><Wordmark dark size={34} /></Link>
         {side}
-        <div className="row-between"><LanguageToggle dark /><Link to="/" className="small link-inline" style={{ color: "#a9b6c8" }}><ArrowLeft size={14} aria-hidden="true" /> ICP Intelligence</Link></div>
+        <div className="row-between"><LanguageToggle dark /><Link to="/" className="small link-inline" style={{ color: "#c9d1dd" }}><ArrowLeft size={14} aria-hidden="true" /> {t("shell.landing")}</Link></div>
       </aside>
-      <div className="auth-form-wrap">
+      <main className="auth-form-wrap" id="main" tabIndex={-1}>
         <div className="auth-form">
-          <div className="row-between" style={{ marginBottom: 4 }}>
-            <Link to="/" className="hide-desktop" style={{ textDecoration: "none" }}><Wordmark size={28} /></Link>
-            <span className="hide-desktop"><LanguageToggle /></span>
+          <div className="row-between hide-desktop" style={{ marginBottom: 4 }}>
+            <Link to="/" style={{ textDecoration: "none" }} aria-label={t("brand.name")}><Wordmark size={28} /></Link>
+            <LanguageToggle />
           </div>
           {children}
         </div>
-      </div>
+      </main>
     </div>
   );
 }
@@ -46,7 +52,10 @@ export function LoginPage() {
   const { login, signInOperator, principal, ready } = useAuth();
   const [params] = useSearchParams();
   const { show } = useToast();
-  const [mode, setMode] = useState<"user" | "operator">(params.get("operator") ? "operator" : "user");
+  // The operator token form is only offered when asked for (/masuk?operator=1, used by /operasi links):
+  // customers never see the operator path.
+  const operatorOffered = !!params.get("operator");
+  const [mode, setMode] = useState<"user" | "operator">(operatorOffered ? "operator" : "user");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [token, setToken] = useState("");
@@ -76,7 +85,7 @@ export function LoginPage() {
   };
 
   return (
-    <AuthFrame side={<div className="stack"><IllPipeline size={240} /><h2>{t("landing.title")}</h2><p>{t("landing.f2.body")}</p></div>}>
+    <AuthFrame side={<div className="stack"><IllPipeline size={240} /><p className="auth-side-title">{t("landing.title")}</p><p>{t("landing.f2.body")}</p></div>}>
       <form onSubmit={submit} noValidate>
         <div className="stack">
           <div>
@@ -84,10 +93,12 @@ export function LoginPage() {
             <p className="muted small mt-2">{mode === "user" ? t("auth.loginLead") : t("auth.operatorLead")}</p>
             {next && <p className="muted small mt-2">{t("auth.nextNote")}</p>}
           </div>
-          <div className="segmented" role="group" aria-label={t("shell.signin")}>
-            <button type="button" aria-pressed={mode === "user"} onClick={() => setMode("user")}><LogIn size={14} aria-hidden="true" />{t("auth.modeUser")}</button>
-            <button type="button" aria-pressed={mode === "operator"} onClick={() => setMode("operator")}><KeyRound size={14} aria-hidden="true" />{t("shell.operator")}</button>
-          </div>
+          {operatorOffered && (
+            <div className="segmented" role="group" aria-label={t("shell.signin")}>
+              <button type="button" aria-pressed={mode === "user"} onClick={() => setMode("user")}><LogIn size={14} aria-hidden="true" />{t("auth.modeUser")}</button>
+              <button type="button" aria-pressed={mode === "operator"} onClick={() => setMode("operator")}><KeyRound size={14} aria-hidden="true" />{t("shell.operator")}</button>
+            </div>
+          )}
           {mode === "user" ? (
             <>
               <label className="field"><span className="field-label">{t("auth.email")}</span>
@@ -142,7 +153,7 @@ export function RegisterPage() {
   const set = (k: keyof typeof form) => (ev: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [k]: k === "accept_terms" ? ev.target.checked : ev.target.value });
 
   return (
-    <AuthFrame side={<div className="stack"><IllPipeline size={240} /><h2>{t("landing.featuresTitle")}</h2><p>{t("landing.plansLead")}</p></div>}>
+    <AuthFrame side={<div className="stack"><IllPipeline size={240} /><p className="auth-side-title">{t("landing.featuresTitle")}</p><p>{t("landing.plansLead")}</p></div>}>
       <form onSubmit={submit} noValidate>
         <div className="stack">
           <div><h1>{t("auth.registerTitle")}</h1><p className="muted small mt-2">{t("auth.registerLead")}</p></div>
@@ -160,10 +171,11 @@ export function RegisterPage() {
             <span className="field-hint">{t("auth.passwordHint")}</span>
             {errors.password && <span className="field-error">{errors.password}</span>}</label>
           <label className="check"><input type="checkbox" checked={form.accept_terms} onChange={set("accept_terms")} />
-            <span>{t("auth.acceptTerms", { terms: "", privacy: "" }).split("  ")[0]}<Link to="/syarat" target="_blank">{t("landing.footer.terms")}</Link> {t("common.and")} <Link to="/privasi" target="_blank">{t("landing.footer.privacy")}</Link>.</span></label>
+            <span>{t("auth.acceptPrefix")} <Link to="/syarat" target="_blank">{t("landing.footer.terms")}</Link> {t("common.and")} <Link to="/privasi" target="_blank">{t("landing.footer.privacy")}</Link>.</span></label>
           {errors.accept_terms && <span className="field-error" role="alert">{errors.accept_terms}</span>}
           <ErrorState error={error} compact />
           <Button type="submit" variant="primary" size="lg" icon={UserPlus} loading={busy}>{t("auth.register")}</Button>
+          <p className="small muted"><Link to="/metodologi">{t("nav.methodology")}</Link></p>
           <p className="small muted">{t("auth.hasAccount")} <Link to={next ? `/masuk?next=${encodeURIComponent(next)}` : "/masuk"}>{t("shell.signin")}</Link></p>
         </div>
       </form>

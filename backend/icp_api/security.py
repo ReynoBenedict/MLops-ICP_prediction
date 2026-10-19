@@ -1,7 +1,7 @@
 """Authentication, authorization, entitlements and rate limiting (all decided server-side).
 
 Principals
-* ``public``   - anonymous visitor: public market snapshot, limited forecasts (rate limited).
+* ``public``   - anonymous visitor: plans, public market snapshot (no forecast values), sign-in.
 * ``user``     - organisation member authenticated with a session token (``icp_sess_…``) or an
                  organisation API key (``icp_live_…``); carries org, role and plan. Roles:
                  viewer < analyst < admin < owner.
@@ -79,6 +79,32 @@ class Principal:
 
 PUBLIC = Principal("anonymous", "public")
 
+# Requests a member holding an unchanged temporary password may still make (everything else is
+# refused with 403 PASSWORD_CHANGE_REQUIRED). /plans and /public/market-snapshot never authenticate.
+PASSWORD_CHANGE_ALLOWED = frozenset(
+    {
+        ("GET", "/api/v1/auth/whoami"),
+        ("GET", "/api/v1/auth/me"),
+        ("POST", "/api/v1/auth/password"),
+        ("POST", "/api/v1/auth/logout"),
+    }
+)
+
+
+def _auth_required(message: str = "Silakan masuk untuk menggunakan fitur ini.") -> ApiError:
+    return ApiError(401, "AUTH_REQUIRED", message, headers={"WWW-Authenticate": "Bearer"})
+
+
+def check_horizon(horizon: int, horizon_max: int, plan_code: str | None = None) -> None:
+    """Plan horizon limit, shared by every forecast-producing path (same error as POST /forecasts)."""
+    if horizon > horizon_max:
+        details: dict[str, Any] = {"limit": horizon_max}
+        if plan_code:
+            details["plan"] = plan_code
+        raise ApiError(
+            403, "PLAN_LIMIT", f"Horizon maksimal untuk akses ini adalah {horizon_max} bulan.", details
+        )
+
 
 def client_key(request: Request) -> str:
     """Client identity for rate limiting. Proxy headers are trusted only from the verified gateway."""
@@ -121,7 +147,9 @@ def _bearer(request: Request) -> str | None:
         return None
     scheme, _, token = header.partition(" ")
     if scheme.lower() != "bearer" or not token:
-        raise ApiError(401, "AUTH_INVALID", "Malformed Authorization header.")
+        raise ApiError(
+            401, "AUTH_INVALID", "Malformed Authorization header.", headers={"WWW-Authenticate": "Bearer"}
+        )
     return token
 
 
@@ -176,7 +204,13 @@ def authenticate(request: Request) -> Principal:
         c.repo.audit(
             "unknown", "auth.failed", "denied", target=request.url.path, request_id=request_id_var.get()
         )
-        raise ApiError(401, "AUTH_INVALID", "Invalid credentials.")
+        raise ApiError(401, "AUTH_INVALID", "Invalid credentials.", headers={"WWW-Authenticate": "Bearer"})
+    if principal.must_change_password and (request.method, request.url.path) not in PASSWORD_CHANGE_ALLOWED:
+        raise ApiError(
+            403,
+            "PASSWORD_CHANGE_REQUIRED",
+            "Ganti kata sandi sementara Anda sebelum menggunakan fitur lain.",
+        )
     request.state.principal = principal
     return principal
 
@@ -188,13 +222,10 @@ def require_admin(request: Request) -> Principal:
             503, "ADMIN_DISABLED", "Administrative operations are disabled: no admin tokens configured."
         )
     principal = authenticate(request)
+    if principal.kind == "public":
+        raise _auth_required("This operation requires a platform operator token.")
     if not principal.is_operator:
-        raise ApiError(
-            401 if principal.kind == "public" else 403,
-            "AUTH_REQUIRED",
-            "This operation requires a platform operator token.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        raise ApiError(403, "FORBIDDEN", "Tindakan ini hanya untuk operator platform.")
     limiter: RateLimiter = request.app.state.rate_limiter
     settings = request.app.state.container.settings
     if settings.rate_limit_enabled:
@@ -207,20 +238,21 @@ def require_user(
 ) -> Callable[[Request], Principal]:
     """Signed-in organisation member with at least ``minimum_role`` (operators pass unless disallowed).
 
+    ``allow_operator=False`` marks customer-organisation endpoints: operators get 403 FORBIDDEN
+    there (tenant administration lives under ``/admin/organizations``).
     ``allow_api_key=False`` restricts the route to interactive sessions (organisation administration).
     """
 
     def dependency(request: Request) -> Principal:
         principal = authenticate(request)
-        if principal.is_operator and allow_operator:
-            return principal
-        if not principal.is_user:
+        if principal.is_operator:
+            if allow_operator:
+                return principal
             raise ApiError(
-                401,
-                "AUTH_REQUIRED",
-                "Silakan masuk untuk menggunakan fitur ini.",
-                headers={"WWW-Authenticate": "Bearer"},
+                403, "FORBIDDEN", "Endpoint ini khusus anggota organisasi, bukan untuk akun operator."
             )
+        if not principal.is_user:
+            raise _auth_required()
         if principal.api_key_id and (not allow_api_key or minimum_role in ("admin", "owner")):
             raise ApiError(403, "FORBIDDEN", "Kunci API tidak dapat mengakses administrasi organisasi.")
         if not has_role(principal.role, minimum_role):
@@ -232,11 +264,11 @@ def require_user(
     return dependency
 
 
-def require_feature(feature: str) -> Callable[[Request], Principal]:
+def require_feature(feature: str, allow_operator: bool = True) -> Callable[[Request], Principal]:
     """Signed-in member whose plan includes ``feature`` (a boolean field of ``Plan``)."""
 
     def dependency(request: Request) -> Principal:
-        principal = require_user("viewer")(request)
+        principal = require_user("viewer", allow_operator=allow_operator)(request)
         if principal.is_operator:
             return principal
         if not getattr(principal.plan, feature, False):

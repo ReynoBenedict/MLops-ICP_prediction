@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "../App";
@@ -42,10 +42,21 @@ const wrap = (ui: React.ReactNode, path = "/") => render(<MemoryRouter initialEn
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.clear(); sessionStorage.clear(); });
 
+const customer = { authenticated: true, name: "Penguji UX", role: "owner", kind: "user", org_id: "org_1", org_name: "PT Uji", plan: "trial", must_change_password: false, horizon_max: 3 };
+/** Fake API for a signed-in customer: whoami answers, everything else 404 unless overridden. */
+function signedIn(extra: (path: string) => Response | null = () => null) {
+  localStorage.setItem("icp.sessionToken", "icp_sess_test");
+  vi.stubGlobal("fetch", async (url: string) => {
+    const path = url.split("?")[0] ?? "";
+    if (path === "/api/v1/auth/whoami") return json(customer);
+    return extra(path) ?? notFound();
+  });
+}
+
 describe("routes", () => {
-  it("shows the Indonesian landing page with the real public snapshot for anonymous visitors", async () => {
+  it("shows the landing page with the public snapshot and a sign-in teaser instead of forecast values", async () => {
     vi.stubGlobal("fetch", async (url: string) => {
-      if (url.startsWith("/api/v1/public/market-snapshot")) return json(snapshot);
+      if (url.startsWith("/api/v1/public/market-snapshot")) return json({ ...snapshot, latest_forecast: { available: true, issue_date: "2026-10-17", forecast_origin: "2026-09", horizon: 6 } });
       if (url.startsWith("/api/v1/plans")) return json([plan]);
       return notFound();
     });
@@ -53,29 +64,34 @@ describe("routes", () => {
     expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent(/Harga Minyak Mentah Indonesia/);
     expect(await screen.findByText("USD 102,26")).toBeInTheDocument();
     expect(screen.getByText("Rp 1.730.696")).toBeInTheDocument();
+    expect(await screen.findByText("Proyeksi terbit 17 Oktober 2026 tersedia setelah masuk")).toBeInTheDocument();
+    expect(screen.getByText(/Proyeksi 6 bulan dari ICP resmi September 2026/)).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Masuk" }).some((a) => a.getAttribute("href") === "/masuk?next=%2Fproyeksi")).toBe(true);
     expect(await screen.findByText("Gratis, fitur terbatas")).toBeInTheDocument();
     expect(screen.getByText(/Kredit foto/)).toBeInTheDocument();
+    expect(screen.getByRole("main")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: "Metodologi & Data" }).every((a) => a.getAttribute("href") === "/metodologi")).toBe(true);
     expect(screen.queryByText(/testimoni/i)).toBeNull();
   });
 
-  it("renders the app shell with the business navigation and sign-in gate on protected pages", async () => {
+  it("never renders forecast values on the landing page, even from an older snapshot that still sends them", async () => {
     vi.stubGlobal("fetch", async (url: string) => {
-      if (url.startsWith("/api/v1/system/status")) return json({ status: "ready", environment: "test", version: "2", checks: [], metadata_backend: "sqlite", object_store_backend: "local", schema_version: 4, expected_schema_version: 4, model_alias: "production", admin_enabled: true });
+      if (url.startsWith("/api/v1/public/market-snapshot")) return json({ ...snapshot, latest_forecast: { id: "fc_1", issue_date: "2026-10-17", forecast_origin: "2026-09", method: "spread_brent_6m",
+        points: [{ period: "2026-10", kind: "future_forecast", prediction: 112.8958, interval_80: [103.3, 121.9] }] } });
+      if (url.startsWith("/api/v1/plans")) return json([plan]);
       return notFound();
     });
-    wrap(<App />, "/skenario");
-    const nav = await screen.findByRole("navigation", { name: "Intelijen Pasar" });
-    for (const label of ["Ringkasan Pasar", "Eksplorasi Harga", "Proyeksi ICP", "Simulasi Skenario", "Insight Pasar", "Laporan & Pemberitahuan"]) {
-      expect(nav).toHaveTextContent(label);
-    }
-    expect(nav).not.toHaveTextContent("Operasi Platform");
-    expect(await screen.findByText("Masuk untuk membuat dan membandingkan skenario.")).toBeInTheDocument();
+    const { container } = wrap(<App />);
+    expect(await screen.findByText("Proyeksi terbit 17 Oktober 2026 tersedia setelah masuk")).toBeInTheDocument();
+    expect(container.textContent).not.toMatch(/112,90|112\.90|spread_brent|fc_1/);
   });
 
-  it("validates the login form before calling the API and switches language", async () => {
+  it("validates the login form before calling the API and switches language; no operator tab unless asked for", async () => {
     const fetchMock = vi.fn(async () => notFound());
     vi.stubGlobal("fetch", fetchMock);
     wrap(<App />, "/masuk");
+    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Masuk ke ICP Intelligence");
+    expect(screen.queryByRole("button", { name: /Operator platform/ })).toBeNull();
     fireEvent.change(await screen.findByLabelText("Email"), { target: { value: "bukan-email" } });
     fireEvent.change(screen.getByLabelText("Kata sandi"), { target: { value: "x" } });
     fireEvent.click(screen.getByRole("button", { name: "Masuk" }));
@@ -86,11 +102,18 @@ describe("routes", () => {
     expect(await screen.findByText("Sign in to ICP Intelligence", {}, { timeout: 4000 })).toBeInTheDocument();
     expect(screen.getByLabelText("Password")).toBeInTheDocument();
   });
+
+  it("puts a space before the terms link on the registration form", async () => {
+    vi.stubGlobal("fetch", async () => notFound());
+    const { container } = wrap(<App />, "/daftar");
+    await screen.findByRole("heading", { level: 1 });
+    expect(container.textContent).toContain("Saya menyetujui Syarat Penggunaan dan Kebijakan Privasi.");
+  });
 });
 
 describe("navigation and deep links", () => {
-  it("redirects the legacy /forecast route to /proyeksi and hides the system card from end users", async () => {
-    vi.stubGlobal("fetch", async () => notFound());
+  it("redirects the legacy /forecast route to /proyeksi for a signed-in customer and hides internal cards", async () => {
+    signedIn();
     wrap(<App />, "/forecast");
     expect(await screen.findByRole("heading", { level: 1, name: /Proyeksi Harga Minyak Mentah Indonesia/ })).toBeInTheDocument();
     expect(screen.queryByText("Sistem")).toBeNull();
@@ -98,13 +121,15 @@ describe("navigation and deep links", () => {
     expect(screen.getByRole("link", { name: "Syarat Penggunaan" })).toHaveAttribute("href", "/syarat");
   });
 
-  it("opens the alerts tab from the query string on the reports page", async () => {
-    vi.stubGlobal("fetch", async () => notFound());
+  it("opens the notifications tab from the query string and marks it in the sidebar", async () => {
+    signedIn((path) => path === "/api/v1/alerts/events" ? json({ items: [], next_cursor: null, unread: 0 }) : path === "/api/v1/reports" ? json({ items: [], next_cursor: null }) : null);
     wrap(<App />, "/laporan?tab=pemberitahuan");
     expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Laporan siap pakai dan pemberitahuan");
-    // anonymous visitors see the sign-in gate, which carries the deep link back to this page
-    const links = await screen.findAllByRole("link", { name: /Masuk/ });
-    expect(links.some((l) => (l.getAttribute("href") ?? "").includes("/masuk?next=%2Flaporan%3Ftab%3Dpemberitahuan"))).toBe(true);
+    expect(screen.getByRole("tab", { name: "Pemberitahuan" })).toHaveAttribute("aria-selected", "true");
+    const nav = screen.getByRole("navigation", { name: "Navigasi ruang kerja" });
+    expect(within(nav).getByRole("link", { name: "Pemberitahuan" })).toHaveAttribute("aria-current", "page");
+    expect(within(nav).getByRole("link", { name: "Laporan" })).not.toHaveAttribute("aria-current");
+    await waitFor(() => expect(document.title).toBe("Pemberitahuan · ICP Intelligence"));
   });
 });
 
@@ -116,6 +141,7 @@ describe("forecast presentation", () => {
     expect(text).toContain("Brent + rata-rata selisih 12 bulan terakhir");
     expect(text).toContain("Data yang digunakan: ICP resmi (ESDM).");
     expect(text).not.toMatch(/[—–]/);
+    for (const jargon of ["versi model", "Langkah", "kuantil", "sistem"]) expect(text, jargon).not.toContain(jargon);
   });
 
   it("distinguishes estimates awaiting publication from future forecasts and labels every input source", () => {
@@ -128,5 +154,7 @@ describe("forecast presentation", () => {
     expect(screen.getAllByText("bersyarat pada skenario").length).toBeGreaterThan(0);
     expect(screen.getByText("USD 95,50")).toBeInTheDocument();
     expect(screen.getByText("Rp 1.700.000")).toBeInTheDocument();
+    // ranges carry their unit
+    expect(screen.getByText("USD 93,00 s.d. 98,00")).toBeInTheDocument();
   });
 });

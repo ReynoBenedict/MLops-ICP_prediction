@@ -41,14 +41,10 @@ def _actor(p: Principal) -> dict[str, Any]:
     return {"id": p.user_id, "role": p.role, "name": p.name}
 
 
-def _org_id(p: Principal, request: Request, explicit: str | None = None) -> str:
-    """Organisation in scope: the member's own; operators must name one with ?org_id=."""
-    if p.is_operator:
-        org = explicit or request.query_params.get("org_id")
-        if not org:
-            raise ApiError(422, "VALIDATION_ERROR", "Operators must specify org_id.")
-        return org
-    assert p.org_id is not None
+def _org_id(p: Principal, request: Request) -> str:
+    """Organisation in scope: always the member's own. Operators are refused on /org* (403) and
+    administer tenants through /admin/organizations instead."""
+    assert p.is_user and p.org_id is not None
     return p.org_id
 
 
@@ -137,14 +133,17 @@ def change_password(
 # -- organisation ----------------------------------------------------------------------------------
 @router.get("/org", response_model=OrganizationDetail)
 def organization(
-    request: Request, principal: Principal = Depends(require_user("viewer", allow_api_key=False))
+    request: Request,
+    principal: Principal = Depends(require_user("viewer", allow_operator=False, allow_api_key=False)),
 ) -> dict[str, Any]:
     return container(request).accounts.organization(_org_id(principal, request))
 
 
 @router.post("/org", response_model=OrganizationDetail)
 def rename_org(
-    request: Request, body: OrgRenameRequest, principal: Principal = Depends(require_user("admin"))
+    request: Request,
+    body: OrgRenameRequest,
+    principal: Principal = Depends(require_user("admin", allow_operator=False)),
 ) -> dict[str, Any]:
     return container(request).accounts.rename_organization(
         _org_id(principal, request), _actor(principal), body.name, request_id_var.get()
@@ -153,16 +152,19 @@ def rename_org(
 
 @router.get("/org/members", response_model=list[UserPublic])
 def members(
-    request: Request, principal: Principal = Depends(require_user("viewer", allow_api_key=False))
+    request: Request,
+    principal: Principal = Depends(require_user("viewer", allow_operator=False, allow_api_key=False)),
 ) -> list[dict[str, Any]]:
     return container(request).accounts.members(_org_id(principal, request))
 
 
 @router.post("/org/members", response_model=InviteResponse, status_code=201)
 def invite(
-    request: Request, body: InviteRequest, principal: Principal = Depends(require_user("admin"))
+    request: Request,
+    body: InviteRequest,
+    principal: Principal = Depends(require_user("admin", allow_operator=False)),
 ) -> dict[str, Any]:
-    actor = _actor(principal) if principal.is_user else {"id": None, "role": "owner", "name": principal.name}
+    actor = _actor(principal)
     return container(request).accounts.invite_member(
         _org_id(principal, request), actor, body.email, body.name, body.role, request_id_var.get()
     )
@@ -173,9 +175,9 @@ def update_member(
     request: Request,
     user_id: str,
     body: MemberUpdateRequest,
-    principal: Principal = Depends(require_user("admin")),
+    principal: Principal = Depends(require_user("admin", allow_operator=False)),
 ) -> dict[str, Any]:
-    actor = _actor(principal) if principal.is_user else {"id": None, "role": "owner", "name": principal.name}
+    actor = _actor(principal)
     return container(request).accounts.update_member(
         _org_id(principal, request), actor, user_id, body.role, body.status, request_id_var.get()
     )
@@ -183,24 +185,30 @@ def update_member(
 
 @router.post("/org/members/{user_id}/reset-password", response_model=TemporaryPasswordResponse)
 def reset_member_password(
-    request: Request, user_id: str, principal: Principal = Depends(require_user("admin"))
+    request: Request,
+    user_id: str,
+    principal: Principal = Depends(require_user("admin", allow_operator=False)),
 ) -> dict[str, Any]:
-    actor = _actor(principal) if principal.is_user else {"id": None, "role": "owner", "name": principal.name}
+    actor = _actor(principal)
     return container(request).accounts.reset_member_password(
         _org_id(principal, request), actor, user_id, request_id_var.get()
     )
 
 
 @router.get("/org/api-keys", response_model=list[ApiKeyInfo])
-def api_keys(request: Request, principal: Principal = Depends(require_user("admin"))) -> list[dict[str, Any]]:
+def api_keys(
+    request: Request, principal: Principal = Depends(require_user("admin", allow_operator=False))
+) -> list[dict[str, Any]]:
     return container(request).accounts.list_api_keys(_org_id(principal, request))
 
 
 @router.post("/org/api-keys", response_model=ApiKeyCreated, status_code=201)
 def create_api_key(
-    request: Request, body: ApiKeyCreateRequest, principal: Principal = Depends(require_user("admin"))
+    request: Request,
+    body: ApiKeyCreateRequest,
+    principal: Principal = Depends(require_user("admin", allow_operator=False)),
 ) -> dict[str, Any]:
-    actor = _actor(principal) if principal.is_user else {"id": None, "role": "owner", "name": principal.name}
+    actor = _actor(principal)
     return container(request).accounts.create_api_key(
         _org_id(principal, request), actor, body.name, request_id_var.get()
     )
@@ -208,9 +216,9 @@ def create_api_key(
 
 @router.post("/org/api-keys/{key_id}/revoke", status_code=204)
 def revoke_api_key(
-    request: Request, key_id: str, principal: Principal = Depends(require_user("admin"))
+    request: Request, key_id: str, principal: Principal = Depends(require_user("admin", allow_operator=False))
 ) -> None:
-    actor = _actor(principal) if principal.is_user else {"id": None, "role": "owner", "name": principal.name}
+    actor = _actor(principal)
     container(request).accounts.revoke_api_key(
         _org_id(principal, request), actor, key_id, request_id_var.get()
     )

@@ -3,8 +3,8 @@
  * with /auth/whoami; the UI only mirrors the principal (kind, role, plan, horizon_max) it returns.
  */
 import type { AuthResponse, WhoAmI } from "./api/types";
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { api, ApiError, AUTH_EXPIRED_EVENT, getOperatorToken, getSessionToken, setOperatorToken, setSessionToken } from "./api/client";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { api, ApiError, AUTH_EXPIRED_EVENT, PASSWORD_CHANGE_EVENT, getOperatorToken, getSessionToken, setOperatorToken, setSessionToken } from "./api/client";
 import { useToast } from "./components/toast";
 import { useT } from "./i18n";
 
@@ -36,7 +36,7 @@ interface AuthState {
    * (also when the server says the token was already invalid). Rejects - leaving the session in
    * place - when the server could not be reached, so the UI never pretends to have signed out.
    */
-  signOut: () => Promise<void>;
+  signOut: (leave?: () => void | Promise<void>) => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -101,7 +101,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return res;
   }, [refresh]);
 
-  const signOut = useCallback(async () => {
+  // `leave` runs after the server ended the session and before the client state is cleared, so the
+  // caller can move to a public page first (otherwise the private-route guard would redirect to sign-in).
+  const signOut = useCallback(async (leave?: () => void | Promise<void>) => {
     if (getSessionToken() && !getOperatorToken()) {
       try {
         await api("/auth/logout", { method: "POST" });
@@ -110,6 +112,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!(e instanceof ApiError && e.status === 401)) throw e;
       }
     }
+    await leave?.();
     setOperatorToken(null);
     setSessionToken(null);
     setPrincipal(ANONYMOUS);
@@ -134,6 +137,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
   }, [show, t]);
+
+  // The server refused a request because the member still has a temporary password: mirror that in
+  // the principal (the route guard then sends the member to /akun#keamanan) and say why, once.
+  // The update is functional so it never depends on a ref that is only synced after render (a 403
+  // arriving right after the first render used to be ignored); the toast follows the state change.
+  const passwordNoticePending = useRef(false);
+  useEffect(() => {
+    const onPasswordChange = () => {
+      setPrincipal((p) => {
+        if (p.kind !== "user" || p.mustChangePassword) return p;
+        passwordNoticePending.current = true;
+        return { ...p, mustChangePassword: true };
+      });
+    };
+    window.addEventListener(PASSWORD_CHANGE_EVENT, onPasswordChange);
+    return () => window.removeEventListener(PASSWORD_CHANGE_EVENT, onPasswordChange);
+  }, []);
+  useEffect(() => {
+    if (principal.mustChangePassword && passwordNoticePending.current) {
+      passwordNoticePending.current = false;
+      show(t("shell.passwordRequired"), "info");
+    }
+  }, [principal.mustChangePassword, show, t]);
 
   const value = useMemo<AuthState>(() => ({
     principal, ready, isUser: principal.kind === "user", isOperator: principal.kind === "operator",
