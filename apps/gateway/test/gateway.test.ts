@@ -113,8 +113,21 @@ describe("API proxy", () => {
     const get = await worker.fetch(new Request("https://icp.example/api/v1/models", { headers: { authorization: "Bearer secret-token" } }), e, ctx);
     expect(get.status).toBe(200);
     expect(keys[0]).toBe("fc:ip:198.51.100.1");
-    expect(keys[1]).toMatch(/^api:auth:[0-9a-f]{24}$/);
+    // not a session token / API key format: only the client-IP bucket applies (v7, SEC-02)
+    expect(keys[1]).toBe("api:ip:unknown");
     expect(keys.join()).not.toContain("secret-token");
+  });
+
+  it("keys /auth/* on the client IP so rotating Authorization headers cannot reset the bucket", async () => {
+    mockUpstream(() => new Response("ok"));
+    const keys: string[] = [];
+    const allow = { limit: async ({ key }: { key: string }) => { keys.push(key); return { success: true }; } } as unknown as RateLimit;
+    const e = env({ API_RATE_LIMITER: allow });
+    for (const junk of ["Bearer a", "Bearer b", "Bearer c"]) {
+      await worker.fetch(new Request("https://icp.example/api/v1/auth/login", { method: "POST", body: "{}",
+        headers: { authorization: junk, "cf-connecting-ip": "198.51.100.7" } }), e, ctx);
+    }
+    expect(new Set(keys)).toEqual(new Set(["api:signin:ip:198.51.100.7"]));
   });
 
   it("refuses upstream redirects", async () => {
@@ -127,7 +140,11 @@ describe("API proxy", () => {
 describe("non-API traffic", () => {
   it("serves the gateway health and static assets", async () => {
     const health = await worker.fetch(new Request("https://icp.example/api/gateway/health"), env(), ctx);
-    expect(await health.json()).toEqual({ status: "ok", environment: "test", backend_configured: true });
+    // public: status only (no environment name or backend configuration, v6)
+    expect(await health.json()).toEqual({ status: "ok" });
+    expect(health.headers.get("strict-transport-security")).toContain("max-age=");
+    expect(health.headers.get("content-security-policy")).toBe("default-src 'none'; frame-ancestors 'none'");
+    expect(health.headers.get("cross-origin-resource-policy")).toBe("same-origin");
     const page = await worker.fetch(new Request("https://icp.example/forecast"), env(), ctx);
     expect(await page.text()).toContain("app");
   });
