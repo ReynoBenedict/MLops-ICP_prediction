@@ -1,61 +1,144 @@
-/** Insight Pasar: rule-generated insights grouped by severity, with figures, sources and next steps. */
-import type { InsightsResponse } from "../api/types";
-import { Database, Lightbulb } from "lucide-react";
-import { loadInsights, NOT_IN_PLAN } from "../lib/plan";
+/**
+ * Insight Pasar: an editorial feed of rule-generated insights. The most important item leads,
+ * up to three follow as compact items, the rest are one-line rows grouped by category.
+ * Importance is shown by position and a marker, never by alarm colours. The detail opens in a
+ * sheet deep-linked by `?insight=<id>` (Back closes it); the category filter is `?kategori=`.
+ * All wording about the data comes from the backend in the active language (`?lang=`).
+ */
+import { Lightbulb } from "lucide-react";
+import { useMemo, useRef } from "react";
+import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
+import type { FeedInsight } from "../api/product-types";
 import { useResource } from "../api/hooks";
 import { useAuth } from "../auth";
 import { IllNoData } from "../components/illustrations";
-import { Badge, Callout, EmptyState, ErrorState, GateNotice, PageHeader, Skeleton } from "../components/ui";
-import { dateTime, fmtNum, period } from "../format";
-import { useT, type Key } from "../i18n";
+import { ImportanceMarker, InsightCompact, InsightDetail, InsightLead, InsightRow, useKindLabel } from "../components/insight";
+import { Button, Callout, EmptyState, ErrorState, GateNotice, PageHeader, Skeleton } from "../components/ui";
+import { dateTime, period } from "../format";
+import { useT } from "../i18n";
+import "../i18n/workspace"; // workspace strings, registered when this lazy chunk loads
+import "../styles/flows.css"; // page styles, loaded with this lazy chunk (not by the public site)
+import { loadInsights, NOT_IN_PLAN } from "../lib/plan";
 
-const ORDER = ["warning", "notice", "info"] as const;
+function FeedSkeleton() {
+  const { t } = useT();
+  return (
+    <div className="ins-feed" role="status" aria-label={t("ins.loading")}>
+      <div className="ins-top"><Skeleton height={260} /></div>
+      <div className="stack-sm">{[0, 1, 2, 3].map((k) => <Skeleton key={k} height={44} />)}</div>
+    </div>
+  );
+}
 
 export default function InsightsPage() {
-  const { t, td, locale, intl } = useT();
+  const { t, locale, intl } = useT();
   const { principal } = useAuth();
-  const res = useResource((s) => loadInsights(principal, s), [principal.kind, principal.plan]);
+  const kindLabel = useKindLabel();
+  const res = useResource((s) => loadInsights(principal, s, locale), [principal.kind, principal.plan, locale]);
   const notInPlan = res.data === NOT_IN_PLAN;
-  const ins = { ...res, data: res.data && res.data !== NOT_IN_PLAN ? (res.data as InsightsResponse) : null };
-  const items = ins.data?.insights ?? [];
-  const basisPeriod = (ins.data?.basis as { icp_period?: string } | undefined)?.icp_period;
+  const data = res.data && res.data !== NOT_IN_PLAN ? res.data : null;
+  const all = useMemo(() => (data?.insights ?? []) as unknown as FeedInsight[], [data]);
+
+  const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const kategori = params.get("kategori");
+  const openId = params.get("insight");
+  // True when this page pushed the `?insight=` entry, so closing can simply go Back.
+  const pushed = useRef(false);
+
+  const kinds = useMemo(() => [...new Set(all.map((i) => i.kind))], [all]);
+  const counts = useMemo(() => all.reduce((m, i) => m.set(i.kind, (m.get(i.kind) ?? 0) + 1), new Map<string, number>()), [all]);
+  const items = useMemo(() => (kategori ? all.filter((i) => i.kind === kategori) : all), [all, kategori]);
+  const lead = items[0] ?? null;
+  const compact = items.slice(1, 4);
+  const rest = items.slice(4);
+  const groups = useMemo(() => {
+    const m = new Map<string, FeedInsight[]>();
+    for (const i of rest) m.set(i.kind, [...(m.get(i.kind) ?? []), i]);
+    return [...m.entries()];
+  }, [rest]);
+  const opened = openId ? all.find((i) => i.id === openId) ?? null : null;
+
+  const open = (id: string) => {
+    const next = new URLSearchParams(params);
+    next.set("insight", id);
+    pushed.current = true;
+    navigate({ pathname: location.pathname, search: `?${next.toString()}` });
+  };
+  const close = () => {
+    if (pushed.current) { pushed.current = false; navigate(-1); return; }
+    const next = new URLSearchParams(params);
+    next.delete("insight");
+    setParams(next, { replace: true });
+  };
+  const setKategori = (k: string | null) => {
+    const next = new URLSearchParams(params);
+    if (k) next.set("kategori", k); else next.delete("kategori");
+    next.delete("insight");
+    setParams(next, { replace: true });
+  };
+  const basisPeriod = data?.basis?.icp_period ?? null;
 
   return (
     <div className="page">
       <PageHeader eyebrow={t("ins.eyebrow")} icon={Lightbulb} title={t("ins.title")} description={t("ins.desc")} />
-      {ins.data && <div className="row small muted"><span>{t("ins.generatedAt", { date: dateTime(ins.data.generated_at, intl) })}</span>{basisPeriod && <span>· {t("ins.basis", { period: period(basisPeriod, locale, true) })}</span>}</div>}
-      {ins.error && <ErrorState error={ins.error} onRetry={ins.reload} />}
-      {notInPlan ? <GateNotice title={t("ins.notInPlanTitle")} upgrade>{t("ins.notInPlanBody")}</GateNotice>
-        : ins.loading && !ins.data ? <Skeleton height={300} /> : !items.length && ins.data ? (
-        <div className="panel"><EmptyState illustration={<IllNoData size={160} />} title={t("ins.empty")}>{t("ins.emptyBody")}</EmptyState></div>
-      ) : (
-        ORDER.map((sev) => {
-          const group = items.filter((i) => i.severity === sev);
-          if (!group.length) return null;
-          return (
-            <section key={sev} className="stack-sm">
-              <h2 className="section-title" style={{ marginBottom: 0 }}>{t(`ins.sev.${sev}` as Key)} <span className="muted">({group.length})</span></h2>
-              <div className="grid cols-2">
-                {group.map((i) => (
-                  <article key={i.id} className={`insight-card ${i.severity}`}>
-                    <div className="row"><Badge tone="outline">{t(`ins.kind.${i.kind}` as Key)}</Badge>{i.period && <span className="xs muted">{period(i.period, locale, true)}</span>}<span className="xs muted">· {t("ins.generated")}</span></div>
-                    <h3>{i.title}</h3>
-                    <p className="small">{i.body}</p>
-                    {i.metrics.length > 0 && (
-                      <div className="insight-metrics">
-                        {i.metrics.map((m) => <span className="m" key={m.label}><span className="l">{m.label}</span><span className="v">{typeof m.value === "number" ? fmtNum(m.value, intl, Number.isInteger(m.value) || Math.abs(m.value) >= 1000 ? 0 : 2) : typeof m.value === "string" ? td("status", m.value, m.value) : "-"} {m.unit}</span></span>)}
-                      </div>
-                    )}
-                    {i.next_step && <div className="small"><strong>{t("ins.nextStep")}:</strong> {i.next_step}</div>}
-                    <div className="xs muted row" style={{ gap: 6 }}><Database size={12} aria-hidden="true" />{t("ins.sources")}: {i.sources.map((s) => s.label).join("; ") || t("common.none")}</div>
-                  </article>
-                ))}
-              </div>
-            </section>
-          );
-        })
+      {data && (
+        <p className="ins-meta small muted">
+          <span>{t("ins.updated", { date: dateTime(data.generated_at, intl) })}{basisPeriod ? ` · ${t("ins.dataThrough", { period: period(basisPeriod, locale, true) })}` : ""}</span>
+          <span> · {t("ins.generatedNote")} · <Link to="/metodologi">{t("ins.methodLink")}</Link></span>
+        </p>
       )}
-      {ins.data && <Callout tone="info">{ins.data.disclaimer}</Callout>}
+
+      {notInPlan ? <GateNotice title={t("ins.notInPlanTitle")} upgrade>{t("ins.notInPlanBody")}</GateNotice>
+        : res.error && !data ? <ErrorState error={res.error} onRetry={res.reload} />
+        : res.loading && !data ? <FeedSkeleton />
+        : !all.length ? (
+          <div className="panel"><EmptyState illustration={<IllNoData size={160} />} title={t("ins.emptyPeriod")}
+            action={<Link className="btn sm" to="/harga">{t("nav.explorer")}</Link>}>{t("ins.emptyBody")}</EmptyState></div>
+        ) : (<>
+          {kinds.length > 1 && (
+            // One row of filters (it scrolls sideways when it does not fit); the count is visual only,
+            // so each button keeps the category name as its accessible name.
+            <div className="ins-filter" role="group" aria-label={t("ins.filter")}>
+              <button type="button" aria-pressed={!kategori} onClick={() => setKategori(null)}>{t("ins.filterAll")}<span className="count" aria-hidden="true">{all.length}</span></button>
+              {kinds.map((k) => <button key={k} type="button" aria-pressed={kategori === k} onClick={() => setKategori(k)}>{kindLabel(k)}<span className="count" aria-hidden="true">{counts.get(k) ?? 0}</span></button>)}
+            </div>
+          )}
+          {openId && !opened && <Callout tone="info">{t("ins.notFound")}</Callout>}
+          {!lead ? (
+            <div className="panel"><EmptyState title={t("ins.emptyFilter")} action={<Button size="sm" onClick={() => setKategori(null)}>{t("ins.clearFilter")}</Button>} /></div>
+          ) : (
+            <div className="ins-feed">
+              <div className={`ins-top${compact.length ? "" : " solo"}`}>
+                <InsightLead i={lead} onOpen={() => open(lead.id)} />
+                {compact.length > 0 && (
+                  <aside className="ins-side" aria-label={t("ins.compactTitle")}>
+                    <h2 className="ins-side-title">{t("ins.compactTitle")}</h2>
+                    <ul className="ins-compact-list">{compact.map((i) => <InsightCompact key={i.id} i={i} onOpen={() => open(i.id)} />)}</ul>
+                  </aside>
+                )}
+              </div>
+              {groups.map(([kind, list]) => (
+                <section key={kind} className="ins-group" aria-labelledby={`ins-g-${kind}`}>
+                  <h2 className="ins-group-title" id={`ins-g-${kind}`}>{kindLabel(kind)}</h2>
+                  <ul className="ins-rows">{list.map((i) => <InsightRow key={i.id} i={i} onOpen={() => open(i.id)} />)}</ul>
+                </section>
+              ))}
+              <p className="ins-legend xs muted">
+                <ImportanceMarker level="high" /> <ImportanceMarker level="medium" /> <span className="imp imp-low"><span className="imp-label">{t("ins.imp.low")}</span></span>
+              </p>
+            </div>
+          )}
+          {data?.disclaimer && <p className="ins-disclaimer xs muted">{data.disclaimer}</p>}
+          {/* A refresh failure after data was shown: one notice, the feed stays readable. */}
+          {res.error && data && <ErrorState error={res.error} onRetry={res.reload} compact />}
+        </>)}
+
+      {opened && data && (
+        <InsightDetail i={opened} open onClose={close} generatedAt={data.generated_at} engineVersion={data.engine_version}
+          disclaimer={data.disclaimer} key={opened.id} />
+      )}
     </div>
   );
 }

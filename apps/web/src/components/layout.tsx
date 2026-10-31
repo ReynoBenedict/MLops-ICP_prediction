@@ -1,23 +1,34 @@
 /**
- * Layouts. Three audiences, three navigations:
- * - PublicLayout (guests, and anyone on the public pages): top navigation + footer, no app sidebar.
- * - AppShell for customers: workspace sidebar (Pasar / Analisis / Keluaran) and an account card.
- * - AppShell for operators: operations-first sidebar, a "Pratinjau produk" group with the read-only
- *   market pages, an environment band and no customer items (scenarios, reports, account).
+ * Signed-in application shell. Two audiences, two navigations (the public site has its own layout,
+ * components/public-layout.tsx):
+ * - AppShell for customers: light workspace sidebar (Pasar / Analisis / Keluaran) and an account card.
+ * - AppShell for operators: dark, operations-first sidebar, a "Pratinjau produk" group with the
+ *   read-only market pages, an environment band and no customer items (scenarios, reports, account).
  * Internal details (environment, API version) are only shown to operators.
+ *
+ * Top bar (sticky, 56 px): on desktop it sits above the main column with the location line
+ * ("Analisis › Proyeksi"), the data status control (customers; components/data-status.tsx) or the
+ * environment and version (operators), and the language toggle. Below 900 px it carries the menu
+ * button, the wordmark and a compact data status; the language toggle moves into the drawer.
  */
 import type { AlertEventList, SystemStatus } from "../api/types";
 import {
-  Activity, Bell, Building2, ChartLine, Database, FileText, FlaskConical, Globe, LayoutDashboard, Lightbulb, LoaderCircle, LogOut,
+  Activity, Bell, BookOpen, Building2, ChartLine, ChevronRight, Database, FileText, FlaskConical, LayoutDashboard, Lightbulb, LoaderCircle, LogOut,
   Menu, ScrollText, Settings, ShieldCheck, SlidersHorizontal, Workflow, X, type LucideIcon,
 } from "lucide-react";
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
-import { api } from "../api/client";
+import { api, sharedGet } from "../api/client";
 import { useResource } from "../api/hooks";
 import { useAuth } from "../auth";
 import { useT, type Key } from "../i18n";
-import { LogoSymbol, Wordmark } from "./brand";
+import "../i18n/workspace"; // workspace strings, registered when this lazy chunk loads
+import "../styles/shell.css"; // shell styles, loaded with this lazy chunk (not by the public site)
+import { onAlertsChanged } from "../lib/alerts";
+import { LogoSymbol } from "./brand";
+import { LanguageToggle, useRouteFocus, useStickyTop } from "./chrome";
+import { DataStatus } from "./data-status";
+import { useModal } from "./modal";
 import { useToast } from "./toast";
 import { Skeleton, StatusBadge } from "./ui";
 
@@ -32,24 +43,14 @@ interface NavItem {
 }
 interface NavGroup { label: Key; items: NavItem[] }
 
-export function LanguageToggle({ dark }: { dark?: boolean }) {
-  const { locale, setLocale, t } = useT();
-  return (
-    <div className={`lang-toggle${dark ? " dark" : ""}`} role="group" aria-label={t("shell.language")}>
-      <Globe size={14} aria-hidden="true" />
-      <button type="button" aria-pressed={locale === "id"} onClick={() => setLocale("id")}>ID</button>
-      <button type="button" aria-pressed={locale === "en"} onClick={() => setLocale("en")}>EN</button>
-    </div>
-  );
-}
-
-function Brand({ to }: { to: string }) {
+/** Logo + product name; `dark` for the operator console's dark sidebar and top bar. */
+function Brand({ to, dark }: { to: string; dark?: boolean }) {
   const { t } = useT();
   return (
     <Link to={to} className="brand" aria-label={t("brand.name")}>
-      <LogoSymbol size={34} tone="teal" />
+      <LogoSymbol size={34} tone={dark ? "teal" : "navy"} />
       <span>
-        <span className="brand-name" style={{ display: "block" }}>{t("brand.name")}</span>
+        <span className="brand-name">{t("brand.name")}</span>
         <span className="brand-sub">{t("brand.tagline")}</span>
       </span>
     </Link>
@@ -71,90 +72,9 @@ export function ShellFooter() {
   );
 }
 
-/* ---------- Public website ---------------------------------------------------------------------- */
-
-export function PublicFooter({ credits }: { credits?: boolean }) {
-  const { t } = useT();
-  const { principal } = useAuth();
-  const productId = useId();
-  const legalId = useId();
-  const signedIn = principal.kind !== "public";
-  return (
-    <footer className="landing-footer">
-      <div className="inner">
-        <div>
-          <Wordmark dark size={30} />
-          <p className="mt-3">{t("landing.footer.operator")}</p>
-          <p className="mt-2">{t("landing.footer.noAdvice")}</p>
-          {credits && <p className="mt-2 xs footer-credit"><strong>{t("landing.photoCreditLabel")}:</strong> {t("landing.photoCredit")} {t("landing.illCredit")}</p>}
-        </div>
-        <nav aria-label={t("landing.footer.product")}>
-          <h2 id={productId} className="footer-h">{t("landing.footer.product")}</h2>
-          <ul>
-            <li><Link to="/">{t("shell.landing")}</Link></li>
-            <li><Link to="/metodologi">{t("nav.methodology")}</Link></li>
-            {!signedIn && <li><Link to="/#paket">{t("nav.plans")}</Link></li>}
-            <li>{signedIn ? <Link to={principal.kind === "operator" ? "/operasi" : "/ringkasan"}>{t("nav.openWorkspace")}</Link> : <Link to="/masuk">{t("shell.signin")}</Link>}</li>
-          </ul>
-        </nav>
-        <nav aria-label={t("landing.footer.legal")}>
-          <h2 id={legalId} className="footer-h">{t("landing.footer.legal")}</h2>
-          <ul><li><Link to="/syarat">{t("landing.footer.terms")}</Link></li><li><Link to="/privasi">{t("landing.footer.privacy")}</Link></li></ul>
-        </nav>
-      </div>
-    </footer>
-  );
-}
-
-/**
- * Header + main + footer for the public pages. Below 900 px the links collapse behind a menu
- * button (nothing is hidden without a replacement).
- */
-export function PublicLayout({ children, credits, className = "" }: { children: ReactNode; credits?: boolean; className?: string }) {
-  const { t } = useT();
-  const { principal, ready } = useAuth();
-  const [open, setOpen] = useState(false);
-  const location = useLocation();
-  useEffect(() => { setOpen(false); }, [location.pathname, location.hash]);
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open]);
-  const signedIn = ready && principal.kind !== "public";
-  const workspace = principal.kind === "operator" ? "/operasi" : "/ringkasan";
-  return (
-    <div className={`landing ${className}`}>
-      <a href="#main" className="skip-link">{t("shell.skip")}</a>
-      <header className="landing-nav">
-        <Link to="/" className="brand-link" aria-label={t("brand.name")}><Wordmark size={32} /></Link>
-        <button type="button" className="btn sm public-menu-btn" aria-expanded={open} aria-controls="public-menu" onClick={() => setOpen((o) => !o)}>
-          {open ? <X size={16} aria-hidden="true" /> : <Menu size={16} aria-hidden="true" />}{t("nav.menu")}
-        </button>
-        <nav id="public-menu" className={`public-menu${open ? " open" : ""}`} aria-label={t("nav.site")}>
-          <div className="links">
-            <NavLink to="/metodologi" className={({ isActive }) => (isActive ? "active" : undefined)}>{t("nav.methodology")}</NavLink>
-            {principal.kind === "user" ? <Link to="/akun#paket">{t("nav.plans")}</Link> : principal.kind === "public" ? <Link to="/#paket">{t("nav.plans")}</Link> : null}
-          </div>
-          <div className="public-actions">
-            <LanguageToggle />
-            {signedIn ? <Link className="btn sm primary" to={workspace}>{t("nav.openWorkspace")}</Link> : (<>
-              <Link className="btn sm" to="/masuk">{t("shell.signin")}</Link>
-              <Link className="btn sm primary" to="/daftar">{t("shell.register")}</Link>
-            </>)}
-          </div>
-        </nav>
-      </header>
-      <main id="main" tabIndex={-1} className="public-main">{children}</main>
-      <PublicFooter credits={credits} />
-    </div>
-  );
-}
-
 /* ---------- Signed-in application shell ------------------------------------------------------- */
 
-/** True while the viewport uses the off-canvas navigation drawer (same breakpoint as styles.css). */
+/** True while the viewport uses the off-canvas navigation drawer (same breakpoint as styles/shell.css). */
 function useDrawerLayout(): boolean {
   const query = "(max-width: 900px)";
   const get = () => { try { return window.matchMedia(query).matches; } catch { return false; } };
@@ -181,8 +101,8 @@ export function customerNav(unread: number): NavGroup[] {
       { to: "/insight", label: "nav.insights", icon: Lightbulb },
     ] },
     { label: "nav.group.output", items: [
-      { to: "/laporan", label: "nav.reports", icon: FileText, match: (p, q) => p === "/laporan" && q.get("tab") !== "pemberitahuan" },
-      { to: "/laporan?tab=pemberitahuan", label: "nav.alerts", icon: Bell, badge: unread, match: (p, q) => p === "/laporan" && q.get("tab") === "pemberitahuan" },
+      { to: "/laporan", label: "nav.reports", icon: FileText },
+      { to: "/pemberitahuan", label: "nav.alerts", icon: Bell, badge: unread },
     ] },
   ];
 }
@@ -206,6 +126,21 @@ export function operatorNav(): NavGroup[] {
   ];
 }
 
+/** Matches a navigation item against the current path (same rule as NavLink: exact for `end`, else prefix). */
+function itemMatches(item: NavItem, pathname: string): boolean {
+  return item.end ? pathname === item.to : pathname === item.to || pathname.startsWith(`${item.to}/`);
+}
+
+/** "Group › Page" for the top bar, from the navigation the reader sees; null when the page is not in it. */
+export function locationTrail(groups: NavGroup[], pathname: string, extra: NavItem[] = []): { group: Key | null; page: Key } | null {
+  for (const g of groups) {
+    const hit = g.items.find((i) => itemMatches(i, pathname));
+    if (hit) return { group: g.label, page: hit.label };
+  }
+  const own = extra.find((i) => itemMatches(i, pathname));
+  return own ? { group: null, page: own.label } : null;
+}
+
 export function AppShell({ children }: { children: ReactNode }) {
   const { t, td, locale } = useT();
   const { principal, ready, isOperator, isUser, signOut } = useAuth();
@@ -216,8 +151,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { show } = useToast();
   const drawer = useDrawerLayout();
   const menuBtn = useRef<HTMLButtonElement>(null);
-  const closeBtn = useRef<HTMLButtonElement>(null);
-  const wasOpen = useRef(false);
+  const asideRef = useRef<HTMLElement>(null);
+  const topbarRef = useRef<HTMLElement>(null);
+  const mainRef = useRef<HTMLElement>(null);
+  const skipRef = useRef<HTMLAnchorElement>(null);
+  const navigated = useRef(false);
   const leaving = useRef<(() => void) | null>(null);
   useEffect(() => () => { leaving.current?.(); }, []);
 
@@ -241,24 +179,33 @@ export function AppShell({ children }: { children: ReactNode }) {
       setSigningOut(false);
     }
   };
-  const status = useResource((s) => isOperator ? api<SystemStatus>("/system/status", { signal: s }) : Promise.resolve(null), [isOperator], 60000);
+  const status = useResource((s) => isOperator ? sharedGet<SystemStatus>("/system/status", { signal: s }) : Promise.resolve(null), [isOperator], 60000);
   // A member with a temporary password may not read alerts yet (403): do not ask.
   const alertsAllowed = isUser && !principal.mustChangePassword;
   const alerts = useResource((s) => alertsAllowed ? api<AlertEventList>("/alerts/events", { query: { limit: 1, unread_only: true }, signal: s }).catch(() => null) : Promise.resolve(null), [alertsAllowed], 60000);
   const unread = alerts.data?.unread ?? 0;
+  const reloadAlerts = alerts.reload;
+  // Rules created, events read or evaluated anywhere in the app: refresh the badge at once.
+  useEffect(() => onAlertsChanged(reloadAlerts), [reloadAlerts]);
 
-  useEffect(() => { setNavOpen(false); try { window.scrollTo(0, 0); } catch { /* jsdom */ } }, [location.pathname]);
-  // Drawer focus: move into the drawer when it opens, back to the menu button when it closes.
-  useEffect(() => {
-    if (navOpen) { wasOpen.current = true; closeBtn.current?.focus(); }
-    else if (wasOpen.current) { wasOpen.current = false; menuBtn.current?.focus(); }
-  }, [navOpen]);
-  useEffect(() => {
-    if (!navOpen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setNavOpen(false); };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [navOpen]);
+  // Navigation: close the drawer without sending focus back to the menu button (the new page's
+  // heading receives focus instead), and start the new page at the top.
+  useStickyTop(topbarRef);
+  const announce = useRouteFocus(mainRef, () => {
+    navigated.current = true;
+    setNavOpen(false);
+    try { window.scrollTo(0, 0); } catch { /* jsdom */ }
+  });
+  // The drawer (≤ 900 px) is a modal dialog: focus trapped, page behind inert and not scrollable,
+  // Escape or the scrim close it, focus returns to the menu button.
+  const drawerOpen = drawer && navOpen;
+  useEffect(() => { if (navOpen) navigated.current = false; }, [navOpen]);
+  useEffect(() => { if (!drawer) setNavOpen(false); }, [drawer]);
+  useModal(drawerOpen, asideRef, {
+    onClose: () => setNavOpen(false),
+    inertTargets: () => [topbarRef.current, mainRef.current, skipRef.current],
+    returnFocus: () => !navigated.current,
+  });
 
   const groups = isOperator ? operatorNav() : customerNav(unread);
   const search = new URLSearchParams(location.search);
@@ -278,25 +225,25 @@ export function AppShell({ children }: { children: ReactNode }) {
   };
 
   const isOpsPage = location.pathname.startsWith("/operasi");
+  const trail = locationTrail(groups, location.pathname, isUser ? [{ to: "/akun", label: "nav.account", icon: Settings }] : []);
+  // The data status reads /data/summary; a member who must replace a temporary password may not yet.
+  const dataStatusAllowed = isUser && ready && !principal.mustChangePassword;
+  const envStatus = status.data
+    ? <><StatusBadge status={status.data.status} /><span className="topbar-env-text">{t("shell.env", { env: status.data.environment, v: status.data.version })}</span></>
+    : <span className="topbar-env-text">{status.error ? t("shell.unreachable") : t("shell.checking")}</span>;
   return (
     <div className={`app${isOperator ? " app-operator" : ""}`}>
-      <a href="#main" className="skip-link">{t("shell.skip")}</a>
-      <header className="topbar">
-        <Brand to={home} />
-        <div className="row topbar-actions">
-          <LanguageToggle dark />
-          <button ref={menuBtn} className="icon-btn" onClick={() => setNavOpen(true)} aria-label={t("nav.open")} aria-expanded={navOpen} aria-controls="sidebar"><Menu size={20} /></button>
-        </div>
-      </header>
-      {navOpen && <div className="sidebar-scrim" onClick={() => setNavOpen(false)} aria-hidden="true" />}
+      <a href="#main" className="skip-link" ref={skipRef}>{t("shell.skip")}</a>
+      <div className="sr-only" role="status" aria-live="polite">{announce}</div>
+      {drawerOpen && <div className="sidebar-scrim" onClick={() => setNavOpen(false)} aria-hidden="true" />}
 
-      <aside className={`sidebar${navOpen ? " open" : ""}`} id="sidebar" inert={drawer && !navOpen ? true : undefined}
-        aria-label={drawer ? navLabel : undefined}>
+      <aside ref={asideRef} className={`sidebar${navOpen ? " open" : ""}`} id="sidebar" inert={drawer && !navOpen ? true : undefined}
+        role={drawerOpen ? "dialog" : undefined} aria-modal={drawerOpen ? true : undefined} aria-label={drawer ? navLabel : undefined}>
         <div className="sidebar-top">
-          <Brand to={home} />
-          {navOpen && <button ref={closeBtn} className="btn ghost sm btn-ghost-dark" onClick={() => setNavOpen(false)} aria-label={t("nav.close")}><X size={16} /></button>}
+          <Brand to={home} dark={isOperator} />
+          {drawerOpen && <button className="btn ghost sm btn-ghost-dark" onClick={() => setNavOpen(false)} aria-label={t("nav.close")}><X size={16} /></button>}
         </div>
-        <nav className="nav" aria-label={navLabel}>
+        <nav className="nav nav-main" aria-label={navLabel}>
           {groups.map((g) => (
             <div key={g.label} className="nav-group">
               <div className="nav-section">{t(g.label)}</div>
@@ -306,10 +253,11 @@ export function AppShell({ children }: { children: ReactNode }) {
         </nav>
 
         <div className="sidebar-foot">
-          <div className="hide-mobile"><LanguageToggle dark /></div>
+          {/* In the drawer layout the top bar has no room for these; on desktop the top bar shows them. */}
+          <div className="drawer-only"><LanguageToggle dark={isOperator} /></div>
           {isOperator && (
-            <div className="env-card">
-              <div className="row" style={{ justifyContent: "space-between" }}>
+            <div className="env-card drawer-only">
+              <div className="row">
                 <span>{t("shell.system")}</span>
                 {status.data ? <StatusBadge status={status.data.status} /> : <span className="xs">{status.error ? t("shell.unreachable") : t("shell.checking")}</span>}
               </div>
@@ -318,10 +266,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           )}
           <div className="user-card">
             <span className="avatar" aria-hidden="true">{isOperator ? "OP" : (principal.name ?? "?").slice(0, 2).toUpperCase()}</span>
-            <div className="grow" style={{ minWidth: 0 }}>
-              <div className="truncate user-name">{principal.name}</div>
+            <div className="grow">
+              <div className="user-name">{principal.name}</div>
               {isOperator ? <div className="xs user-meta">{t("shell.operator")}</div> : (<>
-                <div className="xs user-meta truncate" title={principal.orgName ?? undefined}>{principal.orgName} · {t(`acct.role.${principal.role}` as Key)}</div>
+                <div className="xs user-meta user-org">{principal.orgName}</div><div className="xs user-meta">{t(`acct.role.${principal.role}` as Key)}</div>
                 {principal.plan && <div className="xs user-plan">{t("shell.planLine", { plan: td("plan", principal.plan, principal.plan) })}</div>}
               </>)}
             </div>
@@ -331,14 +279,34 @@ export function AppShell({ children }: { children: ReactNode }) {
             </button>
           </div>
           {isUser && (
-            <nav className="nav nav-account" aria-label={t("nav.account")}>
+            <nav className="nav nav-account" aria-label={t("nav.accountHelp")}>
               <NavLink to="/akun" className={({ isActive }) => (isActive ? "active" : undefined)}><Settings size={18} aria-hidden="true" />{t("nav.account")}</NavLink>
+              <NavLink to="/metodologi"><BookOpen size={18} aria-hidden="true" />{t("nav.help")}</NavLink>
             </nav>
           )}
         </div>
       </aside>
 
-      <main className="main" id="main" lang={locale} tabIndex={-1}>
+      <div className="app-main">
+      <header className="topbar" ref={topbarRef} aria-label={t("shell.topbar")}>
+        <div className="topbar-inner">
+          <button ref={menuBtn} type="button" className="icon-btn topbar-menu" onClick={() => setNavOpen(true)} aria-label={t("nav.open")} aria-expanded={navOpen} aria-controls="sidebar"><Menu size={20} aria-hidden="true" /></button>
+          <div className="topbar-brand"><Brand to={home} dark={isOperator} /></div>
+          {trail && (
+            <nav className="topbar-loc" aria-label={t("shell.location")}>
+              <ol>
+                {trail.group && <li className="topbar-loc-group">{t(trail.group)}<ChevronRight size={14} aria-hidden="true" /></li>}
+                <li><span aria-current="page">{t(trail.page)}</span></li>
+              </ol>
+            </nav>
+          )}
+          <div className="topbar-actions">
+            {isOperator ? <div className="topbar-env">{envStatus}</div> : <DataStatus enabled={dataStatusAllowed} />}
+            <div className="topbar-lang"><LanguageToggle dark={isOperator} /></div>
+          </div>
+        </div>
+      </header>
+      <main className="main" id="main" ref={mainRef} lang={locale} tabIndex={-1}>
         {isOperator && (
           <div className="console-band" role="note">
             <ShieldCheck size={15} aria-hidden="true" />
@@ -346,7 +314,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           </div>
         )}
         {principal.mustChangePassword && location.pathname !== "/akun" && (
-          <div className="callout warn" role="alert" style={{ marginBottom: 16 }}>
+          <div className="callout warn shell-notice" role="alert">
             <Bell size={18} aria-hidden="true" />
             <div className="grow">{t("shell.mustChangePassword")}</div>
             <Link className="btn sm primary" to="/akun#keamanan">{t("acct.changePassword")}</Link>
@@ -362,6 +330,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         )}
         {!(isOperator && isOpsPage) && <ShellFooter />}
       </main>
+      </div>
     </div>
   );
 }

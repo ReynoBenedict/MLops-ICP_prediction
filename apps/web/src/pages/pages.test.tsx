@@ -60,17 +60,20 @@ describe("routes", () => {
       if (url.startsWith("/api/v1/plans")) return json([plan]);
       return notFound();
     });
-    wrap(<App />);
-    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent(/Harga Minyak Mentah Indonesia/);
-    expect(await screen.findByText("USD 102,26")).toBeInTheDocument();
+    const { container } = wrap(<App />);
+    // Wave B copy: the hero names the official ICP and its documents; the value sits in the live panel with its unit.
+    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("ICP resmi, lengkap dengan dokumen sumbernya.");
+    await waitFor(() => expect(container.querySelector(".mkt-num")).toHaveTextContent("102,26"));
     expect(screen.getByText("Rp 1.730.696")).toBeInTheDocument();
-    expect(await screen.findByText("Proyeksi terbit 17 Oktober 2026 tersedia setelah masuk")).toBeInTheDocument();
-    expect(screen.getByText(/Proyeksi 6 bulan dari ICP resmi September 2026/)).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Masuk" }).some((a) => a.getAttribute("href") === "/masuk?next=%2Fproyeksi")).toBe(true);
+    // The teaser is the locked forecast window: horizon and issue date only, linking to sign-in.
+    const lock = screen.getByRole("link", { name: "Proyeksi 6 bulan · terbit 17 Oktober 2026 · masuk untuk melihat" });
+    expect(lock).toHaveAttribute("href", "/masuk?next=%2Fproyeksi");
     expect(await screen.findByText("Gratis, fitur terbatas")).toBeInTheDocument();
-    expect(screen.getByText(/Kredit foto/)).toBeInTheDocument();
+    // The landing no longer uses photographs, so it carries no photo credits.
+    expect(screen.queryByText(/Kredit foto/)).toBeNull();
+    expect(container.querySelector('img[src*="/img/hero"], img[src*="/img/editorial"]')).toBeNull();
     expect(screen.getByRole("main")).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Metodologi & Data" }).every((a) => a.getAttribute("href") === "/metodologi")).toBe(true);
+    expect(screen.getAllByRole("link", { name: "Data & metodologi" }).every((a) => a.getAttribute("href") === "/metodologi")).toBe(true);
     expect(screen.queryByText(/testimoni/i)).toBeNull();
   });
 
@@ -82,7 +85,7 @@ describe("routes", () => {
       return notFound();
     });
     const { container } = wrap(<App />);
-    expect(await screen.findByText("Proyeksi terbit 17 Oktober 2026 tersedia setelah masuk")).toBeInTheDocument();
+    expect(await screen.findByRole("link", { name: /^Proyeksi 1 bulan · terbit 17 Oktober 2026 · masuk untuk melihat$/ })).toBeInTheDocument();
     expect(container.textContent).not.toMatch(/112,90|112\.90|spread_brent|fc_1/);
   });
 
@@ -95,7 +98,12 @@ describe("routes", () => {
     fireEvent.change(await screen.findByLabelText("Email"), { target: { value: "bukan-email" } });
     fireEvent.change(screen.getByLabelText("Kata sandi"), { target: { value: "x" } });
     fireEvent.click(screen.getByRole("button", { name: "Masuk" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Alamat email tidak valid.");
+    // The error belongs to the field: invalid state, description, focus, and a polite summary (A11Y-02).
+    const email = screen.getByLabelText("Email");
+    await waitFor(() => expect(email).toHaveAttribute("aria-invalid", "true"));
+    expect(email).toHaveAccessibleDescription("Alamat email tidak valid.");
+    await waitFor(() => expect(email).toHaveFocus());
+    expect(screen.getByText("Perbaiki 1 isian yang ditandai.").closest("[aria-live]")).not.toBeNull();
     expect(fetchMock).not.toHaveBeenCalledWith(expect.stringContaining("/auth/login"), expect.anything());
     const en = screen.getAllByRole("button", { name: "EN" });
     fireEvent.click(en[en.length - 1]!);
@@ -115,18 +123,19 @@ describe("navigation and deep links", () => {
   it("redirects the legacy /forecast route to /proyeksi for a signed-in customer and hides internal cards", async () => {
     signedIn();
     wrap(<App />, "/forecast");
-    expect(await screen.findByRole("heading", { level: 1, name: /Proyeksi Harga Minyak Mentah Indonesia/ })).toBeInTheDocument();
+    // Page title shortened to "Proyeksi ICP" in the wave B redesign.
+    expect(await screen.findByRole("heading", { level: 1, name: "Proyeksi ICP" })).toBeInTheDocument();
     expect(screen.queryByText("Sistem")).toBeNull();
     expect(screen.queryByText("Masuk sebagai operator")).toBeNull();
     expect(screen.getByRole("link", { name: "Syarat Penggunaan" })).toHaveAttribute("href", "/syarat");
   });
 
-  it("opens the notifications tab from the query string and marks it in the sidebar", async () => {
+  it("opens notifications on their own route (also from the old tab link) and marks it in the sidebar", async () => {
     signedIn((path) => path === "/api/v1/alerts/events" ? json({ items: [], next_cursor: null, unread: 0 }) : path === "/api/v1/reports" ? json({ items: [], next_cursor: null }) : null);
     wrap(<App />, "/laporan?tab=pemberitahuan");
-    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Laporan siap pakai dan pemberitahuan");
-    expect(screen.getByRole("tab", { name: "Pemberitahuan" })).toHaveAttribute("aria-selected", "true");
+    expect(await screen.findByRole("heading", { level: 1 })).toHaveTextContent("Pemberitahuan dan aturannya");
     const nav = screen.getByRole("navigation", { name: "Navigasi ruang kerja" });
+    expect(within(nav).getByRole("link", { name: "Pemberitahuan" })).toHaveAttribute("href", "/pemberitahuan");
     expect(within(nav).getByRole("link", { name: "Pemberitahuan" })).toHaveAttribute("aria-current", "page");
     expect(within(nav).getByRole("link", { name: "Laporan" })).not.toHaveAttribute("aria-current");
     await waitFor(() => expect(document.title).toBe("Pemberitahuan · ICP Intelligence"));

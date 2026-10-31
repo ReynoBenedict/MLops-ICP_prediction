@@ -11,9 +11,9 @@ export function ProcessExplainer() {
     <div className="process">
       <div className="process-ill"><IllIcpProcess size={220} /></div>
       <ol className="process-steps">
-        <li>{t("forecast.process1")}</li>
-        <li>{t("forecast.process2")}</li>
-        <li>{t("forecast.process3")}</li>
+        <li>{t("meth.process.1")}</li>
+        <li>{t("meth.process.2")}</li>
+        <li>{t("meth.process.3")}</li>
       </ol>
     </div>
   );

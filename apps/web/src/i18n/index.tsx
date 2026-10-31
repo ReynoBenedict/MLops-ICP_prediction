@@ -18,10 +18,35 @@ export function readLocale(): Locale {
   }
 }
 
+/** Strings registered after start-up by lazily loaded areas (i18n/workspace.ts, i18n/ops.ts). */
+const LAZY: Record<string, Pair> = {};
+export function registerStrings(strings: Record<string, Pair>): void { Object.assign(LAZY, strings); }
+const lookup = (key: string): Pair | undefined => (DICT as Record<string, Pair | undefined>)[key] ?? LAZY[key];
+
+/**
+ * Development builds name a missing string once in the console (usually a module that renders a
+ * workspace or operator key without importing the module that registers it). Production builds drop
+ * this branch (`import.meta.env.DEV` is replaced by `false`); it never throws.
+ */
+const warned = new Set<string>();
+function warnMissing(key: string): void {
+  if (!import.meta.env.DEV || warned.has(key)) return;
+  warned.add(key);
+  console.warn(`[i18n] missing string "${key}": no loaded dictionary defines it (lazy strings are registered by i18n/workspace.ts and i18n/ops.ts)`);
+}
+
+/** Plural choice inside a string: "{n|month|months}" is the first form when `n` is 1, else the second
+ * (English needs it; Indonesian nouns do not change). Applied before the placeholders. */
+const PLURAL = /\{(\w+)\|([^{}|]*)\|([^{}|]*)\}/g;
+
 export function translate(locale: Locale, key: Key, vars?: Record<string, string | number | null | undefined>): string {
-  const pair = (DICT as Record<string, Pair | undefined>)[key];
-  if (!pair) return String(key).split(".").pop()?.replaceAll("_", " ") ?? String(key);
+  const pair = lookup(key);
+  if (!pair) {
+    warnMissing(String(key));
+    return String(key).split(".").pop()?.replaceAll("_", " ") ?? String(key);
+  }
   let text: string = locale === "en" ? pair[1] : pair[0];
+  if (text.includes("|")) text = text.replace(PLURAL, (_, k: string, one: string, other: string) => (Number(vars?.[k]) === 1 ? one : other));
   if (vars) {
     for (const [k, v] of Object.entries(vars)) text = text.replaceAll(`{${k}}`, v === null || v === undefined ? "-" : String(v));
   }
@@ -32,7 +57,7 @@ export function translate(locale: Locale, key: Key, vars?: Record<string, string
 export function translateDynamic(locale: Locale, prefix: string, value: string | null | undefined, fallback?: string): string {
   if (!value) return fallback ?? "-";
   const key = `${prefix}.${value}` as Key;
-  return key in DICT ? translate(locale, key) : (fallback ?? value.replaceAll("_", " "));
+  return lookup(key) ? translate(locale, key) : (fallback ?? value.replaceAll("_", " "));
 }
 
 interface I18n {

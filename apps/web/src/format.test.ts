@@ -6,7 +6,7 @@ describe("format helpers", () => {
     expect(fmtUsd(112.81, "id-ID")).toBe("USD 112,81");
     expect(fmtUsd(112.81, "en-US")).toBe("USD 112.81");
     expect(fmtIdr(1730696, "id-ID")).toBe("Rp 1.730.696");
-    expect(fmtPct(-3.456, "id-ID")).toBe("−3,5 %");
+    expect(fmtPct(-3.456, "id-ID")).toBe("−3,5%");
     expect(fmtUsd(null, "id-ID")).toBe("-");
   });
 

@@ -13,6 +13,11 @@ export function rangeText(a: string, b: string, locale: Locale = "id"): string {
   return `${a} ${locale === "en" ? "to" : "s.d."} ${b}`;
 }
 
+/** "insight dan bukti per bulan" (id-ID) / "insights and monthly evidence" (en-US); commas where Intl is missing. */
+export function listText(items: string[], intl: string): string {
+  try { return new Intl.ListFormat(intl, { type: "conjunction" }).format(items); } catch { return items.join(", "); }
+}
+
 const MONTHS: Record<Locale, string[]> = {
   id: ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"],
   en: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"],
@@ -33,9 +38,12 @@ export function fmtUsd(v: number | null | undefined, intl: string, digits = 2): 
   return isNum(v) ? `USD ${fmtNum(v, intl, digits)}` : NA;
 }
 
-/** "USD 103,32 s.d. 121,85" (id) / "USD 103.32 to 121.85" (en): a range always carries its unit. */
+/**
+ * "USD 103,32 s.d. 121,85" (id) / "USD 103.32 to 121.85" (en): a range always carries its unit. In a
+ * narrow cell it may wrap only before "s.d."/"to" (no-break spaces elsewhere), never inside a value.
+ */
 export function fmtUsdRange(lo: number | null | undefined, hi: number | null | undefined, intl: string, locale: Locale = "id"): string {
-  return isNum(lo) && isNum(hi) ? `USD ${rangeText(fmtNum(lo, intl), fmtNum(hi, intl), locale)}` : NA;
+  return isNum(lo) && isNum(hi) ? `USD\u00a0${fmtNum(lo, intl)} ${locale === "en" ? "to" : "s.d."}\u00a0${fmtNum(hi, intl)}` : NA;
 }
 
 export function fmtIdr(v: number | null | undefined, intl: string, digits = 0): string {
@@ -45,7 +53,7 @@ export function fmtIdr(v: number | null | undefined, intl: string, digits = 0): 
 export function fmtPct(v: number | null | undefined, intl: string, digits = 1, sign = true): string {
   if (!isNum(v)) return NA;
   const s = fmtNum(Math.abs(v), intl, digits);
-  return `${sign ? (v > 0 ? "+" : v < 0 ? "−" : "") : ""}${s} %`;
+  return `${sign ? (v > 0 ? "+" : v < 0 ? "−" : "") : ""}${s}%`;
 }
 
 export function fmtSigned(v: number | null | undefined, intl: string, digits = 2): string {
@@ -62,16 +70,36 @@ export function period(p: string | null | undefined, locale: Locale = "id", long
   return names[idx] ? `${names[idx]} ${y}` : p;
 }
 
+/**
+ * Replace bare month codes ("2026-11") inside a server sentence with readable month labels
+ * ("Nov 2026"). Full dates ("2026-10-17") and other numbers are left untouched.
+ */
+export function localizePeriods(text: string, locale: Locale = "id"): string {
+  return text.replace(/(?<![\d-])(\d{4})-(0[1-9]|1[0-2])(?![\d-])/g, (_m, y: string, mo: string) => period(`${y}-${mo}`, locale));
+}
+
+/**
+ * Times are shown in Western Indonesia Time with an explicit label ("20 Okt 2026, 09.02 WIB"),
+ * the product's reference zone, so the same event reads the same on every device and in reports.
+ */
+export const DISPLAY_TZ = "Asia/Jakarta";
+export const DISPLAY_TZ_LABEL = "WIB";
+
 export function dateTime(iso: string | null | undefined, intl = "id-ID"): string {
   if (!iso) return NA;
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(intl, { dateStyle: "medium", timeStyle: "short" });
+  return Number.isNaN(d.getTime()) ? iso : `${d.toLocaleString(intl, { dateStyle: "medium", timeStyle: "short", timeZone: DISPLAY_TZ })} ${DISPLAY_TZ_LABEL}`;
 }
 
 export function dateOnly(iso: string | null | undefined, intl = "id-ID"): string {
   if (!iso) return NA;
-  const d = new Date(iso.length === 10 ? `${iso}T00:00:00` : iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(intl, { dateStyle: "long" });
+  // A bare calendar date has no zone; a timestamp is read as its date in WIB.
+  if (iso.length === 10) {
+    const d = new Date(`${iso}T00:00:00`);
+    return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(intl, { dateStyle: "long" });
+  }
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(intl, { dateStyle: "long", timeZone: DISPLAY_TZ });
 }
 
 export function fromMs(ms: number | null | undefined, intl = "id-ID"): string {
@@ -106,6 +134,12 @@ export function monthRange(start: string, end: string): string[] {
 
 /** Current calendar month as YYYY-MM (used to tell elapsed months from future ones client-side). */
 export function currentPeriod(now = new Date()): string {
+  // The calendar month in WIB, not in the device's zone, so every reader splits months the same way.
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: DISPLAY_TZ, year: "numeric", month: "2-digit" }).formatToParts(now);
+    const y = parts.find((p) => p.type === "year")?.value, m = parts.find((p) => p.type === "month")?.value;
+    if (y && m) return `${y}-${m}`;
+  } catch { /* Intl without time-zone data: fall back to the device clock */ }
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 

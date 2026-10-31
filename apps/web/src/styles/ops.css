@@ -1,0 +1,128 @@
+/* ==========================================================================
+   Operator console pages (/operasi/*): system health, data operations and
+   the import stepper, model registry and promotion timeline, jobs, audit,
+   organisations. Operators only; no overflow at 320 px.
+   ========================================================================== */
+
+/* ---------- Health ----------------------------------------------------------------------------- */
+.health-hero { grid-template-columns: minmax(260px, 1fr) minmax(0, 2fr); align-items: center; }
+.hero-status { display: flex; align-items: center; gap: var(--s-4); }
+.hero-icon { flex: none; display: grid; place-items: center; width: 52px; height: 52px; border-radius: var(--r-md); }
+.hero-icon.good { background: var(--good-soft); color: var(--good); }
+.hero-icon.warn { background: var(--warn-soft); color: var(--warn); }
+.hero-icon.bad { background: var(--bad-soft); color: var(--bad); }
+.hero-value { font-size: var(--fs-h2); font-weight: 600; line-height: 1.25; color: var(--ink); }
+.health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(230px, 100%), 1fr)); gap: var(--s-3); }
+.health-tile { display: flex; flex-direction: column; gap: var(--s-2); min-width: 0; padding: var(--s-3) var(--s-4); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); }
+.health-tile.down { border-color: var(--bad-line); background: var(--bad-soft); }
+.health-tile.degraded { border-color: var(--warn-line); background: var(--warn-soft); }
+.health-name { display: flex; align-items: center; gap: var(--s-2); font-weight: 600; color: var(--ink); }
+.health-detail { font-size: var(--fs-sm); color: var(--muted); overflow-wrap: anywhere; }
+.job-card { gap: var(--s-3); padding: var(--s-4); }
+/* Start buttons line up at the bottom of each card, whatever the card holds. */
+.job-card > :last-child { margin-top: auto; }
+.job-grid { grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr)); }
+@media (max-width: 900px) {
+  .health-hero { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ---------- Data operations: import stepper ---------------------------------------------------- */
+.steps { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.step { display: inline-flex; align-items: center; gap: var(--s-2); font-size: var(--fs-sm); font-weight: 500; color: var(--muted); }
+.step .n { display: grid; place-items: center; width: 1.375rem; height: 1.375rem; border: 1px solid var(--line); border-radius: 50%; background: var(--neutral-soft); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
+.step.active { color: var(--ink); }
+.step.active .n { background: var(--teal); border-color: var(--teal); color: var(--on-dark); }
+.step.done { color: var(--good); }
+.step.done .n { background: var(--good-soft); border-color: var(--good-line); color: var(--good); }
+.step-sep { align-self: center; width: 24px; height: 1px; background: var(--line-strong); }
+.ingest-table .badge { white-space: normal; }
+
+/* ---------- Models: production summary, promotion timeline, model card ------------------------- */
+.prod-grid { grid-template-columns: minmax(220px, 0.9fr) minmax(360px, 1.4fr) minmax(240px, 1fr); gap: var(--s-8); }
+.prod-grid .bar-row { grid-template-columns: minmax(110px, 160px) 1fr 60px; }
+@media (max-width: 1360px) {
+  .prod-grid { grid-template-columns: minmax(220px, 1fr) minmax(320px, 1.4fr); }
+  .prod-grid > :last-child { grid-column: 1 / -1; }
+}
+@media (max-width: 760px) {
+  .prod-grid { grid-template-columns: minmax(0, 1fr); }
+}
+.timeline { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.timeline li { position: relative; display: grid; grid-template-columns: 26px 1fr; gap: var(--s-3); padding-bottom: var(--s-4); }
+.timeline li::before { content: ""; position: absolute; left: 12px; top: 26px; bottom: 0; width: 2px; background: var(--line); }
+.timeline li:last-child::before { display: none; }
+.tl-icon { display: grid; place-items: center; width: 26px; height: 26px; border: 1px solid var(--teal-line); border-radius: 50%; background: var(--teal-soft); color: var(--teal); }
+.tl-icon.rollback { border-color: var(--warn-line); background: var(--warn-soft); color: var(--warn); }
+.model-card-md { max-height: 320px; overflow: auto; padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); font-family: var(--font-mono); font-size: var(--fs-meta); line-height: 1.55; white-space: pre-wrap; }
+.up-text { color: var(--good); }
+.down-text { color: var(--bad); }
+.ops-tabs { padding: var(--s-1) var(--s-5) 0; }
+.ops-table-frame { border: 1px solid var(--line); border-radius: var(--r-md); }
+.job-result { max-height: 220px; margin: 0; overflow: auto; padding: var(--s-3); border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); }
+@media (max-width: 560px) {
+  .ops-tabs { padding: var(--s-1) var(--s-4) 0; }
+  /* Comparison bars: the label above its bar, so the bar keeps the card's width instead of shrinking to a dot. */
+  .prod-grid .bar-row { grid-template-columns: minmax(0, 1fr) 60px; row-gap: var(--s-1); }
+  .prod-grid .bar-label { grid-column: 1 / -1; }
+}
+
+.health-body { padding-top: var(--s-5); }
+.ops-tab-panel { padding-top: var(--s-5); }
+
+/* ---------- Shared console pieces (formerly inline styles) ------------------------------------- */
+.tag-row { display: flex; flex-wrap: wrap; gap: var(--s-1) var(--s-2); }
+.file-btn { justify-content: flex-start; overflow: hidden; }
+.callout.commit-bar { align-items: center; }
+.stats-split { padding-top: var(--s-4); border-top: 1px solid var(--line); }
+.doc-link { display: inline-block; max-width: 260px; vertical-align: bottom; }
+.stat-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.pick-field { width: 260px; max-width: 100%; }
+.field-narrow { width: 120px; }
+.check-list { display: grid; gap: var(--s-2); margin: 0; padding: 0; list-style: none; }
+.check-item { display: flex; align-items: flex-start; gap: var(--s-2); }
+.check-item svg { flex: none; margin-top: 2px; }
+.col-psi { width: 40%; }
+.psi-cell { display: flex; align-items: center; gap: var(--s-3); }
+.psi-cell .bar-fill { background: var(--good); }
+.psi-cell .bar-fill.psi-moderate { background: var(--warn); }
+.psi-cell .bar-fill.psi-significant { background: var(--bad); }
+.psi-value { flex: none; width: 52px; text-align: right; }
+
+/* ---------- Audit: filter and record cards ----------------------------------------------------- */
+.ops-filter .input { width: 240px; height: 2rem; font-size: var(--fs-sm); }
+@media (max-width: 560px) {
+  .ops-filter { width: 100%; }
+  .ops-filter .input { flex: 1 1 100%; width: 100%; }
+  /* Record cards: long action names and actor ids wrap inside the card. */
+  .audit-table .tag { white-space: normal; overflow-wrap: anywhere; }
+  .audit-actor { overflow-wrap: anywhere; }
+}
+/* Tablet widths: a long actor id is cut with an ellipsis (full id in its title) and a long action
+   name wraps, so the table fits its frame instead of hiding the actor column past the edge. */
+@media (min-width: 561px) and (max-width: 1100px) {
+  .audit-actor-id { display: block; max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .audit-table .tag { white-space: normal; overflow-wrap: anywhere; }
+}
+@media (pointer: coarse) {
+  .ops-filter .input { height: 2.5rem; }
+}
+
+/* ---------- Jobs: expandable rows (a real button per row; record cards on phones) -------------- */
+.col-expander { width: 44px; }
+.expander { display: grid; place-items: center; width: 28px; height: 28px; border: none; border-radius: var(--r-sm); background: transparent; color: var(--muted); cursor: pointer; transition: background-color var(--dur-1) var(--ease-out); }
+.expander:hover { background: var(--surface-hover); color: var(--ink); }
+.job-outcome-cell { max-width: 380px; }
+.table td.job-detail { background: var(--surface-2); }
+.job-detail-grid { gap: var(--s-4); }
+@media (max-width: 560px) {
+  .jobs-table td.col-expander { order: 99; grid-column: 1 / -1; }
+  .table.rc.jobs-table tbody tr.job-detail-row { background: var(--surface-2); }
+  .table.rc.jobs-table td.job-detail { background: transparent; }
+}
+@media (pointer: coarse) {
+  .expander { width: 40px; height: 40px; }
+}
+
+/* ---------- Organisations: dialogs with forms -------------------------------------------------- */
+.dialog-form { margin-top: var(--s-2); color: var(--ink-2); font-size: var(--fs-sm); }
+.dialog-form .field-label { color: var(--ink-2); }

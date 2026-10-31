@@ -1,191 +1,294 @@
 /**
- * Public landing page: positioning, the public market snapshot (official values only), a sign-in
- * teaser for the latest forecast, how it works, honesty, plans, sources. Forecast values are a
- * signed-in feature: the teaser never renders predictions, even if an older API still sends them.
+ * Public landing page. The first screen shows the product itself: the live market panel with the
+ * latest official ICP and its 24-month history from the public snapshot. Then: how a figure gets
+ * from the official documents to the workspace, a tour of the workspace (real screenshots), how
+ * forecasts treat uncertainty, plans, limits and sources, and a closing call to action.
+ * Forecast values are a signed-in feature (policy v4): the page only ever reads the teaser's
+ * horizon and issue date, even when an older API still sends predicted values.
  */
-import type { MarketSnapshot, PlanInfo } from "../api/types";
-import { ArrowRight, Check, CircleHelp, Lock, Minus } from "lucide-react";
-import { useEffect, useState } from "react";
+import type { MarketSnapshot } from "../api/types";
+import { ArrowRight, Ban } from "lucide-react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { api } from "../api/client";
-import { useResource } from "../api/hooks";
-import { IllPipeline, IllScenarios, IllTimeline } from "../components/illustrations";
-import { PublicLayout } from "../components/layout";
-import { Delta, ErrorState, Kpi, Skeleton, StatusBadge } from "../components/ui";
-import { dateOnly, fmtIdr, fmtNum, fmtUsd, period } from "../format";
-import { useT } from "../i18n";
+import { MarketPanel } from "../components/public/MarketPanel";
+import { PlansBlock } from "../components/public/plans";
+import { ProductTour } from "../components/public/ProductTour";
+import { docLabel, usePublicSnapshot } from "../components/public/snapshot";
+import { PublicLayout, useSectionLink } from "../components/public-layout";
+import { KindChip, prefersReducedMotion } from "../components/ui";
+import { fmtNum, period } from "../format";
+import { useT, type Key } from "../i18n";
+import { keepAnchored } from "../lib/anchor";
 
-/** Teaser data from either snapshot shape: v4 `{available, issue_date, forecast_origin, horizon}` or the older one with points. */
-export function forecastTeaser(raw: unknown): { issueDate: string | null; origin: string | null; horizon: number | null } | null {
-  if (!raw || typeof raw !== "object") return null;
-  const f = raw as { available?: unknown; issue_date?: unknown; forecast_origin?: unknown; horizon?: unknown; points?: unknown };
-  const available = f.available === true || (f.available === undefined && Array.isArray(f.points) && f.points.length > 0);
-  if (!available) return null;
-  const horizon = typeof f.horizon === "number" ? f.horizon : Array.isArray(f.points) ? f.points.length : null;
-  return {
-    issueDate: typeof f.issue_date === "string" ? f.issue_date : null,
-    origin: typeof f.forecast_origin === "string" ? f.forecast_origin : null,
-    horizon: horizon && horizon > 0 ? horizon : null,
-  };
-}
+// Kept here for existing importers (account page, tests).
+export { PlanCard, planFeatures } from "../components/public/plans";
+export { forecastTeaser } from "../components/public/snapshot";
 
-function Photo({ base, alt, caption, eager }: { base: string; alt: string; caption?: string; eager?: boolean }) {
-  const [failed, setFailed] = useState(false);
-  if (failed) {
-    return <img src="/brand/hero-composite.svg" alt={alt} loading={eager ? "eager" : "lazy"} />;
-  }
-  return (
-    <>
-      <picture>
-        <source srcSet={`/img/${base}.webp`} type="image/webp" />
-        <img src={`/img/${base}.jpg`} alt={alt} loading={eager ? "eager" : "lazy"} decoding="async" onError={() => setFailed(true)} />
-      </picture>
-      {caption && <figcaption>{caption}</figcaption>}
-    </>
-  );
-}
+/**
+ * Backtest of the production model (registered version 5, spread_brent_6m, evaluated 17 October
+ * 2026: 69 rolling origins 2020-12..2026-08, one month ahead, MAE in USD/bbl), with the target
+ * month's benchmarks observed ("observed h1": metrics.mae 0.8376) and without them ("hold_last h1":
+ * 6.1072), against repeating last month's ICP on the same 69 cases (6.0567: recomputed from v5's stored
+ * backtest predictions, the figure the workspace's forecast accuracy notes show). The registry metric
+ * baseline_naive_last_mae (6.0938) is persistence on the 66 cases common to all candidate methods,
+ * like the methodology document's table (0.85 / 6.12), so it is not the same-case comparison; the
+ * operator model page shows it as stored. Guests cannot read the model registry, so the landing keeps
+ * these as constants; `meth.accuracy.period` says they are a dated snapshot.
+ */
+const BACKTEST = { known: { model: 0.84, naive: 6.06 }, future: { model: 6.11, naive: 6.06 } } as const;
+const BACKTEST_MAX = 6.5;
 
-function PlanCard({ p, t, intl }: { p: PlanInfo; t: ReturnType<typeof useT>["t"]; intl: string }) {
-  const feats: Array<[boolean, string]> = [
-    [true, t("landing.plan.seats", { n: p.seats })],
-    [true, t("landing.plan.horizon", { n: p.forecast_horizon_max })],
-    [p.scenarios, t("landing.plan.scenarios", { n: p.saved_scenarios_max })],
-    [p.reports_pdf, t("landing.plan.reportsPdf")],
-    [p.reports_excel, t("landing.plan.reportsExcel")],
-    [p.alerts, t("landing.plan.alerts", { n: p.alert_rules_max })],
-    [p.api_access, p.api_access ? t("landing.plan.api", { n: fmtNum(p.api_requests_per_month, intl, 0) }) : t("landing.plan.noApi")],
-    [true, p.history_years ? t("landing.plan.history", { n: p.history_years }) : t("landing.plan.historyAll")],
-  ];
-  return (
-    <div className="plan">
-      <h3>{p.label_id}</h3>
-      <div className="price-note">{p.price_note_id}</div>
-      <ul>{feats.map(([on, label], i) => <li key={i} className={on ? "" : "off"}>{on ? <Check size={15} aria-hidden="true" /> : <Minus size={15} aria-hidden="true" />}{label}</li>)}</ul>
+function ErrorBars({ model, naive, sentence }: { model: number; naive: number; sentence: string }) {
+  const { t, intl } = useT();
+  const row = (label: string, v: number, cls: string) => (
+    <div className="eb-row">
+      <span className="eb-label">{label}</span>
+      <span className="eb-track"><span className={`eb-bar ${cls}`} style={{ width: `${(v / BACKTEST_MAX) * 100}%` }} /></span>
+      <span className="eb-value">{fmtNum(v, intl, 2)}</span>
     </div>
   );
+  return (
+    <figure className="eb" role="img" aria-label={sentence}>
+      <figcaption className="eb-title" aria-hidden="true">{t("landing.honesty.metric")}</figcaption>
+      <div aria-hidden="true">
+        {row(t("landing.honesty.model"), model, "model")}
+        {row(t("landing.honesty.naive"), naive, "naive")}
+      </div>
+    </figure>
+  );
 }
 
-export default function LandingPage() {
-  const { t, locale, intl } = useT();
-  const snap = useResource((s) => api<MarketSnapshot>("/public/market-snapshot", { signal: s, anonymous: true }), []);
-  const plans = useResource((s) => api<PlanInfo[]>("/plans", { signal: s, anonymous: true }), []);
-  const d = snap.data;
-  const teaser = forecastTeaser(d?.latest_forecast);
-  const { hash } = useLocation();
-  // In-page anchors (/#paket from other pages) once the target section has rendered.
+const STEPS = ["s1", "s2", "s3", "s4"] as const;
+const SOURCES = ["esdm", "eia", "wb", "bi"] as const;
+
+/**
+ * Behind the closing call to action: a navy-toned photograph of three ships on the horizon (CC0, Wikimedia
+ * Commons; generic, no place or company implied; docs/ASSET_INVENTORY.md). Decorative and lazy; the band
+ * keeps its navy background when the image is missing. One 1600 px rendition: the horizon is kept in the
+ * band's bottom padding (public.css), so on a phone the photograph is drawn several times wider than the
+ * screen and only its middle shows; a smaller rendition would only be enlarged.
+ */
+function ClosingPhoto() {
+  return (
+    <picture className="closing-photo" aria-hidden="true">
+      <source type="image/avif" srcSet="/img/photo/ships-on-horizon-1600.avif" />
+      <img src="/img/photo/ships-on-horizon-1600.webp" width={1600} height={800} alt="" aria-hidden="true" loading="lazy" decoding="async" />
+    </picture>
+  );
+}
+
+/** The latest month's source documents in words ("Kepmen ESDM 395.K/... dan Pengumuman ..., 13 Oktober 2026"). */
+function evidenceDocs(ev: NonNullable<MarketSnapshot["icp_evidence"]>, t: ReturnType<typeof useT>["t"], intl: string): string {
+  const names = ev.documents.map((d) => docLabel(d, t, intl));
+  try { return new Intl.ListFormat(intl, { type: "conjunction" }).format(names); } catch { return names.join(", "); }
+}
+
+/**
+ * In-page anchors (/#paket from another page or a shared link): every section renders immediately,
+ * so the target is scrolled to when the hash changes. The content above it still grows after that
+ * (the market panel, the step facts and the plan table arrive with their data, at most ~10 s later),
+ * so the target is kept aligned while sections above it change size, until the visitor scrolls or
+ * interacts, or 12 s have passed (lib/anchor.ts).
+ */
+function useHashScroll(hash: string) {
   useEffect(() => {
     if (!hash) return;
     const el = document.getElementById(decodeURIComponent(hash.slice(1)));
-    try { el?.scrollIntoView({ block: "start" }); } catch { /* jsdom */ }
-  }, [hash, plans.data]);
+    if (!el) return;
+    try { el.scrollIntoView({ block: "start", behavior: prefersReducedMotion() ? "auto" : "smooth" }); } catch { /* jsdom */ }
+    return keepAnchored(el);
+  }, [hash]);
+}
+
+/**
+ * True once the element is within 200 px of the viewport (and from then on). The step illustrations'
+ * sprite is requested only then: below the first screen (1440 x 900 and phones) the landing's first
+ * second is left to the heading font and the market panel's data, which on slow connections share
+ * the bandwidth with any image. Without IntersectionObserver the images load at once.
+ */
+function useNearViewport(ref: RefObject<HTMLElement | null>): boolean {
+  const [near, setNear] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === "undefined") { setNear(true); return; }
+    const io = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) { setNear(true); io.disconnect(); }
+    }, { rootMargin: "200px 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, [ref]);
+  return near;
+}
+
+export default function LandingPage() {
+  const { t, intl, locale } = useT();
+  const snap = usePublicSnapshot();
+  const coverage = snap.data?.data.coverage ?? null;
+  const evidence = snap.data?.data.icp_evidence ?? null;
+  const { hash } = useLocation();
+  const section = useSectionLink();
+  const flowRef = useRef<HTMLOListElement>(null);
+  const flowNear = useNearViewport(flowRef);
+  useHashScroll(hash);
 
   return (
-    <PublicLayout credits>
-      <section className="landing-hero">
-        <div>
-          <div className="eyebrow">{t("landing.eyebrow")}</div>
-          <h1>{t("landing.title")}</h1>
-          <p className="lead">{t("landing.lead")}</p>
-          <div className="hero-cta">
-            <Link className="btn primary lg" to="/daftar">{t("landing.ctaPrimary")} <ArrowRight size={16} aria-hidden="true" /></Link>
-            <Link className="btn lg" to="/metodologi">{t("landing.ctaSecondary")}</Link>
-          </div>
-        </div>
-        <figure className="hero-media">
-          <Photo base="hero-refinery" alt={t("landing.photoHero")} caption={`${t("landing.photoHero")} · Nafisathallah, CC BY 4.0`} eager />
-        </figure>
-      </section>
-
-      <div className="section-alt">
-        <section className="section" aria-labelledby="snap">
-          <h2 id="snap">{t("landing.snapshotTitle")}</h2>
-          <p className="lead">{d?.source ?? ""}</p>
-          {snap.error && !snap.loading && <ErrorState error={snap.error} onRetry={snap.reload} compact />}
-          <div className="snapshot">
-            <Kpi label={t("landing.snapshotIcp")} iconTone="icp"
-              value={d ? fmtUsd(d.icp_usd, intl) : snap.loading ? <Skeleton height={34} width={140} /> : "-"}
-              meta={d ? <>{period(d.icp_period, locale, true)} · <StatusBadge status={String(d.freshness.status ?? "unknown")} /></> : undefined} />
-            <Kpi label={t("landing.snapshotMom")}
-              value={d ? <Delta value={d.mom_change_pct} /> : snap.loading ? <Skeleton height={34} width={100} /> : "-"}
-              meta={d?.previous_usd != null ? `${period(d.previous_period, locale)}: ${fmtUsd(d.previous_usd, intl)}` : undefined} />
-            <Kpi label={t("landing.snapshotBrent")} iconTone="wti"
-              value={d ? fmtUsd(d.brent_usd, intl) : snap.loading ? <Skeleton height={34} width={120} /> : "-"}
-              meta={d?.brent_period ? period(d.brent_period, locale, true) : undefined} />
-            <Kpi label={t("landing.snapshotIdr")} iconTone="amber"
-              value={d ? fmtIdr(d.icp_idr, intl) : snap.loading ? <Skeleton height={34} width={150} /> : "-"}
-              meta={d?.usd_idr ? `${t("landing.snapshotFx")}: ${fmtIdr(d.usd_idr, intl)}` : undefined} />
-          </div>
-          <p className="small muted mt-3">{t("landing.snapshotFootnote")}</p>
-          {teaser ? (
-            <div className="teaser mt-4">
-              <span className="teaser-icon" aria-hidden="true"><Lock size={18} /></span>
-              <div className="grow">
-                <h3 className="teaser-title">{teaser.issueDate ? t("landing.teaserTitle", { date: dateOnly(teaser.issueDate, intl) }) : t("landing.teaserTitleNoDate")}</h3>
-                <p className="small muted">{teaser.horizon && teaser.origin ? t("landing.teaserBody", { n: teaser.horizon, origin: period(teaser.origin, locale, true) }) : t("landing.teaserBodyShort")}</p>
-              </div>
-              <div className="row">
-                <Link className="btn primary" to="/masuk?next=%2Fproyeksi">{t("shell.signin")}</Link>
-                <Link className="btn" to="/daftar?next=%2Fproyeksi">{t("shell.register")}</Link>
-              </div>
+    <PublicLayout className="home">
+      <section className="hero" aria-labelledby="hero-h">
+        <div className="wrap hero-grid">
+          <div className="hero-copy">
+            <h1 id="hero-h">{t("landing.title")}</h1>
+            <p className="hero-lead">{t("landing.lead")}</p>
+            <div className="hero-cta">
+              <Link className="btn primary lg" to="/daftar">{t("landing.ctaPrimary")}</Link>
+              <Link className="btn lg" to="/#cara-kerja" onClick={section("cara-kerja")}>{t("landing.ctaSecondary")}</Link>
             </div>
-          ) : d ? <p className="mt-3 small muted">{t("landing.snapshotNoForecast")}</p> : null}
-        </section>
-      </div>
-
-      <section className="section" id="fitur" aria-labelledby="fitur-h">
-        <h2 id="fitur-h">{t("landing.featuresTitle")}</h2>
-        <div className="feature-grid">
-          <div className="feature"><div className="feature-ill"><IllPipeline size={150} /></div><h3>{t("landing.f1.title")}</h3><p>{t("landing.f1.body")}</p></div>
-          <div className="feature"><div className="feature-ill"><IllTimeline size={150} /></div><h3>{t("landing.f2.title")}</h3><p>{t("landing.f2.body")}</p></div>
-          <div className="feature"><div className="feature-ill"><IllScenarios size={150} /></div><h3>{t("landing.f3.title")}</h3><p>{t("landing.f3.body")}</p></div>
+            <p className="hero-sources">{t("landing.heroSources")}</p>
+          </div>
+          <div className="hero-panel"><MarketPanel res={snap} /></div>
         </div>
       </section>
 
-      <div className="section-alt">
-        <section className="section editorial" aria-label={t("landing.editorialTitle")}>
-          <figure><Photo base="editorial-port" alt={t("landing.photoPort")} caption={`${t("landing.photoPort")} · Andrew Thomas, CC BY-SA 2.0`} /></figure>
+      <section id="cara-kerja" className="band band-plain" aria-labelledby="how-h">
+        <div className="wrap">
+          <header className="band-head">
+            <h2 id="how-h">{t("landing.how.title")}</h2>
+            <p className="band-lead">{t("landing.how.lead")}</p>
+          </header>
+          <ol className={flowNear ? "flow flow-near" : "flow"} ref={flowRef}>
+            {STEPS.map((s, i) => (
+              <li key={s} className="flow-step">
+                <span className="flow-num" aria-hidden="true">{i + 1}</span>
+                {/* The step's original illustration: one cell of the CSS sprite /img/illus/steps.svg (public.css),
+                    one request for all four, made when the list nears the viewport (useNearViewport).
+                    Decorative: the heading and text carry the meaning. */}
+                <span className={`flow-art flow-art-${s}`} aria-hidden="true" />
+                <h3>{t(`landing.how.${s}.title` as Key)}</h3>
+                <p>{t(`landing.how.${s}.body` as Key)}</p>
+                {s === "s1" && evidence && evidence.documents.length > 0 && (
+                  <p className="flow-fact">
+                    <strong>{t("landing.how.s1.fact", { period: period(evidence.period, locale, true) })}</strong>
+                    <span>{evidenceDocs(evidence, t, intl)}</span>
+                  </p>
+                )}
+                {s === "s2" && coverage && (
+                  <p className="flow-fact">
+                    <strong>{t("landing.how.s2.count", { confirmed: fmtNum(coverage.confirmed_months, intl, 0), months: fmtNum(coverage.months, intl, 0) })}</strong>
+                    <span>{t("landing.how.s2.countNote", { from: period(coverage.first_period, locale), to: period(coverage.last_period, locale) })}</span>
+                  </p>
+                )}
+                {s === "s3" && (
+                  <ul className="flow-fact flow-list">
+                    {(["eia", "wb", "bi"] as const).map((k) => <li key={k}>{t(`landing.how.s3.${k}` as Key)}</li>)}
+                  </ul>
+                )}
+                {s === "s4" && (
+                  <Link className="flow-link" to="/#produk" onClick={section("produk")}>{t("landing.how.s4.link")} <ArrowRight size={15} aria-hidden="true" /></Link>
+                )}
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
+      <section id="produk" className="band" aria-labelledby="tour-h">
+        <div className="wrap">
+          <header className="band-head">
+            <h2 id="tour-h">{t("landing.tour.title")}</h2>
+            <p className="band-lead">{t("landing.tour.lead")}</p>
+          </header>
+          <ProductTour />
+        </div>
+      </section>
+
+      <section id="ketidakpastian" className="band band-plain" aria-labelledby="honesty-h">
+        <div className="wrap">
+          <header className="band-head">
+            <h2 id="honesty-h">{t("landing.honesty.title")}</h2>
+            <p className="band-lead">{t("landing.honesty.lead")}</p>
+          </header>
+          <div className="honesty">
+            <div className="honesty-col">
+              <KindChip kind="estimate_awaiting_publication" />
+              <h3>{t("landing.honesty.known.title")}</h3>
+              <p>{t("landing.honesty.known.body")}</p>
+              <ErrorBars model={BACKTEST.known.model} naive={BACKTEST.known.naive}
+                sentence={t("landing.honesty.chartKnown", { model: fmtNum(BACKTEST.known.model, intl, 2), naive: fmtNum(BACKTEST.known.naive, intl, 2) })} />
+            </div>
+            <div className="honesty-col">
+              <KindChip kind="future_forecast" />
+              <h3>{t("landing.honesty.future.title")}</h3>
+              <p>{t("landing.honesty.future.body")}</p>
+              <ErrorBars model={BACKTEST.future.model} naive={BACKTEST.future.naive}
+                sentence={t("landing.honesty.chartFuture", { model: fmtNum(BACKTEST.future.model, intl, 2), naive: fmtNum(BACKTEST.future.naive, intl, 2) })} />
+            </div>
+          </div>
+          <p className="honesty-period">{t("meth.accuracy.period")}</p>
+          <div className="honesty-kinds">
+            <p className="honesty-kinds-title">{t("landing.honesty.kinds")}</p>
+            <ul>
+              <li><KindChip kind="observed" /><span>{t("landing.honesty.kind.observed")}</span></li>
+              <li><KindChip kind="estimate_awaiting_publication" /><span>{t("kind.estimate.short")}</span></li>
+              <li><KindChip kind="future_forecast" /><span>{t("kind.forecast.short")}</span></li>
+              <li><KindChip kind="scenario" /><span>{t("landing.honesty.kind.scenario")}</span></li>
+            </ul>
+          </div>
+          <Link className="link-inline honesty-link" to="/metodologi#akurasi">{t("landing.honesty.link")} <ArrowRight size={15} aria-hidden="true" /></Link>
+        </div>
+      </section>
+
+      <section id="paket" className="band" aria-labelledby="paket-h">
+        <div className="wrap">
+          <header className="band-head">
+            <h2 id="paket-h">{t("landing.plansTitle")}</h2>
+            <p className="band-lead">{t("landing.plansLead")}</p>
+          </header>
+          <PlansBlock />
+          <div className="plans-foot">
+            <div className="plans-notes">
+              <p>{t("landing.plans.note")}</p>
+              <p>{t("landing.plans.apiNote")}</p>
+            </div>
+            <Link className="btn primary" to="/daftar">{t("landing.ctaPrimary")}</Link>
+          </div>
+        </div>
+      </section>
+
+      <section id="sumber" className="band band-plain" aria-label={t("landing.sourcesTitle")}>
+        <div className="wrap limits">
           <div>
-            <h2>{t("landing.editorialTitle")}</h2>
-            <p className="lead">{t("landing.editorialBody")}</p>
-            <div id="metode" style={{ marginTop: 22 }}>
-              <h3 style={{ fontSize: 18, color: "var(--navy)" }}>{t("landing.howTitle")}</h3>
-              <ol className="steps-list">
-                <li>{t("landing.how1")}</li><li>{t("landing.how2")}</li><li>{t("landing.how3")}</li>
-              </ol>
-            </div>
+            <h2>{t("landing.honestTitle")}</h2>
+            <ul className="not-list">
+              {(["landing.honest1", "landing.honest2", "landing.honest3"] as const).map((k) => <li key={k}><Ban size={16} aria-hidden="true" /><span>{t(k)}</span></li>)}
+            </ul>
           </div>
-        </section>
-      </div>
-
-      <section className="section" aria-labelledby="honest-h">
-        <h2 id="honest-h"><CircleHelp size={22} aria-hidden="true" style={{ verticalAlign: -3, marginRight: 8 }} />{t("landing.honestTitle")}</h2>
-        <div className="honest">
-          <div className="item">{t("landing.honest1")}</div><div className="item">{t("landing.honest2")}</div><div className="item">{t("landing.honest3")}</div>
+          <div>
+            <h2>{t("landing.sourcesTitle")}</h2>
+            <dl className="sources">
+              {SOURCES.map((s) => (
+                <div key={s}>
+                  <dt>{t(`landing.src.${s}.name` as Key)}</dt>
+                  <dd>{t(`landing.src.${s}.data` as Key)}</dd>
+                  <dd className="sources-terms">{t(`landing.src.${s}.terms` as Key)}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
         </div>
       </section>
 
-      <div className="section-alt">
-        <section className="section" id="paket" aria-labelledby="paket-h">
-          <h2 id="paket-h">{t("landing.plansTitle")}</h2>
-          <p className="lead">{t("landing.plansLead")}</p>
-          <div className="plan-grid">
-            {plans.data ? plans.data.map((p) => <PlanCard key={p.code} p={p} t={t} intl={intl} />) : plans.loading ? [0, 1, 2, 3].map((i) => <Skeleton key={i} height={260} />) : null}
+      <section className="closing" aria-labelledby="closing-h">
+        <ClosingPhoto />
+        <div className="wrap closing-inner">
+          <div>
+            <h2 id="closing-h">{t("landing.closing.title")}</h2>
+            <p>{t("landing.closing.body")}</p>
           </div>
-          {plans.error && !plans.loading && <ErrorState error={plans.error} onRetry={plans.reload} compact />}
-          <div className="mt-4"><Link className="btn primary" to="/daftar">{t("landing.plan.cta")} <ArrowRight size={16} aria-hidden="true" /></Link></div>
-        </section>
-      </div>
-
-      <section className="section editorial" id="sumber" aria-labelledby="sumber-h">
-        <div>
-          <h2 id="sumber-h">{t("landing.sourcesTitle")}</h2>
-          <ul className="steps-list" style={{ counterReset: "s" }}>
-            <li>{t("landing.sources.esdm")}</li><li>{t("landing.sources.eia")}</li><li>{t("landing.sources.wb")}</li><li>{t("landing.sources.bi")}</li>
-          </ul>
+          <div className="closing-cta">
+            <Link className="btn primary lg" to="/daftar">{t("landing.ctaPrimary")}</Link>
+            <Link className="btn lg on-dark" to="/metodologi">{t("landing.nav.data")}</Link>
+          </div>
         </div>
-        <figure><Photo base="editorial-tanker" alt={t("landing.photoTanker")} caption={`${t("landing.photoTanker")} · Sabung.hamster, CC BY-SA 4.0`} /></figure>
       </section>
-
     </PublicLayout>
   );
 }

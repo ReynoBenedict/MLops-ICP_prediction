@@ -1,0 +1,225 @@
+/* ==========================================================================
+   Signed-in application shell (components/layout.tsx AppShell): sidebar,
+   navigation drawer (900 px and below), mobile top bar, main column, shell
+   footer, operator console variant and console band. Loaded with the lazy
+   shell chunk (components/layout.tsx), after the entry stylesheets.
+   Customers get a light sidebar; operators keep a dark one, so the two
+   audiences stay visually distinct. The top bar matches the sidebar it opens.
+   Scrolling: the document is the only vertical scroller for content; the
+   sidebar (desktop) and the open drawer scroll on their own when their
+   content is taller than the window (short windows, large text).
+   ========================================================================== */
+.app { display: grid; grid-template-columns: var(--sidebar-w) minmax(0, 1fr); min-height: 100vh; min-height: 100dvh; }
+
+/* ---------- Sidebar (customer: light) ----------------------------------------------------------- */
+.sidebar {
+  position: sticky; top: 0; height: 100vh; height: 100dvh; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent;
+  display: flex; flex-direction: column; gap: var(--s-3);
+  padding: var(--s-5) var(--s-3) var(--s-4);
+  background: var(--surface); color: var(--ink-2); border-right: 1px solid var(--line);
+  transition: transform var(--dur-3) var(--ease-out);
+}
+.sidebar-top { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+/* a.brand: the shell logo link (`.badge.brand` is a badge tone, not this). */
+a.brand { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-1) var(--s-2); color: var(--ink); text-decoration: none; }
+.brand-name { display: block; font-size: var(--fs-body); font-weight: 600; line-height: 1.15; color: var(--navy); }
+.brand-sub { font-size: var(--fs-meta); font-weight: 500; line-height: 1.35; color: var(--muted); }
+
+.nav { display: flex; flex-direction: column; gap: 2px; }
+.nav-group { display: flex; flex-direction: column; gap: 2px; }
+.nav-section { padding: var(--s-4) var(--s-3) var(--s-1); font-size: var(--fs-meta); font-weight: 600; color: var(--muted); }
+.nav a {
+  position: relative; display: flex; align-items: center; gap: var(--s-3);
+  padding: var(--s-2) var(--s-3); border-radius: var(--r-sm);
+  color: var(--ink-2); font-size: var(--fs-sm); font-weight: 500; text-decoration: none;
+  transition: background-color var(--dur-1) var(--ease-out), color var(--dur-1) var(--ease-out);
+}
+.nav a svg { flex: none; color: var(--muted); }
+.nav a:hover { background: var(--surface-hover); color: var(--ink); }
+.nav a.active { background: var(--surface-selected); color: var(--ink); }
+.nav a.active svg { color: var(--teal); }
+@keyframes indicator-in { from { opacity: 0; transform: scaleY(0.3); } to { opacity: 1; transform: none; } }
+.nav a.active::before { content: ""; position: absolute; left: calc(-1 * var(--s-3)); top: var(--s-2); bottom: var(--s-2); width: 3px; border-radius: 0 3px 3px 0; background: var(--teal); animation: indicator-in var(--dur-2) var(--ease-out) backwards; }
+.nav a:focus-visible { outline-offset: -2px; }
+.nav-badge { margin-left: auto; padding: 0 var(--s-2); border-radius: var(--r-pill); background: var(--teal); color: var(--on-dark); font-size: var(--fs-meta); font-weight: 600; line-height: 18px; font-variant-numeric: tabular-nums; }
+.nav-account a { font-size: var(--fs-sm); }
+/* The whole sidebar scrolls when it is taller than the window (a short window, or large text),
+   as the drawer does: the main navigation keeps its full height instead of shrinking into a small
+   inner scroll area (at 200 % text that area showed one of seven links). The account block stays
+   at the bottom when there is room. */
+.sidebar .nav-main { flex: none; }
+
+.sidebar-foot { flex: none; margin-top: auto; display: flex; flex-direction: column; gap: var(--s-2); }
+.env-card { padding: var(--s-2) var(--s-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); color: var(--muted); font-size: var(--fs-meta); }
+.env-card .row { justify-content: space-between; }
+.env-meta { margin-top: var(--s-1); }
+.user-card { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-3); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); }
+.avatar { flex: none; display: grid; place-items: center; width: 1.875rem; height: 1.875rem; border-radius: 50%; background: var(--teal); color: var(--on-dark); font-size: var(--fs-meta); font-weight: 600; }
+.user-name { font-size: var(--fs-sm); font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.user-meta { color: var(--muted); }
+.user-org { line-height: 1.35; white-space: normal; overflow-wrap: anywhere; }
+.user-plan { margin-top: 1px; font-weight: 600; color: var(--ink-2); }
+.btn-ghost-dark { background: transparent; border: 1px solid var(--line-strong); color: var(--ink-2); }
+.btn-ghost-dark:hover:not(:disabled) { background: var(--surface-hover); color: var(--ink); }
+
+@media (max-height: 760px) and (min-width: 901px) {
+  .sidebar { padding-top: var(--s-3); padding-bottom: var(--s-3); }
+  .sidebar .nav-section { padding-top: var(--s-2); padding-bottom: var(--s-1); }
+  .sidebar .nav a { padding-top: var(--s-1); padding-bottom: var(--s-1); }
+  .env-card, .user-card { padding: var(--s-2); }
+}
+
+/* ---------- Main column and top bar ------------------------------------------------------------ */
+/* The top bar and the main area share one column wrapper, so the sticky bar sticks for the whole
+   page (a sticky grid item would only stick inside its own grid row). */
+.app-main { min-width: 0; min-height: 100vh; min-height: 100dvh; display: flex; flex-direction: column; }
+.topbar {
+  position: sticky; top: 0; z-index: 30; flex: none;
+  min-height: var(--topbar-h); padding: 0 var(--page-pad); /* grows with large text settings */
+  background: var(--surface); color: var(--ink); border-bottom: 1px solid var(--line); box-shadow: var(--e-1);
+}
+.topbar-inner { display: flex; align-items: center; gap: var(--s-4); min-height: calc(var(--topbar-h) - 1px); max-width: var(--content-max); margin: 0 auto; }
+.topbar-menu, .topbar-brand { display: none; }
+.topbar-loc { flex: 1; min-width: 0; }
+.topbar-loc ol { display: flex; align-items: center; gap: var(--s-2); margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); white-space: nowrap; }
+.topbar-loc li { display: inline-flex; align-items: center; gap: var(--s-2); min-width: 0; }
+.topbar-loc-group { color: var(--muted); }
+.topbar-loc-group svg { flex: none; color: var(--faint); }
+.topbar-loc [aria-current="page"] { overflow: hidden; text-overflow: ellipsis; font-weight: 600; color: var(--ink); }
+.topbar-actions { display: flex; align-items: center; gap: var(--s-3); margin-left: auto; }
+.topbar-env { display: flex; align-items: center; gap: var(--s-2); font-size: var(--fs-meta); color: var(--on-dark-2); }
+.topbar-env .badge { background: var(--on-dark-fill); border-color: var(--on-dark-line); color: var(--on-dark); }
+.drawer-only { display: none; }
+.main { min-width: 0; flex: 1 0 auto; display: flex; flex-direction: column; padding: var(--s-6) var(--page-pad) 0; }
+.main:focus { outline: none; }
+/* Deep links (#bukti, #hasil) land 16 px below the sticky top bar (the root's scroll-padding-top
+   already clears the bar, base.css). */
+.main [id] { scroll-margin-top: var(--s-2); }
+
+/* ---------- Data status control and popover (components/data-status.tsx) ---------------------- */
+.ds { position: relative; }
+.ds-btn {
+  display: inline-flex; align-items: center; gap: var(--s-2); height: 2.25rem; padding: 0 var(--s-2) 0 var(--s-3);
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--ink-2);
+  font: inherit; font-size: var(--fs-sm); font-weight: 500; white-space: nowrap; cursor: pointer;
+  transition: background-color var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+}
+.ds-btn:hover { background: var(--surface-hover); border-color: var(--line-strong); }
+.ds-btn[aria-expanded="true"] { background: var(--surface-selected); border-color: var(--teal-line); }
+.ds-btn .badge { line-height: 1.45; }
+.ds-chev { flex: none; color: var(--muted); transition: transform var(--dur-2) var(--ease-out); }
+.ds-btn[aria-expanded="true"] .ds-chev { transform: rotate(180deg); }
+.ds-short { display: none; }
+.ds-dot { display: inline-grid; place-items: center; flex: none; }
+.ds-dot.good { color: var(--good); }
+.ds-dot.warn { color: var(--warn); }
+.ds-dot.bad { color: var(--bad); }
+.ds-dot.neutral, .ds-dot.info { color: var(--muted); }
+.ds-pop {
+  position: absolute; right: 0; top: calc(100% + var(--s-2)); z-index: 40;
+  width: min(440px, calc(100vw - 2 * var(--s-4))); outline: none;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); color: var(--ink-2); box-shadow: var(--e-2);
+  animation: pop-in var(--dur-2) var(--ease-out) backwards;
+}
+.ds-pop-head { padding: var(--s-4) var(--s-4) var(--s-2); }
+.ds-pop-title { font-size: var(--fs-h4); font-weight: 600; line-height: 1.35; color: var(--ink); }
+.ds-pop-lead { margin-top: var(--s-1); font-size: var(--fs-meta); color: var(--muted); }
+.ds-pop-body { padding: var(--s-2) var(--s-4) var(--s-3); }
+.ds-table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+.ds-table th, .ds-table td { padding: var(--s-2); border-bottom: 1px solid var(--line-subtle); text-align: left; vertical-align: middle; }
+.ds-table thead th { padding-top: var(--s-1); padding-bottom: var(--s-1); background: var(--surface-2); color: var(--muted); font-size: var(--fs-meta); font-weight: 600; }
+.ds-table th:first-child, .ds-table td:first-child { padding-left: var(--s-4); }
+.ds-table th:last-child, .ds-table td:last-child { padding-right: var(--s-4); }
+.ds-table .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--ink); }
+.ds-table tbody th { font-weight: 400; }
+.ds-src { display: block; font-weight: 600; color: var(--ink); }
+.ds-prov { display: block; font-size: var(--fs-meta); color: var(--muted); }
+.ds-table .badge { white-space: normal; }
+.ds-pop-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--s-2) var(--s-3); padding: var(--s-3) var(--s-4); border-radius: 0 0 var(--r-md) var(--r-md); background: var(--surface-2); }
+/* The view grows to fill the column, so the footer sits at the bottom on short pages and right
+   after the content on long ones. */
+.main > .route-view { flex: 1 0 auto; }
+.route-view { padding-bottom: var(--s-10); }
+/* The page container (.page) is in components.css: public fallbacks and not-found pages use it too. */
+.shell-notice { margin-bottom: var(--s-4); }
+
+.main-foot { display: flex; justify-content: space-between; flex-wrap: wrap; gap: var(--s-4); width: 100%; max-width: var(--content-max); margin: 0 auto; padding: var(--s-4) 0 var(--s-5); border-top: 1px solid var(--line); color: var(--muted); font-size: var(--fs-meta); }
+.main-foot nav { gap: var(--s-4); }
+.main-foot a { display: inline-flex; align-items: center; min-height: 24px; color: var(--muted); }
+.main-foot a:hover { color: var(--teal-strong); }
+@media (pointer: coarse) {
+  .main-foot nav a { min-height: 40px; }
+  .topbar a.brand { min-height: 40px; }
+}
+
+/* Page eyebrows repeat the location: the desktop top bar already shows it (group › page). */
+@media (min-width: 901px) {
+  .main .page-header .eyebrow { display: none; }
+}
+
+/* ---------- Operator console: dark sidebar and top bar, environment band ---------------------- */
+.console-band { display: flex; align-items: center; gap: var(--s-2); width: 100%; max-width: var(--content-max); margin: calc(-1 * var(--s-2)) auto var(--s-4); padding: var(--s-2) var(--s-3); border: 1px solid var(--warn-line); border-radius: var(--r-md); background: var(--warn-soft); color: var(--warn); font-size: var(--fs-sm); font-weight: 500; }
+.app-operator .sidebar { background: var(--navy-deep); color: var(--on-dark-2); border-right-color: var(--navy-deep); }
+.app-operator a.brand { color: var(--on-dark); }
+.app-operator .brand-name { color: var(--on-dark); }
+.app-operator .brand-sub { color: var(--on-dark-muted); }
+.app-operator .nav-section { color: var(--on-dark-muted); }
+.app-operator .nav a { color: var(--on-dark-2); }
+.app-operator .nav a svg { color: var(--on-dark-muted); }
+.app-operator .nav a:hover { background: var(--on-dark-hover); color: var(--on-dark); }
+.app-operator .nav a.active { background: var(--on-dark-selected); color: var(--on-dark); }
+.app-operator .nav a.active svg { color: var(--focus-on-dark); }
+.app-operator .nav a.active::before { background: var(--focus-on-dark); }
+.app-operator .sidebar :focus-visible, .app-operator .topbar :focus-visible { outline-color: var(--focus-on-dark); }
+.app-operator .sidebar { scrollbar-color: var(--on-dark-line) transparent; }
+.app-operator .env-card { border-color: var(--on-dark-line); background: var(--on-dark-fill); color: var(--on-dark-muted); }
+.app-operator .user-card { border-color: var(--on-dark-line); background: var(--on-dark-fill); }
+.app-operator .user-name { color: var(--on-dark); }
+.app-operator .user-meta { color: var(--on-dark-muted); }
+.app-operator .btn-ghost-dark { border-color: var(--on-dark-line); color: var(--on-dark); }
+.app-operator .btn-ghost-dark:hover:not(:disabled) { background: var(--on-dark-hover); color: var(--on-dark); }
+/* The operator top bar matches the dark sidebar on every width. */
+.app-operator .topbar { background: var(--navy-deep); color: var(--on-dark); border-bottom-color: var(--navy-deep); box-shadow: none; }
+.app-operator .topbar-loc-group { color: var(--on-dark-muted); }
+.app-operator .topbar-loc-group svg { color: var(--on-dark-muted); }
+.app-operator .topbar-loc [aria-current="page"] { color: var(--on-dark); }
+
+/* ---------- Drawer and top bar (900 px and below) ---------------------------------------------- */
+.sidebar-scrim { position: fixed; inset: 0; z-index: 40; background: var(--scrim); touch-action: none; animation: fade-in var(--dur-2) var(--ease-out) backwards; }
+@media (max-width: 900px) {
+  .app { grid-template-columns: minmax(0, 1fr); }
+  .sidebar {
+    position: fixed; z-index: 50; left: 0; top: 0; width: 280px; height: 100dvh;
+    overflow-y: auto; overscroll-behavior: contain;
+    transform: translateX(-102%);
+  }
+  .sidebar.open { transform: translateX(0); box-shadow: var(--e-3); }
+  .drawer-only { display: block; }
+  .topbar { padding: 0 var(--page-pad); box-shadow: none; }
+  .topbar-inner { gap: var(--s-3); }
+  .topbar-menu { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border: 1px solid var(--line-strong); border-radius: var(--r-sm); background: transparent; color: var(--ink); cursor: pointer; transition: background-color var(--dur-1) var(--ease-out); }
+  .topbar-menu:hover { background: var(--surface-hover); }
+  .topbar-brand { display: block; min-width: 0; }
+  .topbar a.brand { min-width: 0; padding: 0; gap: var(--s-2); }
+  /* The name's wrapper must be allowed to shrink too, or the ellipsis below never applies. */
+  .topbar a.brand > span { min-width: 0; }
+  .topbar .brand-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar .brand-sub { display: none; }
+  .topbar-loc, .topbar-lang { display: none; }
+  .topbar-actions { flex-wrap: nowrap; gap: var(--s-2); }
+  .app-operator .topbar-menu { border-color: var(--on-dark-line); color: var(--on-dark); }
+  .app-operator .topbar-menu:hover { background: var(--on-dark-hover); }
+  .app-operator .topbar-env { display: none; }
+  .main { padding-top: var(--s-5); }
+  /* Compact data status: status icon + month; the popover spans the width under the top bar. */
+  .ds-full { display: none; }
+  .ds-short { display: inline-flex; align-items: center; gap: var(--s-1); font-variant-numeric: tabular-nums; }
+  .ds-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .ds-btn { height: 2.5rem; padding: 0 var(--s-2) 0 var(--s-3); }
+  .ds-pop { position: fixed; top: calc(var(--sticky-top, var(--topbar-h)) + var(--s-2)); left: var(--page-pad); right: var(--page-pad); width: auto; max-height: calc(100dvh - var(--sticky-top, var(--topbar-h)) - var(--s-6)); overflow-y: auto; }
+}
+@media (max-width: 359px) {
+  /* Logo only on the narrowest phones, so the menu, the mark and the data status fit one row. */
+  .topbar .brand-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}

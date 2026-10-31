@@ -1,0 +1,164 @@
+/* ==========================================================================
+   Design tokens (docs/DESIGN_SYSTEM.md). The only place where raw colour,
+   type, space, shape, elevation, layout and motion values are written.
+   Custom properties only; every other stylesheet refers to these names.
+   ========================================================================== */
+:root {
+  /* Surfaces and lines */
+  --canvas: #F3F5F8;
+  --canvas-alt: #F7F9FB;
+  --surface: #FFFFFF;
+  --surface-2: #F7F9FB;
+  --surface-hover: #EEF2F6;
+  --surface-selected: #E7F2F2;
+  --line: #E1E6EC;
+  --line-strong: #C8D0DA;
+  --line-subtle: #EDF0F4;
+
+  /* Ink */
+  --ink: #0E2235;
+  --ink-2: #33475B;
+  --muted: #5B6B7D;
+  --faint: #8795A5;
+
+  /* On dark brand surfaces (--navy-deep) */
+  --on-dark: #FFFFFF;
+  --on-dark-2: #C9D5E2;
+  --on-dark-muted: #9FB2C7;
+  --on-dark-line: rgba(255, 255, 255, 0.16);
+  --on-dark-fill: rgba(255, 255, 255, 0.05);
+  --on-dark-hover: rgba(255, 255, 255, 0.08);
+  --on-dark-selected: rgba(95, 208, 214, 0.16);
+  --focus-on-dark: #5FD0D6;
+
+  /* Brand and accent */
+  --navy: #123A5C;
+  --navy-deep: #0D2C47;
+  --teal: #0F6B73;
+  --teal-strong: #0B5359;
+  --teal-soft: #E6F1F1;
+  --teal-line: #B9DBD9;
+  --teal-ring: rgba(15, 107, 115, 0.28);
+  --amber: #D99A2B;
+  --amber-ink: #7A4E06;
+  --amber-soft: #FBF2DE;
+
+  /* Overlays */
+  --scrim: rgba(14, 34, 53, 0.45);
+  --photo-scrim: rgba(14, 34, 53, 0.72);
+
+  /* Status (always icon + text) */
+  --good: #067647;
+  --good-soft: #ECF8F1;
+  --good-line: #ABE2C3;
+  --warn: #A94B05;
+  --warn-soft: #FFF7EA;
+  --warn-line: #F6D39A;
+  --bad: #B42318;
+  --bad-soft: #FEF1F0;
+  --bad-line: #F5C2BD;
+  --info: #1A5FB4;
+  --info-soft: #EEF5FD;
+  --info-line: #BCD6F5;
+  --neutral: #33475B;
+  --neutral-soft: #F0F2F5;
+  --neutral-line: #DCE2E8;
+
+  /* Value-kind categories (not statuses) */
+  --cat-estimate: #1F4F8F;
+  --cat-estimate-soft: #EEF3FB;
+  --cat-estimate-line: #C7D7EE;
+  --cat-forecast: #4A3FA6;
+  --cat-forecast-soft: #F2F0FB;
+  --cat-forecast-line: #D6D0F2;
+  --cat-assumed: #5B4A1A;
+  --cat-assumed-soft: #F4F2EA;
+  --cat-assumed-line: #C9B98A;
+
+  /* Data series and chart marks */
+  --series-icp: #1D6FB8;
+  --series-brent: #E8692F;
+  --series-dubai: #6250D6;
+  --series-wti: #8A5A0B;
+  --series-spread: #0F6B73;
+  --series-s1: #E8692F;
+  --series-s2: #6250D6;
+  --series-s3: #8A5A0B;
+  --series-s4: #0F8F6B;
+  --band: rgba(29, 111, 184, 0.14);
+  --forecast-zone: rgba(29, 111, 184, 0.09);
+  --gap-zone: rgba(181, 71, 8, 0.07);
+  --gap-mark: rgba(181, 71, 8, 0.16);
+  --gap-line: #E19A3C;
+  --coverage-present: #8FB8E0;
+  --coverage-present-line: #7AA9D6;
+
+  /* Typography */
+  --font-sans: "IBM Plex Sans Variable", "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --font-serif: "IBM Plex Serif", Georgia, "Times New Roman", serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  /* Type sizes in rem (exactly the px values at the default 16 px root: 12.5, 13.5, 15, 17, 16, 19, 24,
+     32, 48 px), so text follows the reader's browser text-size setting (B-P3-5, WCAG 1.4.4). */
+  --fs-meta: 0.78125rem;
+  --fs-sm: 0.84375rem;
+  --fs-body: 0.9375rem;
+  --fs-lead: 1.0625rem;
+  --fs-h4: 1rem;
+  --fs-h3: 1.1875rem;
+  --fs-h2: 1.5rem;
+  --fs-kpi: 2rem;
+  --fs-hero-num: 3rem;
+  --fs-display: clamp(2.125rem, 3.6vw + 0.5rem, 3.375rem);
+  --fs-display-2: clamp(1.625rem, 1.6vw + 0.875rem, 2.25rem);
+
+  /* Space (4 px base) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+  --s-12: 48px;
+  --s-16: 64px;
+  --s-20: 80px;
+  --s-24: 96px;
+
+  /* Shape */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-pill: 999px;
+
+  /* Elevation (overlays only; panels and cards are flat) */
+  --e-1: 0 1px 2px rgba(14, 34, 53, 0.06);
+  --e-2: 0 8px 24px rgba(14, 34, 53, 0.10), 0 2px 6px rgba(14, 34, 53, 0.06);
+  --e-3: 0 24px 64px rgba(14, 34, 53, 0.22);
+
+  /* Layout */
+  --sidebar-w: 248px;
+  --topbar-h: 56px;
+  --content-max: 1440px;
+  --public-max: 1200px;
+  --page-pad: 32px;
+  --grid-gap: 20px;
+
+  /* Motion */
+  --dur-1: 120ms;
+  --dur-2: 180ms;
+  --dur-3: 240ms;
+  --ease-out: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@media (max-width: 1280px) {
+  :root { --page-pad: 24px; }
+}
+@media (max-width: 900px) {
+  :root { --grid-gap: 16px; }
+}
+@media (max-width: 560px) {
+  :root { --page-pad: 16px; }
+}

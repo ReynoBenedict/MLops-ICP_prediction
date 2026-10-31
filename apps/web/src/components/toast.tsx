@@ -14,7 +14,8 @@ interface ToastApi { show: (text: string, tone?: ToastTone) => void }
 
 const ToastContext = createContext<ToastApi>({ show: () => undefined });
 const LIFETIME: Record<ToastTone, number> = { good: 4500, info: 4500, bad: 8000 };
-const EXIT_MS = 160;
+/** Matches the toast exit transition (--dur-2 in styles/tokens.css). */
+const EXIT_MS = 180;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const { t: tr } = useT();

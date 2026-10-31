@@ -17,7 +17,7 @@ npm run lint -w @icp/web && npm run typecheck -w @icp/web && npm run test -w @ic
 
 | Area | Route | Who | Page |
 |---|---|---|---|
-| Public | `/` | anonymous | Landing page (hero, live public market snapshot, how it works, honesty, plans, sources, photo credits). Signed-in users are redirected to `/ringkasan`. |
+| Public | `/` | anonymous | Landing page (hero with the live public market snapshot, illustrated how it works, product tour, honesty, plans, sources, closing call to action over a photograph). Signed-in users are redirected to `/ringkasan`. |
 | Public | `/masuk`, `/daftar`, `/syarat`, `/privasi` | anonymous | Login (users + operator token), registration (creates a trial organisation), terms, privacy |
 | Intelijen Pasar | `/ringkasan` | everyone | Ringkasan Pasar — latest official ICP, MoM/YoY, rupiah equivalent (ICP × JISDOR), benchmarks, freshness, 5-year chart with the published forecast, plain-language summary, data-quality notes |
 | | `/harga` | everyone | Eksplorasi Harga — ranges, ICP vs Brent/Dubai/WTI, spreads, rupiah per barrel, monthly table, CSV, provenance & verification status |
@@ -52,9 +52,18 @@ in the Operasi Platform area. Copy contains no em dashes (`i18n.test.ts`); range
 
 ### Motion and input
 
-Transitions are 150 ms (controls) and 200 ms (cards, page fade-in); everything is disabled under
-`prefers-reduced-motion: reduce` (`styles.css`). Focus rings are visible on the dark sidebar and on
-every custom control; on coarse pointers small buttons grow to 40 px.
+Transitions use the motion tokens (120 ms controls, 180 ms toggles/toasts/page fade-in, 240 ms
+sheets, drawers and result reveals); everything is disabled under `prefers-reduced-motion: reduce`
+(`src/styles/base.css`). Focus rings are visible on every custom control, including the operator's
+dark sidebar; on coarse pointers small buttons grow to 40 px.
+
+### Styles
+
+The design system is documented in `docs/DESIGN_SYSTEM.md`. `src/styles/` holds `tokens.css` (all
+tokens), `base.css` (self-hosted IBM Plex fonts, reset, utilities), `components.css` (shared
+primitives) and one file per area (`shell.css`, `public.css`, `market.css`, `flows.css`, `ops.css`),
+imported in that order by `main.tsx`. Fonts are served from `public/fonts/` (OFL 1.1, see
+`docs/ASSET_INVENTORY.md`).
 
 ## i18n
 
@@ -76,12 +85,19 @@ what the server returns (kind, role, plan, `horizon_max`, `must_change_password`
 errors (`PLAN_LIMIT`, `FEATURE_NOT_IN_PLAN`, `SEAT_LIMIT`, `AUTH_REQUIRED`) are rendered with an
 upgrade / sign-in action; nothing is enforced client-side only.
 
-## Brand assets
+## Brand assets and images
 
 `public/brand/` (logo symbol, wordmark light/dark, app icon, hero composite, OG image),
 `public/favicon.svg`, `src/components/brand.tsx` (inline logo), `src/components/illustrations.tsx`
-(empty-state / explanatory SVGs). Photography in `public/img/` is third-party (see
-`docs/ASSET_INVENTORY.md`); the landing page shows the required credits.
+(inline empty-state / explanatory SVGs), `public/img/illus/` (original static illustrations: the
+landing's step sprite, the methodology art, the not-found drawing), `public/img/photo/` (two CC0
+photographs, navy-toned, AVIF + WebP) and `public/img/product/` (screenshots of the app). Only
+material that needs no credit is shipped (original, CC0, public domain, Unsplash or Pexels License),
+so the site shows no credit line. Every image file must have a row in the licence register of
+`docs/ASSET_INVENTORY.md`, with the SHA-256 of the file; `npm run asset-licences` (part of
+`npm run check` and of CI) fails otherwise, and also fails on an image imported from `src/` or inlined
+as a `data:image` URI.
+Placement and loading rules: `docs/DESIGN_SYSTEM.md`, "Imagery".
 
 ## Akun untuk pengujian lokal
 

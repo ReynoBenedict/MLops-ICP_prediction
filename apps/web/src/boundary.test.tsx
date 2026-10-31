@@ -87,7 +87,7 @@ describe("guests", () => {
     expect(container.textContent).toContain("Desember 2020 s.d. Agustus 2026");
     expect(container.textContent).not.toMatch(/versi model|dsv_|fc_|RBRTE|MLflow|baseline/i);
     expect(calls).toEqual([]);
-    await waitFor(() => expect(document.title).toBe("Metodologi & Data · ICP Intelligence"));
+    await waitFor(() => expect(document.title).toBe("Data & metodologi · ICP Intelligence"));
   });
 });
 
@@ -96,11 +96,11 @@ describe("customers", () => {
     asCustomer();
     mount("/ringkasan");
     const nav = await screen.findByRole("navigation", { name: "Navigasi ruang kerja" });
-    for (const label of ["Pasar", "Analisis", "Keluaran", "Ringkasan", "Riwayat Harga", "Proyeksi", "Simulasi Skenario", "Insight", "Laporan", "Pemberitahuan"]) {
+    for (const label of ["Pasar", "Analisis", "Keluaran", "Ringkasan", "Riwayat harga", "Proyeksi", "Simulasi skenario", "Insight", "Laporan", "Pemberitahuan"]) {
       expect(nav).toHaveTextContent(label);
     }
-    expect(nav).not.toHaveTextContent("Kesehatan Sistem");
-    expect(screen.getByRole("link", { name: "Akun & Organisasi" })).toHaveAttribute("href", "/akun");
+    expect(nav).not.toHaveTextContent("Kesehatan sistem");
+    expect(screen.getByRole("link", { name: "Akun & organisasi" })).toHaveAttribute("href", "/akun");
     expect(screen.getByText("Paket Uji coba")).toBeInTheDocument();
     await waitFor(() => expect(document.title).toBe("Ringkasan · ICP Intelligence"));
   });
@@ -134,7 +134,7 @@ describe("customers", () => {
   it("with the Viewer role see why scenario controls are disabled", async () => {
     asCustomer(viewer, (path) => path === "/api/v1/scenarios" ? json({ items: [], next_cursor: null }) : null);
     mount("/skenario");
-    expect(await screen.findByText(/Peran Pembaca dapat melihat dan membandingkan skenario/)).toBeInTheDocument();
+    expect(await screen.findByText(/Peran Pembaca dapat melihat skenario tersimpan/)).toBeInTheDocument();
   });
 });
 
@@ -143,11 +143,11 @@ describe("operators", () => {
     asOperator((path) => path === "/api/v1/system/status" ? json({ status: "ready", environment: "local", version: "2.0.0", checks: [], metadata_backend: "sqlite", object_store_backend: "local", schema_version: 4, expected_schema_version: 4, model_source: "bundle", admin_enabled: true }) : null);
     mount("/operasi");
     const nav = await screen.findByRole("navigation", { name: "Navigasi konsol operasi" });
-    for (const label of ["Operasi", "Kesehatan Sistem", "Data & Versi", "Model & Evaluasi", "Pekerjaan", "Audit", "Organisasi", "Pratinjau produk", "Ringkasan", "Riwayat Harga", "Proyeksi", "Insight"]) {
+    for (const label of ["Operasi", "Kesehatan sistem", "Data & versi", "Model & evaluasi", "Pekerjaan", "Audit", "Organisasi", "Pratinjau produk", "Ringkasan", "Riwayat harga", "Proyeksi", "Insight"]) {
       expect(nav).toHaveTextContent(label);
     }
-    for (const label of ["Simulasi Skenario", "Laporan", "Pemberitahuan"]) expect(within(nav).queryByRole("link", { name: label })).toBeNull();
-    expect(screen.queryByRole("link", { name: "Akun & Organisasi" })).toBeNull();
+    for (const label of ["Simulasi skenario", "Laporan", "Pemberitahuan"]) expect(within(nav).queryByRole("link", { name: label })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Akun & organisasi" })).toBeNull();
     expect(await screen.findByText("Konsol operasi · lingkungan local · API 2.0.0")).toBeInTheDocument();
   });
 

@@ -71,6 +71,14 @@ function fakeServer(opts: { logout?: "ok" | "network" } = {}) {
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); localStorage.clear(); sessionStorage.clear(); lastLocation = ""; goBack = null; });
 
+/**
+ * A navigation step here is a server round trip (fake fetch) + auth refresh + a route change that may
+ * load a lazy page chunk for the first time. With several test files running in parallel on a busy
+ * machine that occasionally exceeded the global 3 s window (observed 2/16 loaded runs); the window is
+ * widened for these waits only. The assertions are unchanged.
+ */
+const NAV = { timeout: 8_000 };
+
 describe("sign-in and sign-out flow", () => {
   it("login -> deep link -> logout -> public home with feedback -> Back re-checks the session -> login again", async () => {
     const server = fakeServer();
@@ -81,21 +89,25 @@ describe("sign-in and sign-out flow", () => {
     fireEvent.click(screen.getByRole("button", { name: "Masuk" }));
 
     // Deep link honoured; the sign-in page is replaced, not stacked in history.
-    await waitFor(() => expect(lastLocation).toBe("/skenario"));
+    await waitFor(() => expect(lastLocation).toBe("/skenario"), NAV);
     expect(await screen.findByText(/Selamat datang, Penguji UX/)).toBeInTheDocument();
     expect(localStorage.getItem("icp.sessionToken")).toBe(TOKEN);
 
     fireEvent.click(await screen.findByRole("button", { name: "Keluar" }));
-    await waitFor(() => expect(lastLocation).toBe("/"));
+    await waitFor(() => expect(lastLocation).toBe("/"), NAV);
     expect(server.logoutCalls).toBe(1);
-    expect(localStorage.getItem("icp.sessionToken")).toBeNull();
+    // signOut clears the client after the private shell has unmounted (a passive-effect cleanup that can
+    // run a moment after the new route is on screen), and the feedback is shown only after that. Probe
+    // sees "/" as soon as the route renders, so check storage once the feedback is there: a busy machine
+    // once caught the gap (2026-10-27).
     expect(await screen.findByText(/Anda telah keluar/)).toBeInTheDocument();
+    expect(localStorage.getItem("icp.sessionToken")).toBeNull();
     expect(screen.queryByRole("button", { name: "Keluar" })).toBeNull();
 
     // Browser Back lands on the earlier private page: the guard re-checks the session and sends the
     // guest to sign-in with the deep link, without rendering any private shell.
     act(() => goBack?.());
-    await waitFor(() => expect(lastLocation).toBe("/masuk?next=%2Fakun"));
+    await waitFor(() => expect(lastLocation).toBe("/masuk?next=%2Fakun"), NAV);
     expect(screen.queryByRole("button", { name: "Keluar" })).toBeNull();
     expect(screen.queryByRole("navigation", { name: "Navigasi ruang kerja" })).toBeNull();
 
@@ -103,7 +115,9 @@ describe("sign-in and sign-out flow", () => {
     fireEvent.change(await screen.findByLabelText("Email"), { target: { value: "ux@test.id" } });
     fireEvent.change(screen.getByLabelText("Kata sandi"), { target: { value: "rahasia-panjang" } });
     fireEvent.click(screen.getByRole("button", { name: "Masuk" }));
-    await waitFor(() => expect(lastLocation).toBe("/akun"));
+    // First visit of /akun in this file: its lazy chunk is transformed on demand, which under a
+    // loaded machine (parallel test files) can take longer than the default 1 s window.
+    await waitFor(() => expect(lastLocation).toBe("/akun"), NAV);
     expect(await screen.findByRole("button", { name: "Keluar" })).toBeInTheDocument();
   }, 30_000); // multi-step flow: generous budget for a loaded machine (assertions unchanged)
 
@@ -149,7 +163,7 @@ describe("sign-in and sign-out flow", () => {
     await act(async () => { await api("/scenarios").catch(() => undefined); });
     expect(await screen.findByText(/Sesi Anda telah berakhir/)).toBeInTheDocument();
     await waitFor(() => expect(localStorage.getItem("icp.sessionToken")).toBeNull());
-    await waitFor(() => expect(lastLocation).toBe("/masuk?next=%2Fskenario"));
+    await waitFor(() => expect(lastLocation).toBe("/masuk?next=%2Fskenario"), NAV);
   }, 30_000);
 });
 
