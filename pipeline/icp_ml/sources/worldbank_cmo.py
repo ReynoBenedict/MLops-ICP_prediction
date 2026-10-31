@@ -20,7 +20,7 @@ from datetime import date
 
 import pandas as pd
 
-from icp_ml.sources.base import HttpClient, SourceError, SourceFetch, ValueEvidence, utcnow_iso
+from icp_ml.sources.base import HttpClient, SourceError, SourceFetch, ValueEvidence, jakarta_today, utcnow_iso
 
 PAGE_URL = "https://www.worldbank.org/en/research/commodity-markets"
 LICENSE_NOTE = "World Bank Commodity Price Data (The Pink Sheet), CC BY 4.0; attribution required."
@@ -57,7 +57,7 @@ def fetch_cmo_monthly(client: HttpClient, today: date | None = None) -> dict[str
     data = data.rename(columns={0: "period_raw"})
     data = data[data["period_raw"].astype(str).str.match(r"^\d{4}M\d{2}$")]
     data["period"] = data["period_raw"].astype(str).str.replace("M", "-", regex=False)
-    today = today or date.today()
+    today = today or jakarta_today()
     current = f"{today.year}-{today.month:02d}"
     out: dict[str, SourceFetch] = {}
     for dataset, (label, _) in COLUMNS.items():

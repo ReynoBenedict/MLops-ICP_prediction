@@ -291,6 +291,79 @@ def build_reconciliation(state_dir: Path, legacy_csv: Path | None = None) -> pd.
     return df
 
 
+def recheck_decree_numbers(state_dir: Path, ocr: bool = False) -> list[dict[str, Any]]:
+    """Re-read every stored decree copy with the current parser and list decree-number corrections.
+
+    Read-only. A record is rechecked only when its stored copy (``pdf/``) still has the recorded
+    checksum and the re-extraction gives the same month and value (numbers are corrected, values never).
+    Decrees read by OCR are rechecked only with ``ocr=True`` (slow; text-layer decrees need no OCR).
+    Returns ``[{period, url, sha256, method, old, new}]`` for records whose number changes."""
+    from icp_ml.sources.base import sha256_bytes
+
+    decrees: dict[str, Any] = _load(state_dir / "decrees.json", {})
+    changes: list[dict[str, Any]] = []
+    for period, rec in sorted(decrees.items()):
+        if rec.get("value") is None or rec.get("method") not in ("text-layer", "ocr"):
+            continue  # no value was read from this document: it is not evidence for any month
+        if rec.get("method") == "ocr" and not ocr:
+            continue
+        local = state_dir / "pdf" / Path(str(rec.get("local_path") or "")).name
+        if not local.is_file():
+            logger.warning("decree %s: stored copy missing (%s)", period, local.name)
+            continue
+        body = local.read_bytes()
+        if sha256_bytes(body) != rec.get("sha256"):
+            logger.warning("decree %s: stored copy does not match the recorded checksum", period)
+            continue
+        ext = esdm_icp.extract_decree(body, allow_ocr=ocr)
+        if (
+            ext.method != rec.get("method")
+            or ext.period != rec.get("extracted_period")
+            or ext.value != rec.get("value")
+        ):
+            logger.warning(
+                "decree %s: re-extraction differs in month or value; number left unchanged", period
+            )
+            continue
+        if ext.decree_number != rec.get("decree_number"):
+            changes.append(
+                {
+                    "period": period,
+                    "url": rec.get("url"),
+                    "sha256": rec.get("sha256"),
+                    "method": rec.get("method"),
+                    "old": rec.get("decree_number"),
+                    "new": ext.decree_number,
+                }
+            )
+    return changes
+
+
+def apply_decree_numbers(state_dir: Path, changes: list[dict[str, Any]]) -> dict[str, int]:
+    """Write corrected decree numbers into ``decrees.json`` and the decree observations of
+    ``reconciliation.json`` (matched by period and document checksum). Values are not touched."""
+    decrees: dict[str, Any] = _load(state_dir / "decrees.json", {})
+    months: list[dict[str, Any]] = _load(state_dir / "reconciliation.json", [])
+    by_doc = {(c["period"], c["sha256"]): c["new"] for c in changes}
+    n_decrees = n_sources = 0
+    for c in changes:
+        rec = decrees.get(c["period"])
+        if rec is not None and rec.get("sha256") == c["sha256"] and rec.get("decree_number") != c["new"]:
+            rec["decree_number"] = c["new"]
+            n_decrees += 1
+    for m in months:
+        for o in m.get("sources", []):
+            key = (m.get("period"), o.get("sha256"))
+            if o.get("kind") in esdm_icp.DECREE_KINDS and key in by_doc and o.get("reference") != by_doc[key]:
+                o["reference"] = by_doc[key]
+                n_sources += 1
+    if n_decrees:
+        _save(state_dir / "decrees.json", decrees)
+    if n_sources:
+        _save(state_dir / "reconciliation.json", months)
+    return {"decrees": n_decrees, "reconciliation_sources": n_sources}
+
+
 def run_backfill(
     state_dir: Path = DEFAULT_STATE_DIR,
     client: HttpClient | None = None,
@@ -322,9 +395,11 @@ def run_backfill(
 
 __all__ = [
     "DEFAULT_STATE_DIR",
+    "apply_decree_numbers",
     "backfill_decrees",
     "build_reconciliation",
     "discover_articles",
     "fetch_articles",
+    "recheck_decree_numbers",
     "run_backfill",
 ]

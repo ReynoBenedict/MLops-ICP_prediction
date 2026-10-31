@@ -23,7 +23,7 @@ import os
 import threading
 import time
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -55,6 +55,19 @@ def utcnow_iso() -> str:
 
 def sha256_bytes(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+# ICP months are Indonesian calendar months: "has month t ended?" and the issue date are decided in
+# Western Indonesia Time (UTC+7, no daylight saving), not in the server's time zone (audit v7 ML-04).
+JAKARTA = timezone(timedelta(hours=7), "WIB")
+
+
+def jakarta_today(now: datetime | None = None) -> date:
+    """Today's date in Jakarta (WIB, UTC+7) for ``now`` (default: the current instant)."""
+    instant = now or datetime.now(timezone.utc)
+    if instant.tzinfo is None:
+        instant = instant.replace(tzinfo=timezone.utc)
+    return instant.astimezone(JAKARTA).date()
 
 
 def month_end(period: pd.Period) -> date:
@@ -279,7 +292,7 @@ def aggregate_daily_to_monthly(
     (``min_coverage`` of the business days), and (c) either the last observation lies in the final
     week of the month or at least ``settle_days`` have passed since month end (publication delay).
     """
-    today = today or date.today()
+    today = today or jakarta_today()
     df = daily.dropna(subset=[value_col]).copy()
     df["date"] = pd.to_datetime(df["date"])
     df["period"] = df["date"].dt.to_period("M")

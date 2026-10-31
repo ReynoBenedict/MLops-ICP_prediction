@@ -27,6 +27,7 @@ from icp_ml.sources.base import (
     SourceError,
     SourceFetch,
     aggregate_daily_to_monthly,
+    jakarta_today,
     utcnow_iso,
 )
 
@@ -74,7 +75,7 @@ def fetch_jisdor_daily(
     end: date | None = None,
     cache_closed_quarters_s: int = 30 * 86400,
 ) -> tuple[pd.DataFrame, list[SourceDocument], list[str]]:
-    end = end or date.today()
+    end = end or jakarta_today()
     frames, docs, warnings = [], [], []
     for q_start, q_end in _quarters(start, end):
         closed = q_end < end and (end - q_end).days > 10
@@ -107,7 +108,7 @@ def fetch_usd_idr(
 ) -> dict[str, SourceFetch]:
     """Return two monthly datasets: ``usd_idr`` (monthly average) and ``usd_idr_eom`` (month-end fixing)."""
     daily, docs, warnings = fetch_jisdor_daily(client, start, end)
-    today = today or date.today()
+    today = today or jakarta_today()
     out = {}
     for name, how, definition in (
         (

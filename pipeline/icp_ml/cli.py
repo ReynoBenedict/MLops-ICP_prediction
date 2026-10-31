@@ -30,7 +30,10 @@ from icp_ml.schema import load_series, parse_csv_bytes, sha256_bytes
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_ICP = ROOT / "data" / "raw" / "dataset.csv"
-DEFAULT_WTI = ROOT / "data" / "raw" / "wti.csv"
+# EIA RWTC monthly mean (Git-tracked; byte-identical to the active local WTI dataset version and to
+# the series production model v5 was trained on). data/raw/wti.csv is the DVC-only legacy series with
+# different values (e.g. 2026-06: 95.96 vs 84.8071) and must not be the default (audit v7 DATA-06).
+DEFAULT_WTI = ROOT / "data" / "seed" / "wti.csv"
 INPUTS = ("icp", "wti", "brent", "dubai", "fx")
 
 

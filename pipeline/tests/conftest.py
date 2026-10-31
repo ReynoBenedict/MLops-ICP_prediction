@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -51,8 +52,12 @@ def synthetic_panel(synthetic) -> pd.DataFrame:
 
 @pytest.fixture
 def repo_data() -> tuple[bytes, bytes]:
+    # Git-tracked inputs only: data/raw/wti.csv is DVC-managed and absent in a clean CI checkout.
     icp = ROOT / "data" / "raw" / "dataset.csv"
-    wti = ROOT / "data" / "raw" / "wti.csv"
-    if not icp.exists() or not wti.exists():
-        pytest.skip("repository datasets not present (run `dvc pull`)")
+    wti = ROOT / "data" / "seed" / "wti.csv"
+    missing = [p.name for p in (icp, wti) if not p.is_file()]
+    if missing:
+        if os.getenv("ICP_REQUIRE_DATA") == "1":
+            pytest.fail(f"test datasets missing: {missing} (ICP_REQUIRE_DATA=1)", pytrace=False)
+        pytest.skip(f"test datasets missing: {missing}")
     return icp.read_bytes(), wti.read_bytes()

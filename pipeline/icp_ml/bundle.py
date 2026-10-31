@@ -25,6 +25,7 @@ operator environment and are refused by the backend in bundle mode.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import logging
@@ -90,6 +91,10 @@ def _content_type(name: str) -> str:
     return "application/octet-stream"
 
 
+def _sha256(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
 def _put(store: BundleStore, key: str, data: bytes, overwrite: bool) -> None:
     store.put(key, data, _content_type(key), overwrite=overwrite)
 
@@ -143,25 +148,53 @@ def export_bundle(
     exported_at = datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     written: list[str] = []
     skipped: list[str] = []
-
-    def write(name: str, data: bytes) -> None:
-        key = bundle_key(version, name)
-        if store.exists(key) and not overwrite:
-            skipped.append(key)
-            return
-        _put(store, key, data, overwrite=True)
-        written.append(key)
-
-    write(MODEL_FILE, payload)
+    files: dict[str, bytes] = {MODEL_FILE: payload}
     for name, artifact in ARTIFACT_FILES.items():
         text = registry._text_artifact(info.run_id, artifact)
         if text is None:
             logger.warning("version %s has no artifact %s; bundle will omit it", version, artifact)
             continue
-        write(name, text.encode("utf-8"))
-    write(
-        META_FILE, json.dumps(_meta_from_info(info, trusted, exported_at), indent=2, sort_keys=True).encode()
-    )
+        files[name] = text.encode("utf-8")
+    manifest = {name: _sha256(data) for name, data in files.items()}
+
+    # Audit v7 ML-05: bundle files are write-once. An existing file is kept only when it is
+    # byte-identical to what MLflow holds; a different one is refused unless ``overwrite`` is set.
+    for name, data in files.items():
+        key = bundle_key(version, name)
+        if store.exists(key) and not overwrite:
+            if _sha256(store.get(key)) != manifest[name]:
+                raise RegistryError(
+                    f"Stored bundle file {key} differs from model version {version} in MLflow; "
+                    "re-export with --overwrite after checking why."
+                )
+            skipped.append(key)
+            continue
+        _put(store, key, data, overwrite=True)
+        written.append(key)
+    meta_key = bundle_key(version, META_FILE)
+    meta = _meta_from_info(info, trusted, exported_at)
+    meta["files"] = manifest
+    if store.exists(meta_key) and not overwrite:
+        stored_meta = json.loads(store.get(meta_key).decode("utf-8"))
+        if stored_meta.get("files") not in (None, manifest):
+            raise RegistryError(f"Stored {meta_key} lists different file hashes; re-export with --overwrite.")
+        if stored_meta.get("files") is None:
+            logger.warning(
+                "bundle %s predates the sha256 manifest; re-export with --overwrite to add it", version
+            )
+        skipped.append(meta_key)
+    else:
+        _put(store, meta_key, json.dumps(meta, indent=2, sort_keys=True).encode(), overwrite=True)
+        written.append(meta_key)
+
+    # Read everything back before the index and the production pointer move (pointer last).
+    for name, digest in manifest.items():
+        if _sha256(store.get(bundle_key(version, name))) != digest:
+            raise RegistryError(
+                f"Bundle verification failed for {bundle_key(version, name)}: the stored bytes do not match; "
+                "the production pointer was not changed."
+            )
+    meta_sha = _sha256(store.get(meta_key))
 
     versions = BundleRegistry(store, registry.model_name, registry.alias).exported_versions()
     if version not in versions:
@@ -174,6 +207,8 @@ def export_bundle(
         "model_name": registry.model_name,
         "alias": registry.alias,
         "method": info.method_spec.name,
+        "meta_sha256": meta_sha,
+        "model_sha256": manifest[MODEL_FILE],
     }
     _put(store, POINTER_KEY, json.dumps(pointer, indent=2, sort_keys=True).encode(), overwrite=True)
     return {"version": version, "written": written, "skipped": skipped, "pointer": pointer}
@@ -258,7 +293,12 @@ class BundleRegistry:
         key = bundle_key(str(version), MODEL_FILE)
         if not self.store.exists(key):
             raise RegistryError(f"Model version {version} has no bundle payload ({key})")
-        return load_skops(self.store.get(key), list(meta.get("skops_trusted_types") or []))
+        payload = self.store.get(key)
+        expected = (meta.get("files") or {}).get(MODEL_FILE)
+        if expected and _sha256(payload) != expected:
+            # Bundles exported before the manifest (no "files") load as before.
+            raise RegistryError(f"Model version {version}: payload sha256 does not match the bundle manifest")
+        return load_skops(payload, list(meta.get("skops_trusted_types") or []))
 
     def _version_for_run(self, run_id: str) -> str | None:
         for v, m in self._meta.items():

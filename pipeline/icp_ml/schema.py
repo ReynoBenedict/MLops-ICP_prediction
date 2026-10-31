@@ -28,6 +28,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from icp_ml.sources.base import jakarta_today
+
 
 @dataclass(frozen=True)
 class DatasetSpec:
@@ -405,7 +407,7 @@ def freshness(
     but only once the month has ended, which the caller enforces by never storing partial
     months). One extra month of grace is allowed before "stale".
     """
-    today = today or date.today()
+    today = today or jakarta_today()
     if not period_end:
         return {"status": "unknown", "latest_period": None, "expected_period": None, "months_behind": None}
     current = pd.Period(year=today.year, month=today.month, freq="M")

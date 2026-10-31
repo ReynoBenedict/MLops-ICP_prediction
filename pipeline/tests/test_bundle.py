@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 import numpy as np
@@ -10,6 +11,8 @@ import pytest
 
 from icp_ml.bundle import (
     INDEX_KEY,
+    META_FILE,
+    MODEL_FILE,
     POINTER_KEY,
     BundleOperationUnavailable,
     BundleRegistry,
@@ -225,3 +228,73 @@ def test_bundle_loading_enforces_the_allow_list(trained):
 
     with pytest.raises(UntrustedModelType):
         load_skops(sio.dumps({"x": Odd()}), [])
+
+
+# --- audit v7 ML-05: sha256 manifest, content-compare on re-export, verified pointer --------------
+def _sha(b: bytes) -> str:
+    return hashlib.sha256(b).hexdigest()
+
+
+def test_meta_and_pointer_carry_sha256_of_every_bundle_file(trained):
+    reg, _, _ = trained
+    store = DictStore()
+    out = export_bundle(reg, store)
+    version = out["version"]
+    meta = json.loads(store.get(bundle_key(version, META_FILE)))
+    assert meta["files"][MODEL_FILE] == _sha(store.get(bundle_key(version, MODEL_FILE)))
+    for name, digest in meta["files"].items():
+        assert _sha(store.get(bundle_key(version, name))) == digest
+    pointer = json.loads(store.get(POINTER_KEY))
+    assert pointer["meta_sha256"] == _sha(store.get(bundle_key(version, META_FILE)))
+    assert pointer["model_sha256"] == meta["files"][MODEL_FILE]
+
+
+def test_re_export_refuses_a_stored_file_that_differs_and_leaves_the_pointer_alone(trained):
+    reg, _, _ = trained
+    store = DictStore()
+    first = export_bundle(reg, store)
+    version = first["version"]
+    pointer_before = store.get(POINTER_KEY)
+    key = bundle_key(version, "intervals.json")
+    store.put(key, b'{"tampered": true}', "application/json", overwrite=True)
+    with pytest.raises(RegistryError, match="differs"):
+        export_bundle(reg, store)
+    assert store.get(POINTER_KEY) == pointer_before
+    # an explicit overwrite repairs it
+    export_bundle(reg, store, overwrite=True)
+    assert json.loads(store.get(key)) != {"tampered": True}
+
+
+def test_pointer_is_not_written_when_a_stored_file_cannot_be_verified(trained):
+    reg, _, _ = trained
+
+    class LossyStore(DictStore):
+        def get(self, key: str) -> bytes:
+            data = super().get(key)
+            return data[:-1] if key.endswith(MODEL_FILE) else data
+
+    store = LossyStore()
+    with pytest.raises(RegistryError, match="verification"):
+        export_bundle(reg, store)
+    assert not store.exists(POINTER_KEY) and not store.exists(INDEX_KEY)
+
+
+def test_loading_a_model_whose_payload_does_not_match_the_manifest_fails(trained):
+    reg, _, _ = trained
+    store = DictStore()
+    version = export_bundle(reg, store)["version"]
+    payload = store.get(bundle_key(version, MODEL_FILE))
+    store.put(bundle_key(version, MODEL_FILE), payload + b"\0", "application/octet-stream", overwrite=True)
+    with pytest.raises(RegistryError, match="sha256"):
+        BundleRegistry(store, "Bundle_Model").load_model(version)
+
+
+def test_legacy_bundles_without_a_manifest_still_load(trained):
+    reg, _, _ = trained
+    store = DictStore()
+    version = export_bundle(reg, store)["version"]
+    meta_key = bundle_key(version, META_FILE)
+    meta = json.loads(store.get(meta_key))
+    meta.pop("files")
+    store.put(meta_key, json.dumps(meta).encode(), "application/json", overwrite=True)
+    assert BundleRegistry(store, "Bundle_Model").load_model(version) is not None

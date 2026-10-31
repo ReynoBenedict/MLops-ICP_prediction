@@ -84,7 +84,27 @@ _DECREE_ANCHOR = re.compile(
     + r")\s+(?P<y>20\d\d)\s+ditetapkan\s+sebesar\s+U\s?[S5]\s?[\$S85]?\s*(?P<v>\d{1,3}\s?[.,]\s?\d{2})",
     re.I,
 )
-_DECREE_NUMBER = re.compile(r"NOMOR\s*:?\s*(?P<n>\d{1,4}\s?\.?\s?K\s?/[A-Z0-9./ ]{3,40}?/20\d\d)", re.I)
+# The decree's own number is printed only where the decree names itself: the title block
+# ("KEPUTUSAN MENTERI ... REPUBLIK INDONESIA NOMOR <n> TENTANG [PENETAPAN] HARGA MINYAK MENTAH
+# INDONESIA BULAN <month> <year>") and the annex header ("LAMPIRAN KEPUTUSAN ... NOMOR : <n> TANGGAL :
+# <date> TENTANG ... BULAN <month> <year>"). Numbers in the considerations cite other decrees, e.g.
+# "Keputusan Menteri ... Nomor 276.K/MG.03/MEM.M/2026 tanggal 30 Juni 2026 tentang Formula Harga Minyak
+# Mentah Indonesia" (the formula decree cited by every monthly decree of its period); they are never the
+# decree's own number. Text layers and OCR space characters out ("3 5 2 . K / M G . 0 3 / M E M . M /
+# 2 0 2 6") and add noise after NOMOR ("NOMOR i 42 K/...", "NOMOR~ :"). The number itself is upper case.
+# The title block is preferred: OCR of the annex header sometimes reads its colon as a digit
+# ("NOMOR 1 134 K/12/MEM/2020" for "NOMOR : 134 K/12/MEM/2020").
+_OWN_NUMBER = re.compile(
+    r"NOMOR[\s:;.,~|©i]{0,6}(?P<n>(?-i:\d[0-9A-Z./ ]{3,60}?))\s*"
+    r"(?P<annex>TANGGAL[\s:;.,]{0,4}\d{1,2}\s+[A-Za-z]+\s+(?:\d\s?){3}\d\s*)?"
+    r"TENTANG\s+(?:PENETAPAN\s+)?HARGA\s+MINYAK\s+MENTAH\s+INDONESIA\s+BULAN\s+"
+    r"(?P<m>" + _MONTH_RE + r")\s+(?P<y>(?:\d\s?){3}\d)(?!\d)",
+    re.I,
+)
+# Shape of a ministerial/director-general decree number, e.g. 395.K/MG.03/MEM.M/2026, 20K/12/MEM/2019.
+DECREE_NUMBER_SHAPE = re.compile(r"\d{1,4}\.?K/[A-Z0-9.]+(?:/[A-Z0-9.]+)*/20\d\d")
+# Evidence kinds of a decree document (text layer or OCR); the other official kinds are announcements.
+DECREE_KINDS = frozenset({"decree_text", "decree_ocr"})
 # Announcement sentences.
 _ARTICLE_MAIN = re.compile(
     r"(?:ICP|minyak\s+mentah\s+Indonesia)[^.]{0,80}?bulan\s+(?P<m>"
@@ -181,18 +201,35 @@ def fetch_archive(client: HttpClient) -> tuple[list[ArchiveEntry], SourceDocumen
 # ---------------------------------------------------------------------------------------------
 # Decree PDFs
 # ---------------------------------------------------------------------------------------------
-def extract_from_text(text: str) -> tuple[str | None, float | None, str | None]:
+def decree_own_number(text: str, period: str | None = None) -> str | None:
+    """The decree's own number, read only from a block where the decree names itself (the title block,
+    else the annex header; see ``_OWN_NUMBER``). With ``period`` the block must name that month. ``None``
+    when no such block is readable or when the blocks of the preferred kind disagree: a number that cannot
+    be trusted is never returned (a cited regulation is never a fallback)."""
     flat = re.sub(r"\s+", " ", text)
-    number = None
-    nm = _DECREE_NUMBER.search(flat)
-    if nm:
-        number = re.sub(r"\s+", "", nm.group("n"))
+    title: list[str] = []
+    annex: list[str] = []
+    for m in _OWN_NUMBER.finditer(flat):
+        if period is not None and _period(m.group("m"), re.sub(r"\s", "", m.group("y"))) != period:
+            continue
+        number = re.sub(r"\s+", "", m.group("n"))
+        found = annex if m.group("annex") else title
+        if DECREE_NUMBER_SHAPE.fullmatch(number) and number not in found:
+            found.append(number)
+    found = title or annex
+    return found[0] if len(found) == 1 else None
+
+
+def extract_from_text(text: str) -> tuple[str | None, float | None, str | None]:
+    """(period, ICP value, the decree's own number) from a decree's text layer or OCR text."""
+    flat = re.sub(r"\s+", " ", text)
     for m in _DECREE_ANCHOR.finditer(flat):
         period = _period(m.group("m"), m.group("y"))
         value = _to_float(m.group("v"))
         if period and 5 < value < 300:
-            return period, value, number
-    return None, None, number
+            return period, value, decree_own_number(flat, period)
+    # no operative clause: the number (of whatever month the document names) is kept for diagnosis only
+    return None, None, decree_own_number(flat)
 
 
 def pdf_text_layer(pdf_bytes: bytes, max_pages: int = 4) -> str:
@@ -555,6 +592,7 @@ __all__ = [
     "ArticleExtraction",
     "DecreeExtraction",
     "ReconciledMonth",
+    "decree_own_number",
     "evidence_from",
     "extract_decree",
     "extract_from_text",

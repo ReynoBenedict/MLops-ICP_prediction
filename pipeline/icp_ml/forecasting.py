@@ -30,7 +30,7 @@ import pandas as pd
 from icp_ml.backtest import forecast_path
 from icp_ml.features import BENCHMARK_COLUMNS, FX_COLUMN, TARGET_COLUMN, MissingFeatureData
 from icp_ml.methods import BENCH, MethodSpec
-from icp_ml.sources.base import month_end
+from icp_ml.sources.base import jakarta_today, month_end
 
 MAX_HORIZON = 6
 BENCHMARK_BOUNDS = (0.0, 500.0)
@@ -126,7 +126,7 @@ def make_forecast(
     official = panel[TARGET_COLUMN].dropna()
     if official.empty:
         raise ForecastInputError("ICP history is empty")
-    today = today or date.today()
+    today = today or jakarta_today()
     origin = official.index.max()
     targets = [origin + i for i in range(1, horizon + 1)]
     assumptions = _validate_scenario(scenario, targets)

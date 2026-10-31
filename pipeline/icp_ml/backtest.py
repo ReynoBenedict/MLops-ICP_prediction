@@ -27,6 +27,7 @@ import pandas as pd
 from icp_ml.features import (
     BENCHMARK_COLUMNS,
     FEATURE_COLUMNS,
+    FX_COLUMN,
     TARGET_COLUMN,
     MissingFeatureData,
     build_feature_frame,
@@ -79,44 +80,62 @@ def forecast_path(
     last_target = origin + max(horizons)
     idx = pd.period_range(panel.index.min(), max(panel.index.max(), last_target), freq="M")
     # Working copy: everything after the origin is unknown to the forecaster until we fill it in.
+    # Every month origin+1..last_target is filled in order (also months that are not requested, so
+    # lags of a later step never read a realised value), and nothing after last_target is kept.
     work = panel.reindex(idx).copy()
+    work = work[work.index <= last_target]
     work.loc[work.index > origin, TARGET_COLUMN] = np.nan
-    last_known = {b: panel.loc[:origin, b].dropna() for b in BENCHMARK_COLUMNS}
+    inputs = (*BENCHMARK_COLUMNS, FX_COLUMN)
+    last_known = {b: panel.loc[:origin, b].dropna() for b in inputs if b in panel}
     required = spec.requires
+    wanted = set(horizons)
     rows = []
-    for h in horizons:
+    for h in range(1, max(horizons) + 1):
         target = origin + h
         sources: dict[str, str] = {}
-        for b in BENCHMARK_COLUMNS:
-            observed = target in panel.index and not np.isnan(panel.loc[target, b])
+        for b in inputs:
+            observed = target in panel.index and b in panel and not np.isnan(panel.loc[target, b])
             if assumptions and b in assumptions and target in assumptions[b]:
                 work.loc[target, b] = assumptions[b][target]
                 sources[b] = "scenario"
             elif mode == "observed" and observed:
+                work.loc[target, b] = float(panel.loc[target, b])
                 sources[b] = "observed"
-            elif last_known[b].empty:
+            elif b not in last_known or last_known[b].empty:
                 work.loc[target, b] = np.nan
                 sources[b] = "unavailable"
             else:
                 work.loc[target, b] = float(last_known[b].iloc[-1])
                 sources[b] = "assumed_hold_last"
+        fx_source = sources.pop(FX_COLUMN)
         try:
             feats = feature_row(work, target, required)
         except MissingFeatureData as exc:
-            rows.append(
-                {"horizon": h, "target": str(target), "y_pred": np.nan, "sources": sources, "error": str(exc)}
-            )
+            if h in wanted:
+                rows.append(
+                    {
+                        "horizon": h,
+                        "target": str(target),
+                        "y_pred": np.nan,
+                        "sources": sources,
+                        "fx_source": fx_source,
+                        "error": str(exc),
+                    }
+                )
             continue
         x = pd.DataFrame([{c: feats.get(c, np.nan) for c in FEATURE_COLUMNS}])
         y_hat = float(np.asarray(method.predict(x)).reshape(-1)[0])
         # Recursive: this prediction becomes the ICP lag for later horizons (never the true value).
         work.loc[target, TARGET_COLUMN] = y_hat
+        if h not in wanted:
+            continue
         rows.append(
             {
                 "horizon": h,
                 "target": str(target),
                 "y_pred": y_hat,
                 "sources": sources,
+                "fx_source": fx_source,
                 "benchmarks": {
                     b: (None if np.isnan(work.loc[target, b]) else float(work.loc[target, b]))
                     for b in BENCHMARK_COLUMNS
@@ -257,9 +276,19 @@ def interval_tables(
 
 
 def split_coverage(
-    pred_df: pd.DataFrame, method: str, levels: tuple[float, ...], fit_share: float = 0.6
+    pred_df: pd.DataFrame,
+    method: str,
+    levels: tuple[float, ...],
+    fit_share: float = 0.6,
+    embargo: bool = True,
 ) -> dict[str, dict[str, dict[str, float]]]:
-    """Honest coverage: intervals fitted on the earliest ``fit_share`` of origins, evaluated on the rest."""
+    """Honest coverage: intervals fitted on the earliest ``fit_share`` of origins, evaluated on the rest.
+
+    With ``embargo`` (default since audit v7 ML-01) a fit case is used only when its *target* month is
+    not later than the first test origin, so no realised value of a month the test cases forecast
+    (targets after the cut) shapes the intervals being checked. Without it, multi-step fit cases of the
+    last fit origins overlapped the test targets (models exported before 2026-10-20 stored that variant).
+    """
     g = pred_df[pred_df["method"] == method]
     if g.empty:
         return {}
@@ -268,6 +297,8 @@ def split_coverage(
     if cut is None:
         return {}
     fit, test = g[g["origin"] < cut], g[g["origin"] >= cut]
+    if embargo:
+        fit = fit[fit["target"].astype(str) <= str(cut)]
     tables = interval_tables(fit, method, levels)
     out: dict[str, dict[str, dict[str, float]]] = {}
     for (mode, h), gh in test.groupby(["mode", "horizon"]):

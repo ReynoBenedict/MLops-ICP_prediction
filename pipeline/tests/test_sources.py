@@ -160,8 +160,9 @@ def test_archive_table_and_decree_text():
         ("2025-02", True),
     ]
     period, value, number = esdm_icp.extract_from_text(
-        "KEPUTUSAN ... NOMOR : 395.K/MG.03/MEM.M/2026 ... KEDUA : Harga rata-rata Minyak Mentah Indonesia untuk bulan September 2026 "
-        "ditetapkan sebesar US$112,81/barrel. KETIGA"
+        "KEPUTUSAN MENTERI ENERGI DAN SUMBER DAYA MINERAL REPUBLIK INDONESIA NOMOR : 395.K/MG.03/MEM.M/2026 "
+        "TENTANG HARGA MINYAK MENTAH INDONESIA BULAN SEPTEMBER 2026 ... KEDUA : Harga rata-rata Minyak Mentah "
+        "Indonesia untuk bulan September 2026 ditetapkan sebesar US$112,81/barrel. KETIGA"
     )
     assert (period, value, number) == ("2026-09", 112.81, "395.K/MG.03/MEM.M/2026")
     # OCR variants: 'US$ 57.27', 'USS63.26', 'US5 40,67'
@@ -178,6 +179,185 @@ def test_archive_table_and_decree_text():
         )[1]
         is None
     )
+
+
+# Excerpts of the text layers of the ESDM decrees for August and September 2026 (line breaks as
+# PyMuPDF returns them). Both cite the formula decree 276.K/MG.03/MEM.M/2026 in their considerations;
+# the August title block spaces its own number out, the September PDF has no text on page 1 (the
+# number is only in the annex header).
+DECREE_AUG_2026 = """KEPUTUSAN MENTER! ENERGI DAN SUMBER DAYA MINERAL
+REPUBLIK INDONESIA
+NOMOR 3 5 2 .  K/MG. 03/MEM.M/2026
+TENTANG
+HARGA MINYAK MENTAH INDONESIA BULAN AGUSTUS 2026
+DENGAN RAHMAT TUHAN YANG MAHA ESA
+c. bahwa Menteri Energi dan Sumber Daya Mineral telah
+menetapkan Keputusan Menteri Energi dan Sumber Daya
+Mineral Nomor 276.K/MG.03/MEM.M/2026 tanggal 30
+Juni
+2026
+tentang
+Formula
+Harga
+Minyak
+Mentah
+Indonesia;
+1 1.  Keputusan Menteri Energi dan Sumber Daya Mineral
+Nomor 276.K/MG.03/MEM.M/2026 tanggal 30 Juni 2026
+tentang Formula Harga Minyak Mentah Indonesia;
+Harga rata-rata Minyak Mentah Indonesia untuk bulan
+Agustus 2026 ditetapkan sebesar US$89,43/barrel.
+LAMPIRAN
+KEPUTUSAN MENTER! ENERGI DAN SOMBER DAYA MINERAL
+REPUBLIK INDONESIA
+NOMOR
+: 3 5 2 . K / M G . 0 3 / M E M . M / 2 0 2 6
+TANGGAL
+: 8  September 2 0 2 6
+TENTANG
+HARGA MINYAK MENTAH INDONESIA BULAN AGUSTUS 2026
+"""
+DECREE_SEP_2026 = """11. Keputusan Menteri Energi dan Sumber Daya Mineral
+Nomor 276.K/MG.03/MEM.M/2026 tanggal 30 Juni 2026
+tentang Formula Harga Minyak Mentah Indonesia;
+KEDUA
+: Harga rata-rata Minyak Mentah Indonesia untuk bulan
+September 2026 ditetapkan sebesar US$112,81/barrel.
+LAMPIRAN
+KEPUTUSAN MENTERI ENERGI DAN SUMBER DAYA MINERAL
+REPUBLIK INDONESIA
+NOMOR
+: 395.K/MG.03/MEM.M/2026
+TANGGAL  :  7 Oktober 2026
+TENTANG
+HARGA MINYAK MENTAH INDONESIA BULAN SEPTEMBER 2026
+"""
+
+
+def test_decree_number_is_the_decrees_own_never_a_cited_regulation():
+    """Regression (2026-10-25): both monthly decrees were recorded as 276.K/MG.03/MEM.M/2026, the formula
+    decree cited in their considerations, instead of 352.K (August) and 395.K (September)."""
+    assert esdm_icp.extract_from_text(DECREE_AUG_2026) == ("2026-08", 89.43, "352.K/MG.03/MEM.M/2026")
+    assert esdm_icp.extract_from_text(DECREE_SEP_2026) == ("2026-09", 112.81, "395.K/MG.03/MEM.M/2026")
+    # Director-general decrees 2022-2024: the number field is empty in the text layer (filled in by the
+    # electronic signature); the only "Nomor ...K/..." left is the cited formula decree -> no number.
+    dg_2022 = (
+        "KEPUTUSAN MENTERI ENERGI DAN SUMBER DAYA MINERAL REPUBLIK INDONESIA NOMOR : TENTANG HARGA MINYAK "
+        "MENTAH INDONESIA BULAN APRIL 2022 MENTERI ENERGI DAN SUMBER DAYA MINERAL REPUBLIK INDONESIA, ... 9. "
+        "Keputusan Menteri Energi dan Sumber Daya Mineral Nomor 61.K/MG.01/MEM.M/2022 tentang Formula Harga "
+        "Minyak Mentah Indonesia; MEMUTUSKAN: ... Harga rata-rata Minyak Mentah Indonesia untuk bulan April "
+        "2022 ditetapkan sebesar US$ 102,51/barrel. LAMPIRAN KEPUTUSAN MENTERI ENERGI DAN SUMBER DAYA "
+        "MINERAL REPUBLIK INDONESIA NOMOR : TANGGAL : TENTANG HARGA MINYAK MENTAH INDONESIA BULAN APRIL 2022"
+    )
+    assert esdm_icp.extract_from_text(dg_2022) == ("2022-04", 102.51, None)
+    # OCR (June 2020): the annex header reads its colon as a digit; the title block wins.
+    ocr_2020 = (
+        "REPUBLIK INDONESIA NOMOR: 134 K/12/MEM/2020 TENTANG PENETAPAN HARGA MINYAK MENTAH INDONESIA BULAN "
+        "JUNI 2020 ... untuk bulan Juni 2020 ditetapkan sebesar US$ 36.68 /barrel ... LAMPIRAN KEPUTUSAN "
+        "MENTERI ENERGI DAN SUMBER DAYA MINERAL REPUBLIK INDONESIA NOMOR 1 134 K/12/MEM/2020 TANGGAL : 2 Juli "
+        "2020 TENTANG PENETAPAN HARGA MINYAK MENTAH INDONESIA BULAN JUNI 2020"
+    )
+    assert esdm_icp.extract_from_text(ocr_2020)[2] == "134K/12/MEM/2020"
+    # A title block of another month is never this decree's number; disagreeing title blocks -> None.
+    assert esdm_icp.decree_own_number(DECREE_AUG_2026, "2026-09") is None
+    assert (
+        esdm_icp.decree_own_number(
+            "NOMOR 1.K/MG.03/MEM.M/2026 TENTANG HARGA MINYAK MENTAH INDONESIA BULAN MEI 2026 "
+            "NOMOR 2.K/MG.03/MEM.M/2026 TENTANG HARGA MINYAK MENTAH INDONESIA BULAN MEI 2026",
+            "2026-05",
+        )
+        is None
+    )
+
+
+def test_recheck_and_apply_decree_numbers(tmp_path):
+    """The repair path re-reads stored decree copies (checksum-verified) and corrects only numbers."""
+    import json
+
+    import fitz
+
+    from icp_ml.sources import esdm_backfill
+    from icp_ml.sources.base import sha256_bytes
+
+    def pdf(text: str) -> bytes:
+        doc = fitz.open()
+        page = doc.new_page()
+        y = 40
+        for line in text.splitlines():
+            page.insert_text((40, y), line, fontsize=8)
+            y += 10
+        data = doc.tobytes()
+        doc.close()
+        return bytes(data)
+
+    (tmp_path / "pdf").mkdir()
+    aug = pdf(DECREE_AUG_2026 + ("x " * 120))  # > 200 characters: read as a text layer
+    (tmp_path / "pdf" / "2026-08_aaaa.pdf").write_bytes(aug)
+    tampered = pdf(DECREE_SEP_2026 + ("x " * 120))
+    (tmp_path / "pdf" / "2026-09_bbbb.pdf").write_bytes(tampered)
+    decrees = {
+        "2026-08": {
+            "url": "https://migas.esdm.go.id/aug.pdf",
+            "sha256": sha256_bytes(aug),
+            "local_path": "C:/elsewhere/2026-08_aaaa.pdf",
+            "extracted_period": "2026-08",
+            "value": 89.43,
+            "method": "text-layer",
+            "decree_number": "276.K/MG.03/MEM.M/2026",
+        },
+        "2026-09": {  # recorded checksum differs from the stored copy -> never rechecked
+            "url": "https://migas.esdm.go.id/sep.pdf",
+            "sha256": "0" * 64,
+            "local_path": "2026-09_bbbb.pdf",
+            "extracted_period": "2026-09",
+            "value": 112.81,
+            "method": "text-layer",
+            "decree_number": "276.K/MG.03/MEM.M/2026",
+        },
+    }
+    (tmp_path / "decrees.json").write_text(json.dumps(decrees), encoding="utf-8")
+    recon = [
+        {
+            "period": "2026-08",
+            "value": 89.43,
+            "status": "verified",
+            "note": "",
+            "sources": [
+                {
+                    "kind": "decree_text",
+                    "value": 89.43,
+                    "sha256": sha256_bytes(aug),
+                    "reference": "276.K/MG.03/MEM.M/2026",
+                },
+                {
+                    "kind": "announcement",
+                    "value": 89.43,
+                    "sha256": "ann",
+                    "reference": "352.K/MG.03/MEM.M/2026",
+                },
+            ],
+        }
+    ]
+    (tmp_path / "reconciliation.json").write_text(json.dumps(recon), encoding="utf-8")
+    changes = esdm_backfill.recheck_decree_numbers(tmp_path)
+    assert [(c["period"], c["old"], c["new"]) for c in changes] == [
+        ("2026-08", "276.K/MG.03/MEM.M/2026", "352.K/MG.03/MEM.M/2026")
+    ]
+    assert esdm_backfill.apply_decree_numbers(tmp_path, changes) == {
+        "decrees": 1,
+        "reconciliation_sources": 1,
+    }
+    saved = json.loads((tmp_path / "decrees.json").read_text(encoding="utf-8"))
+    assert (
+        saved["2026-08"]["decree_number"] == "352.K/MG.03/MEM.M/2026" and saved["2026-08"]["value"] == 89.43
+    )
+    assert saved["2026-09"]["decree_number"] == "276.K/MG.03/MEM.M/2026"  # untouched
+    sources = json.loads((tmp_path / "reconciliation.json").read_text(encoding="utf-8"))[0]["sources"]
+    assert [(s["kind"], s["value"], s["reference"]) for s in sources] == [
+        ("decree_text", 89.43, "352.K/MG.03/MEM.M/2026"),
+        ("announcement", 89.43, "352.K/MG.03/MEM.M/2026"),
+    ]
+    assert esdm_backfill.recheck_decree_numbers(tmp_path) == []  # idempotent
 
 
 ARTICLE_HTML = """<html><head><title>ICP Januari 2022 Terkerek Jadi US$85,89 per Barel</title></head><body>
