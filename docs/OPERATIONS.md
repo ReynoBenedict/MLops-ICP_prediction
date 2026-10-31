@@ -5,10 +5,54 @@
 | Endpoint | Use |
 |---|---|
 | `GET /health/live` | Process is up (no dependencies). Liveness probe. |
-| `GET /health/ready` | Measured checks of each dependency, each with status, critical flag, detail and latency. `503` if a critical dependency (metadata store, object store) is down; `degraded` if the registry, production model or datasets are unavailable. |
+| `GET /health/ready` | Operators (admin bearer): measured checks of each dependency, each with status, critical flag, detail and latency. `503` if a critical dependency (metadata store, object store) is down; `degraded` if the registry, production model or datasets are unavailable. Everyone else gets only `{"status"}` (same HTTP status). Checks run concurrently, each capped at 5 s. **Warm-up:** the production model loads in the background when the process starts (about 5-10 s locally); until it is loaded the model checks wait at most 0.5 s and report `degraded` ("still loading after start-up"), so the first probes after a start answer quickly with `200 degraded`, then `ready`. Platform probes should accept `200` (degraded) and alert only on `503`. On the serverless staging backend (Vercel) the warm-up starts when an instance starts (first request after an idle period); the job runner check reads `not_configured` there by design. |
 | `GET /api/v1/system/status` | The same checks plus backends, schema version and whether admin operations are enabled (also shown on the Operations page). |
-| `GET /api/gateway/health` | Worker-level check (does not call the backend). |
+| `GET /api/gateway/health` | Worker-level check (does not call the backend); returns only `{"status": "ok"}`. |
 | `GET /metrics` | Prometheus (`icp_http_requests_total`, `icp_http_request_duration_seconds`, `icp_forecast_runs_total`, `icp_prediction_value_usd`, `icp_jobs_total`). Protect with `METRICS_TOKEN`. |
+
+## Monitoring
+
+What exists today:
+
+- Health endpoints and the Operations console pages (above); the Worker check
+  `/api/gateway/health` does not depend on the backend.
+- Prometheus metrics at `/metrics` (`backend/icp_api/metrics.py`) and an optional local
+  observability profile: `docker compose --profile observability up` starts Prometheus
+  (`infra/monitoring/prometheus.yml`) and Grafana with the dashboard
+  `infra/monitoring/grafana/dashboards/icp_dashboard.json`. It is not deployed.
+- Logs: backend JSON logs with `request_id` (Vercel runtime logs, kept 1 hour on Hobby; container logs for the
+  Quick Tunnel fallback), `npx wrangler tail --env staging -c apps/gateway/wrangler.jsonc` for the Worker.
+- In-product signals: the `data_freshness`, `benchmark_freshness`, `data_verification` and
+  operator-only `ingestion_failure` insights ([INSIGHT_ENGINE.md](INSIGHT_ENGINE.md)).
+
+What does not exist: uptime monitoring, alerting to a person, log retention beyond the host, an SLA.
+Checking staging is manual: `npm run smoke -- https://icp-gateway-staging.icp-gateway.workers.dev`. If a
+(free) uptime monitor is ever added, point it at `/api/gateway/health` only: it is answered by the Worker and
+never calls the backend. A monitor polling a page or the backend's `/health/*` would start the serverless
+backend over and over and spend its free Active CPU allowance (docs/DEPLOYMENT.md, "Why no frequent keep-warm").
+
+## Incident response
+
+There is no on-call rota; the operator is the responder. Minimal procedure:
+
+1. **Triage.** Ask for the request id shown in the UI error box; search backend logs and
+   `wrangler tail` for it. Check `/api/gateway/health`, then `/health/ready` and `/system/status`.
+2. **Contain.**
+   - Leaked or suspected secret: rotate it (gateway shared secret: [Rotating the gateway shared
+     secret](#rotating-the-gateway-shared-secret); for a confirmed leak skip the overlap window and set
+     only the new secret on both sides; operator tokens via `ADMIN_API_TOKENS`, see
+     [DEPLOYMENT.md](DEPLOYMENT.md#rollback-and-recovery)).
+     Revoke affected member sessions by disabling the member or changing the password; revoke
+     API keys from the organisation's API-key page.
+   - Abusive tenant: suspend the organisation (`POST /api/v1/admin/organizations/{id}/status`).
+   - Bad data or model: activate the previous dataset version or export the previous model version
+     ([DEPLOYMENT.md](DEPLOYMENT.md#rollback-and-recovery)).
+3. **Evidence.** Export the relevant `audit_events` (Operations → Audit) and logs before any
+   restore; keep a `npm run backup` / `wrangler d1 export` copy.
+4. **Recover** following [Backups and restore](#backups-and-restore), then run the smoke test.
+5. **Inform** affected organisation owners through the contact channel agreed at activation (the
+   product has no e-mail delivery and no broadcast message); record what happened, the cause and
+   the fix in a dated note under `docs/`.
 
 ## Logs and correlation
 
@@ -19,6 +63,195 @@
 - Job workers carry the request ID of the request that created the job.
 - To trace a user report, ask for the request ID shown in the UI's error box and search the logs
   for it.
+- The Worker writes one JSON line (visible in `wrangler tail` and Workers Logs) for each event worth an
+  operator's attention, always with the `request_id` and never with secrets or the backend URL:
+  `gateway.upstream_non_json_error` (`upstream_status`, e.g. 530 from an offline Quick Tunnel),
+  `gateway.public_stale_served` (`key`, `stored_at`, `upstream_status` or `no_response`) and
+  `gateway.edge_cache_write_failed` (`key`, KV error text, e.g. the daily write quota; at most one per key
+  and isolate every 5 minutes, because a failed write is not retried within that interval),
+  `gateway.backend_warm_ping` (`status`, `ms`: the non-blocking `GET /health/live` a person's page view sends
+  to the backend, at most once a minute per isolate; never for crawlers, monitors or requests without Fetch
+  Metadata; several seconds here is a cold start, which on Vercel by default includes the install of the
+  dependencies, docs/DEPLOYMENT.md "Size of the function") and `gateway.public_refresh`
+  (`path`, `outcome` such as `200 live`: the daily Cron Trigger at 22:17 UTC).
+
+## Timeout budget
+
+Every layer must give up a little *before* the layer in front of it, so the user always gets a
+deliberate answer (data, a stale copy or an error envelope with a request id) instead of a dropped
+connection. Values as configured on 2026-10-25. The browser rows are `TIMEOUTS` and `timeoutFor` in
+`apps/web/src/api/client.ts` (contract C3) and `apps/web/src/auth.tsx` (the boot `whoami` check, retry
+included, ends within one 8 s deadline; only a 401 clears the stored credential).
+
+| Layer | Request | Timeout | Retries | Where it is set |
+|---|---|---|---|---|
+| Browser (contract C3) | public snapshot, plans (`publicGet`, `publicGetMeta`) | 10 s | none | `client.ts` `TIMEOUTS.public` |
+| Browser | `GET /auth/whoami` | 8 s (app start never waits longer) | one retry after a 429/5xx, inside the same 8 s deadline (auth layer) | `TIMEOUTS.whoami`, `auth.tsx` |
+| Browser | everything else | 35 s | none | `TIMEOUTS.default` |
+| Browser | `POST /forecasts`, scenario run / compare | 60 s | none (Idempotency-Key makes a manual retry safe) | `TIMEOUTS.compute` |
+| Browser | `POST /reports` | 95 s, above the gateway's 90 s, so a slow report ends with the gateway's own JSON answer | none | `TIMEOUTS.report` |
+| Browser | file downloads (`downloadWithAuth`: reports, exports, dataset versions) | 60 s, headers and body together | none | `TIMEOUTS.download` |
+| Gateway Worker | anonymous `GET /public/market-snapshot`, `GET /plans` | `PUBLIC_UPSTREAM_TIMEOUT_MS` 8 s, then the last-known-good copy | one retry on a connection failure, inside the same 8 s deadline | `apps/gateway/wrangler.jsonc` |
+| Gateway Worker | all other `/api/v1/*` | `UPSTREAM_TIMEOUT_MS` 30 s local, 90 s staging and production | GET/HEAD: one retry on a connection failure, inside the same deadline; timeouts and POSTs are never retried | `wrangler.jsonc` |
+| Cloudflare edge | Worker subrequest to a proxied origin (Quick Tunnel fallback) | 100 s (HTTP 524) | – | Cloudflare platform |
+| Vercel | one function invocation (`maxDuration`) | 60 s → `504 FUNCTION_INVOCATION_TIMEOUT` from Vercel (a non-JSON error page becomes the gateway's 504 envelope) | – | `infra/vercel/vercel.json` |
+| Gateway Worker | daily refresh of the two public copies (Cron Trigger) | 60 s per route (`SCHEDULED_PUBLIC_TIMEOUT_MS`; nobody waits, a cold start may finish) | as for GET | `apps/gateway/src/index.ts` |
+| Gateway Worker | warm-on-visit ping `GET /health/live` | 25 s, in `waitUntil` (never delays the page) | none | `apps/gateway/src/index.ts` |
+| Backend | any request (ASGI middleware) | `REQUEST_TIMEOUT_SECONDS` 30 s → `504 REQUEST_TIMEOUT`. The middleware cannot stop a synchronous endpoint's worker thread; its data-plane calls end with the same deadline (next rows) | – | `backend/icp_api/settings.py`, `middleware.py` |
+| Backend → data plane | one D1 statement through the Worker | 15 s per attempt; inside a request a read gets at most the time left before the request deadline | up to 3 attempts, back-off 0.25 s then 0.5 s: reads after connection errors and 429/502/503/504, writes only after connection errors and 429 (a 5xx after a write is ambiguous); timeouts are never retried. Inside a request no read, no retry and no back-off starts after the deadline; a write's first attempt always starts, with its full 15 s | `backend/icp_api/storage/sql.py` (`request_deadline`) |
+| Backend → data plane | one KV object through the Worker | 30 s per attempt; reads (GET/HEAD) inside a request get at most the time left | up to 3 attempts: connection errors, 429/502/503/504 and timeouts of reads; same deadline rule (a write's first attempt always starts, with its full 30 s) | `backend/icp_api/storage/objects.py` |
+| Backend jobs | ingestion / training | 300 s / 1800 s | job retry policy; jobs run outside requests, so no request deadline applies | `JOB_TIMEOUT_*` |
+
+**Measured durations** (2026-10-25, a backend instance of the current code on its own port with an isolated
+copy of the local data: SQLite and local objects, Python 3.10, model warm; median of 3 warm calls, first
+call after start in brackets):
+
+| Request | Duration |
+|---|---|
+| `POST /forecasts`, horizon 1 / 3 (member) / 6 (operator) | 59 / 110 / 157 ms (445 / 193 / 155 ms) |
+| `POST /reports` market_monthly, PDF + CSV (member) | 703 ms (2.45 s; matplotlib and ReportLab load on first use) |
+| `POST /reports` market_monthly, PDF + Excel + CSV (operator) | 733 ms (1.49 s) |
+| `POST /reports` forecast, horizon 3 (member) / 6, three formats (operator) | 811 / 867 ms |
+| `POST /reports` scenario_comparison, two scenarios (member) | 742 ms |
+| `POST /reports` data_provenance (member / operator) | 208 / 385 ms |
+
+On D1 every metadata statement is a round trip through the Worker. A market report issues about 9 of them
+and a forecast about 6 (request read cache, wave A), plus one KV write per file. The deployed snapshot took
+about 5 s for 12 round trips on 2026-10-17 (about 0.4 s each through the Quick Tunnel), which puts the
+slowest report at roughly 5-10 s on staging (an estimate: nothing was measured on staging, which may not be
+redeployed in this mission): a third of the 30 s request budget or less. **Decision
+(2026-10-25):** `REQUEST_TIMEOUT_SECONDS` stays at 30 s, and the data-plane retries, which could run past it,
+are now bounded by the same deadline. Raise the request limit only if a measured route approaches 30 s, and
+keep it below the gateway's 90 s minus a backend wake-up.
+
+Inconsistencies found on 2026-10-25 and their status (evidence: the files named in the table):
+
+1. **Reports and forecasts against the 30 s backend limit.** Resolved by measurement (above): every report
+   kind finishes in under 1 s warm locally and is estimated at well under 30 s on the staging data plane, so
+   30 s is a real ceiling with room to spare. The browser's 60 s / 95 s and the gateway's 90 s cover a
+   sleeping backend's wake-up (Render Free ≈ 60 s) on top of it.
+2. Fixed: the browser waits 95 s for `POST /reports`, longer than the gateway's 90 s (it used to be 90 s, so
+   the two raced).
+3. Open (by design): the browser default of 35 s is shorter than the gateway's 90 s on staging/production,
+   so during a cold start an ordinary GET ends in the client-side `TIMEOUT` message while the request is
+   still waking the backend. The next attempt succeeds; the message should say that the service is starting.
+4. Fixed (2026-10-25, `backend/tests/test_request_deadline.py`): a slow D1 read could retry for 3 × 15 s and
+   a slow KV read for 3 × 30 s, and the worker thread went on doing so after the middleware had answered
+   `504` at 30 s, so a degraded data plane tied up threads long after the user got the error. Now only
+   retries, back-off and reads are bounded: no read, no retry and no back-off sleep starts after the request
+   deadline, and a read attempt gets at most the time left. A write's **first** attempt always starts, even
+   after the deadline, with its full timeout (D1 15 s, KV 30 s): refusing it would cut a write sequence in
+   the middle, and cutting it short would turn a write that may still land into an ambiguous failure. So a
+   report cut off at 30 s still ends with a report row: its next read is refused, the run fails and the
+   `failed` row is written (or, if only its file writes were left, they and the `succeeded` row are
+   written); an audit row (like any other single write, a usage event for example) written after the
+   deadline lands as well (tests in
+   `test_request_deadline.py`, review PLAT-B-01, 2026-10-26). What remains: work after the deadline is a
+   chain of single write attempts, each up to 15 s (D1) or 30 s (KV); a write refused with 429 after the
+   deadline is not retried, so that one statement is lost; a sequence that needs a read between
+   two writes stops at the read (example: a scenario run stores its forecast, then reads it back, so the
+   scenario's last-run link and the usage event are not written; the forecast is in the history). Not
+   bounded by the request deadline: the S3/R2 object store (boto3: 3 attempts, 30 s read timeout) and MLflow
+   tracking calls, neither of which the zero-cost topology uses on the request path.
+5. Fixed: downloads time out after 60 s (`downloadWithAuth`).
+6. Open: public snapshot latency is close to its budget. The deployed snapshot measured ≈ 5 s through the
+   data plane on 2026-10-17 ([DEPLOYMENT.md](DEPLOYMENT.md#self-hosted-backend-through-a-quick-tunnel-manual-fallback)),
+   against an 8 s gateway limit; the request read cache (wave A) cut the snapshot from 12 to 3 statements,
+   not yet measured on staging. A slow day turns live answers into stale ones (or errors before the first
+   copy exists). Watch `gateway.public_stale_served` with `upstream_status: "no_response"`.
+7. Fixed earlier on 2026-10-25: the gateway retry used to get a fresh full timeout, so a GET could wait up to
+   2 × 90 s on staging, beyond the Cloudflare 100 s edge limit; a malformed `UPSTREAM_TIMEOUT_MS` (empty or
+   not a number) aborted every request immediately, and a malformed `MAX_BODY_BYTES` disabled the body
+   limit. Both now fall back to the defaults.
+
+## Stale public data (last-known-good copies at the gateway)
+
+The landing page and the plan page read two anonymous endpoints, `GET /api/v1/public/market-snapshot`
+and `GET /api/v1/plans`. For exactly these two (no `Authorization` header, no query string) the Worker
+keeps the last successful JSON answer in the `OBJECTS` KV namespace, under
+`edge-cache/public/market-snapshot` and `edge-cache/public/plans`, with metadata
+`{storedAt, sha256, contentSha256}` (contract C2; copies written before 2026-10-25 carry only the first two):
+
+- **Backend healthy:** the live answer is returned unchanged with `X-ICP-Cache: live`. It is stored when its
+  *content* differs from the stored copy (at most once per key every 5 minutes), and an unchanged copy is
+  rewritten once it is a day old (`EDGE_CACHE_REFRESH_MS`, 24 h; review PLAT-B-02). The staging Worker's daily Cron Trigger
+  (`17 22 * * *`) requests both answers through the same code with a 60 s upstream budget and rewrites an
+  unchanged copy from 23 h on (`SCHEDULED_REFRESH_AFTER_MS`), so the copies stay current without visitors
+  (two backend invocations a day; `gateway.public_refresh` in the Worker log). `contentSha256` is
+  the SHA-256 of the parsed JSON without the top-level `generated_at` (which differs on every snapshot
+  answer); `sha256` covers the stored bytes and is what guards integrity before a copy is served. A copy
+  without `contentSha256` is compared by its bytes and replaced once. A write that fails (for example the
+  daily write quota) is not retried by that isolate for 5 minutes.
+- `storedAt` (and the `X-ICP-Cached-At` header of a stale answer) is the time the copy was last written:
+  when its content last changed or, for unchanged content, the last daily refresh. It is therefore at most
+  about a day older than the last live answer the Worker saw before an outage (a day plus up to 5 minutes
+  for an isolate's memo, longer only if a refresh write failed), and never newer than the data it holds. It
+  is not the exact time the backend last answered; the stored body's `generated_at` is the time of that
+  same write.
+- **Backend unreachable** (network error, no answer within `PUBLIC_UPSTREAM_TIMEOUT_MS` = 8 s, any status
+  ≥ 500 including the Cloudflare 52x/530 pages of an offline Quick Tunnel, or a non-JSON 4xx page from in front
+  of the backend, such as a Cloudflare 1015/1020 page or the Render router's 404): the stored copy is returned with
+  `200`, `X-ICP-Cache: stale`, `X-ICP-Cached-At: <ISO time it was stored>` and `Cache-Control: no-store`, byte
+  for byte as the backend sent it. The page must then say that the figures are a stored copy from that time;
+  the copy's own `freshness` field describes the data *at that time*, not now.
+- **No copy yet** (fresh namespace, or after a purge): the normal error (`502`/`504`
+  `UPSTREAM_TIMEOUT_OR_UNAVAILABLE`, JSON).
+- Requests with any `Authorization` header (signed-in members, operators) never read or write the copies.
+- On every `/api/v1/*` route, an upstream error answer (4xx or 5xx) that is not JSON is replaced by the same
+  JSON error envelope (`504` for upstream 504/522/524, otherwise `502`), so the browser never receives an HTML
+  error page from `/api/`. The backend itself answers every error as JSON, so such a page always comes from in
+  front of it. JSON errors from the backend keep their status and body; successful answers pass through as
+  sent (file downloads are CSV, PDF or Excel).
+
+**What it looks like.** In the browser's network panel the snapshot answers `200` with `x-icp-cache: stale`;
+in `wrangler tail` each such answer logs `gateway.public_stale_served` with the stored time and the upstream
+status. Nothing else in the product is served from these copies.
+
+**Inspect** (read-only; needs a wrangler login for the account):
+```bash
+npx wrangler kv key list --namespace-id 067677c60b6946949ed2ff3cf518ea7a --prefix edge-cache/ --remote
+npx wrangler kv key get edge-cache/public/market-snapshot --namespace-id 067677c60b6946949ed2ff3cf518ea7a --remote
+```
+
+**Purge** (for example after publishing a correction while the backend is down, or if a copy must not be
+shown any more):
+```bash
+npx wrangler kv key delete edge-cache/public/market-snapshot --namespace-id 067677c60b6946949ed2ff3cf518ea7a --remote
+npx wrangler kv key delete edge-cache/public/plans --namespace-id 067677c60b6946949ed2ff3cf518ea7a --remote
+```
+A running Worker isolate may keep using the copy it already read for up to 5 minutes; redeploy the Worker
+to drop it at once. In the same way, an isolate that found no copy keeps that answer for up to 5 minutes, so
+a copy written meanwhile by another isolate is served by this one only after that. The next live `200`
+recreates the key. Only `edge-cache/` keys are disposable: never
+delete other keys in this namespace (datasets, exports, model bundles). Wrangler 4 operates on *local*
+storage unless `--remote` is given. A hand-written value is ignored unless its metadata carries a valid
+`storedAt` and the exact `sha256` of the value, so a copy cannot be planted by accident; the internal data
+plane refuses the `edge-cache/` prefix (`400 INVALID_OBJECT_KEY`), so the backend can neither read nor
+overwrite these keys.
+
+**Budget** (Workers KV Free: 1,000 writes and 100,000 reads per day for the whole account, shared with
+forecast exports, report files, datasets and model bundles):
+
+| Key | Writes per day | Reads per day |
+|---|---|---|
+| `edge-cache/public/plans` | 1 per change of the plan catalogue (rare) plus 1 daily refresh of the unchanged copy; never more than 1 per 5 minutes per isolate | ≤ 288 per active Worker isolate: one read per 5 minutes, whether or not a copy exists (an isolate remembers "no copy" as well as a copy, so an outage before the first copy does not cost a read per request); 0 for requests with credentials |
+| `edge-cache/public/market-snapshot` | 1 per change of the data: a newly published month, a correction, a change of the freshness status, a new forecast teaser (`generated_at` alone does not count), plus 1 daily refresh while it is unchanged; about 1-2 a day in normal operation, never more than 1 per 5 minutes per isolate | as above |
+
+In normal operation the two keys therefore use about 2 of the 1,000 daily writes (one refresh per key per
+day, plus one per real change of the data; best effort across isolates, so several isolates active at the
+refresh time can each write once). (Until 2026-10-25 every snapshot answer counted as changed because of
+`generated_at`, so the 5-minute throttle was the binding limit: up to 288 writes a day, ≈ 29 % of the
+quota, with one active isolate. From 2026-10-25 to 2026-10-26 unchanged content was never rewritten, so a
+stale notice could name a time weeks before the outage.) The 5-minute
+throttle remains the hard bound if the content ever changed on every answer. It is exact within one isolate
+and best effort across isolates: an isolate learns of another isolate's write only when it re-reads the key
+(every 5 minutes) and KV has propagated it (up to about 60 s), so several isolates serving the site at once
+can each write once per 5 minutes. Concurrent live answers in one isolate run at most one write check per key
+at a time. Reads are bounded by 288 per key per active isolate per day (each new isolate reads once when it
+first needs a key), and never by more than one per Worker request. If writes run short,
+`gateway.edge_cache_write_failed` appears in the Worker log (at most once per key and isolate every 5 minutes;
+no put is attempted in between) and the live answers are unaffected (the copy just ages). The value size is a
+few KB per key (answers above 256 KiB are never stored).
 
 ## Common problems
 
@@ -27,7 +260,10 @@
 | `503 MODEL_UNAVAILABLE` on forecasts | No version holds the `production` alias, or the registry is unreachable. Check `/health/ready` → `model_registry`/`production_model`; train and promote. In bundle mode (`model_bundle` check): no `models/production.json` in the object store; run `icp-api export-model` from the operator machine. |
 | `409 OPERATION_UNAVAILABLE` on train / validate / promote / rollback | The backend runs with `MODEL_SOURCE=bundle`. Train and promote locally (MLflow), then `icp-api export-model`. |
 | Forecast succeeds but `export_available=false` | The object store refused the CSV write (KV free quota: 1k writes/day, or the data plane was unreachable). The forecast record is intact; exports resume when writes succeed. |
-| API answers `504`/`502` or "data service unavailable" | The self-hosted backend or its Quick Tunnel is not running (machine asleep, process stopped). Restart with `npm run staging:backend`; the tunnel URL changes and the script redeploys the Worker. (On a sleeping host such as Render Free the first request can take ~60 s; the Worker waits 90 s.) |
+| API answers `504`/`502` or "data service unavailable" | Vercel backend: a cold start (seconds, more with the default packing, which installs the dependencies from PyPI at start-up; retry; a failed install logs `Runtime dependency installation failed`, see `node scripts/vercel-backend.mjs --runtime-log`), a request over the 60 s `maxDuration`, a paused deployment (`503 DEPLOYMENT_PAUSED` upstream: Hobby usage limits, see the Vercel dashboard → Usage) or a wrong `BACKEND_URL` (a deployment URL behind Vercel Authentication answers 401 HTML; use the production domain). Check `/health/live` on the production domain and `npx wrangler tail` (`upstream_status`). Quick Tunnel fallback: the machine or the tunnel is not running; restart with `npm run staging:backend` (new URL, automatic redeploy). |
+| Landing or plan page shows figures marked as a stored copy (`X-ICP-Cache: stale`) | The backend is unreachable and the Worker serves the last-known-good copy (see [Stale public data](#stale-public-data-last-known-good-copies-at-the-gateway)). Fix the backend as above; live answers resume by themselves. The Worker log shows `gateway.public_stale_served` with the upstream status. |
+| `502 UPSTREAM_TIMEOUT_OR_UNAVAILABLE` and `gateway.upstream_non_json_error` with `upstream_status: 530` (or 52x) in the Worker log | Cloudflare could not reach the origin: Quick Tunnel offline (530/1033), origin refused or timed out (521/522/524). The HTML error page is discarded by the Worker. Restart the backend and tunnel (`npm run staging:backend`). With a 4xx `upstream_status` (404, 403, 429) the page came from in front of the backend: a wrong or removed `BACKEND_URL` host (Vercel `404 DEPLOYMENT_NOT_FOUND`, a protected deployment URL `401`), or a Cloudflare block or rate limit on the origin (1020/1015). Check `BACKEND_URL` and the origin's status. |
+| Worker does not start: `Incorrect type for map entry '<NAME>'` (wrangler dev or deploy) | The Worker's main module exported something that is not a handler. `main` must stay `src/worker.ts`, which re-exports only the default handler from `src/index.ts`; `test/entrypoint.test.ts` guards this. |
 | `503 DATASET_UNAVAILABLE` / `DATASET_OBJECT_MISSING` / `DATASET_INTEGRITY_ERROR` | No active version, the object is missing from R2, or the checksum doesn't match. Re-activate a known-good version; investigate bucket changes. |
 | `422 DATA_INSUFFICIENT` | A month inside the lag window (up to 3 months before the origin) is missing in ICP or a benchmark the method needs. Run the ingestion jobs or import the month. |
 | `409 JOB_ALREADY_ACTIVE` | One job per type at a time. Wait, or cancel the active job (its ID is in `details.active_job_id`). |
@@ -37,6 +273,8 @@
 | `ingest_icp` slow or partial | The ESDM archive server is very slow. The job is resumable (state in `var/sources/esdm`); rerun it. Months whose decree PDF failed OCR are accepted from the monthly announcement (`single_source`). |
 | `422 DATA_INSUFFICIENT` for one method only | The method needs an input (e.g. Dubai) that has no active dataset. Run `ingest_benchmarks` / `ingest_fx`, or check `/datasets/active`. |
 | `403 GATEWAY_REQUIRED` | The request bypassed the Worker, or the secrets differ. Compare the Worker secret and backend `GATEWAY_SHARED_SECRET`. |
+| `429 RATE_LIMITED` on sign-in | `details.scope=client`: 5 failures for that e-mail from that IP in 15 min (other IPs unaffected); `scope=account`: 100 failures from all IPs. Wait for `Retry-After`, or restart the backend to clear the in-memory counters. |
+| `429 QUOTA_EXCEEDED` for an API key | Monthly plan quota used up; `details.reset_at` gives the UTC reset. Raise the plan or wait. |
 | `401 AUTH_INVALID` in audit as `auth.failed` | Wrong or expired admin token; repeated events may indicate probing. Rotate tokens if needed. |
 | `/health/ready`: schema v0/1 | Migrations not applied. Locally `npm run setup` or `node scripts/py.mjs -m icp_api.cli migrate`; D1: `wrangler d1 migrations apply --remote`. |
 | Backend refuses to start: `Invalid deployed configuration` | A staging/production rule failed (see [ENVIRONMENTS.md](ENVIRONMENTS.md)). The message lists each problem. |
@@ -49,7 +287,12 @@
 - Freshness is computed against each source's publication schedule (ICP for month M is due early in
   M+1; benchmark/FX months complete at month end). `lagging` = one month behind, `stale` = more.
   Expected availability never counts as publication.
-- Jobs (operator token, `POST /api/v1/jobs`, also from the Operations page):
+- On the serverless staging backend there is no job runner (`POST /api/v1/jobs` → `503 JOBS_DISABLED`): run
+  the same work from the operator machine against the staging stores, with `APP_ENV=local`,
+  `METADATA_BACKEND=d1_gateway`, `OBJECT_STORE_BACKEND=gateway`, `GATEWAY_INTERNAL_URL` and
+  `GATEWAY_SHARED_SECRET` set in that shell only: `node scripts/py.mjs -m icp_api.cli ingest icp|benchmarks|fx`.
+  The backend's public snapshot memo picks the new data up within 60 s.
+- Jobs (operator token, `POST /api/v1/jobs`, also from the Operations page; container hosts):
   - `ingest_benchmarks` - WTI/Brent (EIA API with `EIA_API_KEY`, else the EIA mirror) and Dubai
     (World Bank Pink Sheet). Complete months only; revisions recorded in the version diff.
   - `ingest_fx` - Bank Indonesia JISDOR monthly average and month-end.
@@ -58,11 +301,34 @@
     and listed in the job result (`params.news_pages`, `params.full_backfill` for the first run).
   - `train` (`auto_promote`), `refresh_forecast` (republish the system forecast), `evaluate_alerts`.
   - Every ingestion/training job ends by republishing the system forecast and evaluating alert rules.
-- Scheduled: `.github/workflows/continuous-training.yml` runs the three ingestions, the drift
-  report and a validated training on the 5th and 12th of each month (after ESDM publication).
+- Not scheduled (since 2026-10-20): `.github/workflows/continuous-training.yml` is started by hand
+  (`workflow_dispatch`) and runs the three ingestions and the drift report against a deployed backend; it
+  trains only when that backend reports `model_source=mlflow` (the staging backend runs bundle mode, so
+  retraining is an operator-local procedure followed by `icp-api export-model`).
 - Manual CSV import (Data → Import, merge mode) remains available for exceptional cases; it is
   previewed, audited and creates a new version.
 - CLI equivalents: `icp-api ingest benchmarks|fx|icp [--full]`, `icp-ml backtest`, `icp-ml train`.
+- Provenance check (read-only): `node scripts/py.mjs -m icp_api.cli verify-provenance` compares value, label and
+  evidence month by month (expected: 0 disagreements, 0 gaps). `backfill-dissent [--dry-run]` records
+  differing source readings as `dissent` (additive, idempotent; back up first). See
+  [DATA_RECONCILIATION.md](DATA_RECONCILIATION.md).
+- Decree numbers: `node scripts/py.mjs -m icp_api.cli repair-decree-references [--apply] [--ocr] [--state-dir DIR]
+  [--backup-dir DIR] [--backup-taken]` re-reads every stored decree copy (checksum-verified) with the current
+  parser and corrects the decree number recorded with its evidence (`source_evidence.reference` and the
+  reconciliation state under `SOURCE_STATE_DIR/esdm`). It is a dry run unless `--apply` is given, never changes
+  a value, status or dataset version and is idempotent (a second run reports 0 documents). `--ocr` also re-reads
+  scanned decrees (slow). When `--apply` has something to correct, the command first takes a backup itself and
+  verifies it before writing anything: on the local store it runs the `icp-api backup` routine into
+  `--backup-dir` (default `var/backups/<UTC stamp>/`), copies `decrees.json` and `reconciliation.json` to
+  `esdm-state/` inside it, and checks the copy with `restore-check` against the live database (the evidence row
+  count must match); on a deployed store (D1, R2, Postgres) it refuses with exit code 2 until you have taken
+  the platform backup ([Backups and restore](#backups-and-restore)) and re-run with `--backup-taken`. A failed backup writes nothing. The
+  `dataset.icp.decree_reference_repair` audit row is always written, with the rows actually corrected and the
+  backup location; outcome `failure` (`state_files_written: false`) means the run stopped part-way: restore
+  from that backup or re-run, the trail keeps both runs. Run `verify-provenance` afterwards. Applied locally on
+  2026-10-25 after a manual backup (28 references; see
+  [DATA_RECONCILIATION.md](DATA_RECONCILIATION.md)); the staging D1 database still holds the old references
+  and needs the same run when it is next migrated or cloned.
 
 ## Accounts and tenants (operator tasks)
 
@@ -72,22 +338,77 @@
   response and must be handed over out of band (no e-mail service).
 - To rotate an operator token: add the new `name:token` to `ADMIN_API_TOKENS`, restart, remove the
   old one. Failed attempts appear in the audit log as `auth.failed`.
+- **Deletion requests** (Operations → Organisasi → Pengajuan penghapusan, or
+  `GET /api/v1/admin/deletion-requests?status=pending`): check the requester and scope, then execute or decline
+  with a note (`POST …/{id}/resolve`). Execution anonymises in place and cannot be undone from the UI; take a
+  backup first (`npm run backup` / `wrangler d1 export`). Nothing is hard-deleted and official data is untouched.
+- **Data export** is self-service for owners (`GET /org/export`); operators cannot download a tenant export.
+- **Audit retention:** `node scripts/py.mjs -m icp_api.cli audit-prune [--older-than-days N]` shows what would
+  be deleted; add `--apply` to delete. Only `audit_events` older than the period are removed, `0` keeps
+  everything, and the prune is itself audited. Export the audit log first if it may be needed as evidence.
+- **Plan quotas:** API-key requests above the plan's monthly quota get `429 QUOTA_EXCEEDED` until the next
+  UTC month; raising the plan (`/admin/organizations/{id}/plan`) lifts the limit immediately.
+
+## Rotating the gateway shared secret
+
+`GATEWAY_SHARED_SECRET` authenticates the Worker → backend calls (`X-Gateway-Secret`) and the backend →
+Worker data plane (`/api/internal/*`). Both sides also accept the previous secret(s) listed in
+`GATEWAY_ACCEPTED_SECRETS` (comma-separated, each ≥ 32 characters when deployed, compared in constant time),
+so a planned rotation needs no downtime. Outbound calls always use `GATEWAY_SHARED_SECRET`. Never paste
+secret values into tickets, chat or shell history files.
+
+1. Generate a new value: `node scripts/py.mjs -m icp_api.cli new-token`.
+2. **Worker:** `npx wrangler secret put GATEWAY_ACCEPTED_SECRETS --env <env> -c apps/gateway/wrangler.jsonc`
+   (the *current* value), then `npx wrangler secret put GATEWAY_SHARED_SECRET --env <env> -c apps/gateway/wrangler.jsonc`
+   (the *new* value). A secret change takes effect immediately; the Worker now sends the new secret to the
+   backend and accepts both on `/api/internal/*`.
+3. **Backend:** in its environment set `GATEWAY_SHARED_SECRET=<new>` and `GATEWAY_ACCEPTED_SECRETS=<old>`, then
+   restart (staging: edit the container env file under `var/secrets/` and re-run `npm run staging:backend`).
+   Between steps 2 and 3 the old backend still accepts only the old value; do step 3 straight after step 2
+   (a short window of `403 GATEWAY_REQUIRED` on `/api/v1/*` is possible on the laptop topology, where the
+   restart also changes the tunnel URL).
+4. Check: `npm run smoke -- <gateway URL>`; `/health/ready` (operator) is `ready`; no `GATEWAY_REQUIRED` in logs.
+5. **Close the window:** `npx wrangler secret delete GATEWAY_ACCEPTED_SECRETS --env <env> -c apps/gateway/wrangler.jsonc`,
+   remove `GATEWAY_ACCEPTED_SECRETS` from the backend environment and restart it. Re-run the smoke test.
+6. Update the operator machine's shell variables used for `export-model`/`clone-state`, and record the
+   rotation date (not the value) in the operations log.
+
+For a **suspected leak**, skip the overlap: set only the new `GATEWAY_SHARED_SECRET` on both sides (no
+`GATEWAY_ACCEPTED_SECRETS`), accept the brief outage, then review `audit_events` and the Worker logs for
+`/api/internal/*` use. Operator tokens rotate the same way through the multi-entry `ADMIN_API_TOKENS`
+(see "Accounts and tenants").
 
 ## Backups and restore
 
 **Local**
 - `npm run backup` writes `var/backups/<UTC timestamp>/`. It contains `metadata.db` and `mlflow.db`
   (consistent SQLite online backups), `objects/` and `mlflow-artifacts/`.
+- Verify a backup before relying on it (read-only):
+  `node scripts/py.mjs -m icp_api.cli restore-check var/backups/<stamp> [--live-db var/metadata.db]` reports
+  SQLite integrity, schema version, row counts, dataset-object checksums, the model-bundle manifest and the
+  difference to the live database.
 - To restore: stop the stack, copy the files back into `var/` (`metadata.db`, `mlflow/mlflow.db`,
   `objects/`, `mlflow/artifacts/`), then start it again.
+- **Rehearsal (2026-10-20, on a copy):** backup `20261020T024313Z` was copied to a scratch directory outside
+  `var/` (625 files, 36.5 MB, 0.8 s), passed `integrity_check` (metadata and MLflow, schema 6), and an API
+  process pointed at the copy (`APP_ENV=test`, `MODEL_SOURCE=bundle`, port 18765, throwaway operator token)
+  was live in 4.2 s and `ready` with every check `ok` (it applied the newer migration 0007 to the copy on
+  start). The public market snapshot (Sep 2026 = 112.81) was identical to the live API; data summary,
+  active datasets, models, latest forecast (model v5) and verification all answered 200. Total 6.8 s; the
+  source backup was unchanged (checksums). Caveat: one MLflow experiment's `artifact_location` in
+  `mlflow.db` is an absolute path into the live `var/`, so restoring the MLflow store to another path or
+  machine needs those locations rewritten (or the same path); bundle-mode serving is unaffected.
+  Repeat the rehearsal after each schema migration and record RTO/RPO here.
 
 **Deployed (zero-cost topology, docs/DEPLOYMENT.md)**
 - **D1:** Time Travel provides point-in-time restore. Also export periodically with
   `npx wrangler d1 export icp-metadata-staging --remote --output=<file>.sql -c infra/cloudflare/d1/wrangler.jsonc`.
 - **KV:** objects are write-once and never deleted by the app. Off-site copy:
-  `npx wrangler kv key list --namespace-id <id>` then `npx wrangler kv key get <key> --namespace-id <id>`
+  `npx wrangler kv key list --namespace-id <id> --remote` then `npx wrangler kv key get <key> --namespace-id <id> --remote`
   per object (datasets, exports, `models/`). The model bundle is re-creatable from the operator's
-  MLflow store with `icp-api export-model`.
+  MLflow store with `icp-api export-model`. Keys under `edge-cache/` are the gateway's disposable copies of
+  public answers (written and overwritten by the Worker, not write-once); they need no backup and are not
+  restored. Wrangler 4 reads *local* storage unless `--remote` is given.
 - **MLflow (operator machine):** `npm run backup` covers `var/mlflow`; keep that directory backed up,
   it is the only training history.
 - **Restore order:** KV objects (datasets, bundle), then D1, then `icp-api export-model` if the

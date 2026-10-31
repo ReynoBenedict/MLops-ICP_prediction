@@ -1,0 +1,66 @@
+# Runtime dependencies of the serverless API on Vercel (Python 3.12, Linux x86_64), copied into the
+# deploy folder by scripts/vercel-backend.mjs. Staging mode only: METADATA_BACKEND=d1_gateway,
+# OBJECT_STORE_BACKEND=gateway, MODEL_SOURCE=bundle. Not included on purpose: mlflow (never imported
+# in bundle mode; training/export run on the operator machine), uvicorn (Vercel serves the ASGI app),
+# boto3/psycopg2 (R2/Postgres transports are unused), the ingest extra (PDF/OCR: ingestion runs on the
+# operator machine) and defusedxml (only the FX ingestion job imports it).
+#
+# Full closure with exact pins, versions identical to requirements/constraints.txt (checked by
+# backend/tests/test_serverless.py; et_xmlfile, an openpyxl dependency, is not in that file yet and is
+# pinned to the development environment's 2.0.0). Resolved 2026-10-27 with
+#   pip download --only-binary=:all: --platform manylinux2014_x86_64 --platform manylinux_2_28_x86_64
+#     --platform manylinux_2_34_x86_64 --python-version 3.12 --implementation cp --abi cp312
+#     -c requirements/constraints.txt <top-level runtime packages>
+# Installed size of these 45 wheels on Linux: 356.1 MB (339.6 MiB) without bytecode. That is within the
+# 500 MB Python limit but above the 225 MiB that Vercel's Python builder keeps inside a function, so by
+# default Vercel installs these packages from PyPI into /tmp/_vc_deps at every cold start;
+# `scripts/vercel-backend.mjs --deploy --bundle full` keeps all of them in the function instead (large
+# functions, beta). See docs/DEPLOYMENT.md "Size of the function". `excludeFiles` in vercel.json never
+# applies to these packages (the builder adds them from its own environment), and they must not be
+# stripped by other means either: numpy.testing imports numpy._core.tests at runtime (scipy pulls
+# numpy.testing in), so the app no longer starts without the packages' tests/ directories.
+annotated-doc==0.0.5
+annotated-types==0.8.0
+anyio==4.15.1
+certifi==2026.10.19
+charset-normalizer==3.5.2
+cloudpickle==3.1.2
+contourpy==1.3.2
+cycler==0.12.1
+et_xmlfile==2.0.0
+fastapi==0.143.2
+fonttools==4.65.0
+h11==0.16.0
+httpcore==1.0.9
+httpx==0.28.1
+idna==3.20
+joblib==1.6.0
+kiwisolver==1.5.1
+matplotlib==3.10.9
+numpy==2.2.6
+openpyxl==3.1.5
+opentelemetry-api==1.45.1
+packaging==26.3
+pandas==2.3.3
+pillow==13.0.0
+prettytable==3.18.0
+prometheus_client==0.26.0
+pydantic==2.14.1
+pydantic_core==2.50.1
+pyparsing==3.3.3
+python-dateutil==2.9.0.post0
+pytz==2026.5
+PyYAML==6.0.3
+reportlab==4.5.1
+requests==2.34.2
+scikit-learn==1.7.2
+scipy==1.15.3
+six==1.17.0
+skops==0.16.0
+starlette==1.7.0
+threadpoolctl==3.7.0
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+tzdata==2026.5
+urllib3==2.8.0
+wcwidth==0.9.2

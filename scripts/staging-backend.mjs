@@ -1,5 +1,8 @@
 #!/usr/bin/env node
 /**
+ * MANUAL FALLBACK since 2026-10-28: the staging backend normally runs on Vercel Hobby
+ * (scripts/vercel-backend.mjs, docs/DEPLOYMENT.md) and this machine does not need to stay on.
+ *
  * Zero-cost staging backend on this machine: run the backend image in the staging configuration,
  * open a Cloudflare Quick Tunnel to it, and deploy the staging Worker pointing at the tunnel.
  *
@@ -11,7 +14,8 @@
  * Keep this process running: the tunnel (and therefore the public API) stops when it exits or the
  * machine sleeps. Quick Tunnels get a new random hostname every time. The hostname is machine-local
  * state: it is written to var/staging-backend-url.txt (gitignored) and passed to Wrangler with
- * `--var BACKEND_URL:<url>`; apps/gateway/wrangler.jsonc keeps a placeholder and is never edited.
+ * `--var BACKEND_URL:<url>`, which overrides the Vercel domain kept in apps/gateway/wrangler.jsonc for
+ * that deploy only (this script never edits the file). Back to Vercel: `npx wrangler deploy --env staging`.
  * Secrets come from var/secrets/staging.render.env (gitignored); nothing is printed.
  * See docs/DEPLOYMENT.md, "Self-hosted backend through a Quick Tunnel".
  */
