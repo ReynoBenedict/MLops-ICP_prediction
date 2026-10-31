@@ -64,8 +64,20 @@ each method is refitted on history ≤ L and asked for h = 1..6 in two input mod
 
 * `observed` – benchmark averages of the target months are the realised values (relevant for
   estimates awaiting publication);
-* `hold_last` – benchmarks beyond L are held at their last value known at L (relevant for genuine
-  future months without a scenario).
+* `hold_last` – benchmarks **and USD/IDR** beyond L are held at their last value known at L (relevant for
+  genuine future months without a scenario).
+
+**As-of rule (no look-ahead).** For every origin, every month L+1 … last target is filled in order
+(scenario → observed, in `observed` mode only → last value held), including the FX feature and the
+months between non-contiguous requested horizons, and intermediate months are predicted recursively.
+Each row records its `fx_source`. Until 2026-10-20 (`forecast_path`, finding D-01) the FX feature was
+never overwritten after the origin, so in `hold_last` mode `ridge_full` used the realised FX of the target
+month, and for non-contiguous horizons the skipped months kept realised benchmark lags. Measured
+effect: production `spread_brent_6m` and `naive_last` unchanged (they do not read FX);
+`ridge_full` hold_last MAE h1–h6 changed from 6.25/9.35/10.76/12.02/12.63/13.51 to
+6.21/9.22/10.62/11.87/12.31/13.15; selection (observed mode) and the leaderboard winner are unchanged.
+Stored artefacts were not retrained. `pipeline/tests/test_backtest_leakage.py` perturbs ICP, benchmarks
+and FX after the origin and requires identical predictions.
 
 Metrics per (method, mode, horizon): MAE, RMSE, bias, sMAPE, **MASE** (scaled by the in-sample
 one-step naive MAE at each origin), directional accuracy vs ICP(L), error quantiles.
@@ -80,14 +92,25 @@ promoted solely because it is more complex").
 **Uncertainty.** Prediction intervals are empirical quantiles (50/80/95 %) of the backtest errors
 per mode and horizon, stored with each model (`evaluation/intervals.json`). An out-of-sample
 coverage check (intervals fitted on the first 60 % of origins, evaluated on the rest) is logged as
-`evaluation/interval_coverage.json`. Scenario-based points use the `observed` table and are flagged
+`evaluation/interval_coverage.json`. The intervals are **empirical, not calibrated**: no wording in the API,
+reports or UI may call them calibrated or guaranteed.
+
+**Evaluation disclosure (since 2026-10-20).** Every accuracy number shown to users states its evaluation
+period (first and last backtest origin), the number of cases n, the horizon and the input mode, and is
+compared with the naive "repeat last month's official ICP" baseline **on exactly the same cases**
+(`icp_ml.evaluation.baseline_by_step`, recomputed from the stored `backtest_predictions.csv`; no
+retraining). Coverage is shown with its own n and check window. A level whose measured coverage is ≥ 0.10
+below nominal is listed in `under_coverage`, and a `coverage_warning` is shown when that happens or when
+the coverage sample has fewer than 20 cases. Model versions without stored predictions get `baseline: null`;
+nothing is estimated. The same disclosure appears per forecast point, in the model card
+(`evaluation_disclosure`, `calibrated: false`), in reports and in the CSV export. Scenario-based points use the `observed` table and are flagged
 `conditional_on_scenario`.
 
 ## 5. Results on the reconciled official series (2026-10-17, local store, model v5)
 
 Official ICP 2019-01..2026-09 (93 months, no gaps after reconciliation), benchmarks to 2026-09;
-69 rolling origins (2020-12..2026-08), MAE in USD/bbl on the common comparison set
-(`evaluation/backtest_metrics_common.csv` of MLflow parent run `f8785e73…`):
+69 rolling origins (2020-12..2026-08) for v5; MAE in USD/bbl on the cases common to all methods (66 at h1,
+64 at h3; `evaluation/backtest_metrics_common.csv` of MLflow parent run `f8785e73…`):
 
 | Method | observed h1 | observed h3 | observed h6 | hold_last h1 | hold_last h3 | hold_last h6 |
 |---|---|---|---|---|---|---|
@@ -106,6 +129,22 @@ selection score 0.93 over h1–h3); the previously deployed gradient-boosting fa
 and degrades with horizon. For genuinely future months with no benchmark view, **no method beats
 persistence** (all ≈ 6.1 at h1, within the 10 % gate); the product therefore presents future months
 as conditional on the benchmark assumption and shows the `hold_last` error band.
+
+Figures shown in the product (added 2026-10-27, corrected the same day): the landing page, the
+methodology page and the workspace show the **registered production model v5's own backtest** on its
+69 origins (2020-12..2026-08): observed h1 0.84 (0.8376), hold_last h1 6.11 (6.1072), and "repeat last
+month's ICP" on **the same 69 cases**: 6.06 (6.0567; the same in both situations, because persistence
+ignores the benchmarks). That last figure is not a registry metric: the backend recomputes it from v5's
+stored backtest predictions (`icp_ml.evaluation.baseline_by_step`) and returns it with every forecast
+point's evaluation (`evaluation.baseline`, n = 69); the forecast page's sentences and bars use it. The
+registry metric `baseline_naive_last_mae` = 6.09 (6.0938), and `baseline_naive_hold_last_h1_mae`
+likewise, is naive_last on the **66 cases common to all candidate methods** (the table above, where
+spread_brent_6m is 0.85 / 6.12 on those 66 cases); naive_last's own run has 68 cases (6.0665). The
+operator model page shows the registry metrics as stored, so it shows 6.09 next to v5's 69-case 0.84.
+The server-written insight on hold_last accuracy (`insights/rules.py`, `model_evaluation`) compares
+the model and persistence on the same cases (6.11 vs 6.06) whenever the stored predictions are
+available, and falls back to the registry figures only without them. The landing states the date of its figures and that they do not update automatically when the
+method is re-evaluated.
 
 Out-of-sample 80 % interval coverage for v5 (intervals fitted on the first 60 % of origins, tested on
 the rest): observed h1 0.96, h2–h6 1.00 (conservative); hold_last h1 0.86, h2 0.82, h3 0.65, h4 0.76,
@@ -135,8 +174,15 @@ kind, prediction, intervals by level, interval basis, benchmark inputs with sour
 (`observed | scenario | assumed_hold_last`) and whether the model uses them, recursion flag,
 rupiah equivalent (prediction × USD/IDR with its own source label). The forecast record stores the
 origin, issue date, method, model version, scenario, dataset versions of every input, and the
-workflow (`api`, `scenario`, `report`, `system`). The *system* forecast (shown publicly) is
+workflow (`api`, `scenario`, `report`, `system`). The *system* forecast (shown to signed-in members, clipped to their
+plan horizon; the public snapshot only says since when one is available, without values) is
 republished after every data or model change.
+
+## 7a. Insight rules
+
+The insight engine and its rule catalogue (definitions, thresholds, importance, consistency
+rules) are documented in [INSIGHT_ENGINE.md](INSIGHT_ENGINE.md); the thresholds in
+`backend/icp_api/insights/rules.py` are listed there.
 
 ## 8. Known limitations
 
@@ -145,4 +191,10 @@ republished after every data or model change.
   formula inputs (Dated Brent, OPEC basket, etc.) are not public as a monthly series.
 * No forward curve or futures-based benchmark expectations are used (licensing); future months
   therefore rely on user scenarios.
-* Intervals are empirical and unconditional on volatility regimes.
+* Intervals are empirical and unconditional on volatility regimes; the out-of-sample coverage sample per
+  horizon is small (≈ 27 cases), which the coverage warning states.
+* Benchmark and FX values are as currently published, not point-in-time vintages; revisions are rare and
+  not modelled.
+* The live forecast path fills FX like the backtest, but `make_forecast` keeps the rupiah-only meaning of an FX
+  scenario; only `ridge_full` reads FX. If an FX-reading method is ever promoted, `input_usage` must mark
+  `usd_idr` as used.

@@ -17,7 +17,7 @@
 | local `mlflow.db` (empty: Default experiment only) | removed 2026-10-17 (no runs or models; MLflow recreates it; the real history is in `legacy/mlflow-history/`) |
 | MLflow history in Docker volumes `mlops-icp_prediction_old_pgdata` / `_mlflow-artifacts` | Exported read-only to `legacy/mlflow-history/`. The volumes themselves are untouched. |
 | `.github/workflows/*.yml` (previous versions, including uncommitted edits) | `legacy/ci/`. New `ci.yml` and `continuous-training.yml` are in `.github/workflows/`. |
-| `README.md` (course milestones LK-02 … LK-12) | `docs/history/course-milestones-README.md` |
+| `README.md` (course milestones LK-02 … LK-12) | [`docs/archive/course-milestones-README.md`](archive/course-milestones-README.md) |
 | `requirements*.txt`, `pytest.ini`, `pyrightconfig.json`, `conftest.py`, `docker-compose.yaml` | `pyproject.toml` (deps, ruff, mypy, pytest), `requirements/constraints.txt`, `docker-compose.yml` |
 
 `data/` (raw PDFs, `dataset.csv`, `wti.csv`, DVC metadata) and `notebooks/` are unchanged.

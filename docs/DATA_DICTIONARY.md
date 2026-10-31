@@ -42,6 +42,7 @@ Derived (never stored as a dataset): `icp_idr = icp_price × usd_idr` (rupiah pe
 | `conflict` | Official documents disagree; month excluded until resolved and documented |
 | `legacy_unverified` | Value inherited from the repository CSV without a document (being replaced) |
 | `rejected` | Superseded legacy value (kept for audit) |
+| `dissent` | Another reading of the same month that differs from the value used (e.g. an announcement typo outvoted by two documents); shown as "Sumber berbeda" and never used to classify the month (since v6) |
 
 ## 4. Features (`pipeline/icp_ml/features.py`, `FEATURE_COLUMNS`)
 
@@ -57,7 +58,7 @@ Derived (never stored as a dataset): `icp_idr = icp_price × usd_idr` (rupiah pe
 
 Rows are only complete when every required feature exists; gaps are never bridged.
 
-## 5. Application tables (metadata store, migrations 0001–0004)
+## 5. Application tables (metadata store, migrations 0001–0006)
 
 | Table | Purpose |
 |---|---|
@@ -71,7 +72,9 @@ Rows are only complete when every required feature exists; gaps are never bridge
 | `saved_scenarios` | Named scenario inputs per organisation |
 | `alert_rules`, `alert_events` | Alert configuration and de-duplicated in-app notifications |
 | `report_runs` | Generated reports (object keys per format, parameters, summary) |
-| `usage_events` | Usage accounting per organisation/user/API key |
+| `usage_events` | Usage accounting per organisation/user/API key; `api.request` rows count against the monthly API-key quota |
+| `plan_change_requests` (0005) | Plan-change requests (pending/approved/declined/withdrawn); at most one pending per organisation |
+| `deletion_requests` (0006) | Account/organisation deletion requests (pending/executed/declined/withdrawn); at most one pending per organisation, scope and account. 0006 also adds `organizations.deleted_at` and `users.deleted_at` |
 
 ## 6. Forecast record (`forecast_runs.result_json`, API `ForecastResult`)
 
@@ -84,4 +87,11 @@ points[]: period, step, kind, prediction (USD/bbl), intervals{"0.5"|"0.8"|"0.95"
           benchmarks{brent,dubai,wti: {value, source, used_by_model}}, recursive,
           prediction_idr, fx_rate, fx_source
 warnings[], interval_levels[], interval_note
+
+Added at read time (not stored; API and CSV export only):
+points[].evaluation{mode, horizon, n, mae, mase, dir_acc, coverage, coverage_n, origin_start, origin_end,
+          baseline{method=naive_last, label, mae, n}, beats_baseline, coverage_period, under_coverage[],
+          coverage_warning, summary}, points[].actual, points[].kind_now
+input_usage[]{…, effect: used|ignored|rupiah_only}, ignored_inputs[], notes{…, coverage_warning, ignored_inputs},
+plan_clip (members)
 ```

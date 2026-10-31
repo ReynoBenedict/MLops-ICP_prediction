@@ -1,4 +1,4 @@
-# Commercial readiness assessment (2026-10-16)
+# Commercial readiness assessment (2026-10-16, updated 2026-10-20)
 
 Status vocabulary: **Implemented & tested** · **Implemented, awaiting credentials/decision** ·
 **Partially implemented** · **Not implemented** · **Blocked**.
@@ -19,15 +19,18 @@ official decree.
 | Self-service registration (trial org + owner), login, sessions, password change | Implemented & tested | `PUBLIC_REGISTRATION_ENABLED` toggles sign-up |
 | Organisation membership, roles (viewer/analyst/admin/owner), seat limits | Implemented & tested | Invitations hand over a one-time password (no e-mail service) |
 | Plans & entitlements enforced server-side (horizon, scenarios, reports, alerts, API access, seats) | Implemented & tested | Plans in `entitlements.py`; operator sets plan via `/admin/organizations/{id}/plan` |
-| API access plans (org API keys, usage accounting) | Implemented & tested | Monthly usage per action in `usage_events`; hard monthly quota enforcement **partially implemented** (counted, not blocked) |
-| Billing / payment provider | Not implemented | Interface point: `AccountService.set_plan`; a provider (e.g. Stripe/Xendit/Midtrans) would call it from a verified webhook. Requires merchant account, tax/invoice decisions (PPN), and test credentials – none available |
-| Usage limits / rate limits | Implemented & tested (rate limits); quotas partial | Edge + backend rate limits; monthly API quota not enforced |
+| API access plans (org API keys, usage accounting, monthly quota) | Implemented & tested | Monthly usage per action in `usage_events`; API-key requests above the plan's `api_requests_per_month` get `429 QUOTA_EXCEEDED` until the next UTC month, with quota headers (since 2026-10-20) |
+| Plan change requests | Implemented & tested | Owners/admins request a plan in the app; operators approve or decline in the operations console (approval uses the audited `set_plan` path). No payment is taken; migration `0005` must be applied to D1 on deployment |
+| Billing / payment provider | Partially implemented (sandbox only, disabled) | Midtrans Snap sandbox adapter with order state machine, signature/amount/environment-checked idempotent webhook and a dry-run reconciliation CLI, behind `BILLING_ENABLED=false`; production refused, no prices, no automatic plan activation, no customer UI. Live use needs the owner gates in [BILLING.md](BILLING.md#activation-gates-all-owner-decisions-none-can-be-inferred-from-the-code) (merchant account/KYC, prices, PPN, refund policy, production keys, always-on host). Comparison: [audits/BILLING_PROVIDER_COMPARISON.md](audits/BILLING_PROVIDER_COMPARISON.md) |
+| Transactional e-mail | Implemented, awaiting credentials/decision (disabled) | Reset, verification and invitation token service exists behind `EMAIL_ENABLED=false` (enforced: `true` is refused until a provider is integrated); needs a provider, a sending domain and SPF/DKIM/DMARC (OWNER_DECISIONS §8) |
+| Usage limits / rate limits | Implemented & tested | Edge + backend rate limits (single backend instance enforced), sign-in throttle per (e-mail, IP) with an account ceiling, monthly API-key quota |
 | Scenario analysis, insights, reports (PDF/XLSX/CSV), alerts (in-app) | Implemented & tested | E-mail/webhook delivery of alerts **not implemented** |
 | Data source licensing | Implemented (documented) | See `DATA_SOURCES.md`: ESDM (government publication, attribution), EIA (public domain), World Bank (CC BY 4.0, dataset page to confirm), BI JISDOR (public release, attribution). Redistribution of derived monthly values is permitted; raw daily BI data is not resold |
-| Visual assets licensing | Implemented (documented) | `ASSET_INVENTORY.md` – CC BY / CC BY-SA photos from Wikimedia Commons with attribution; original SVGs |
-| Privacy policy, terms of use | Implemented (in-app pages, Indonesian; summary in `LEGAL_NOTICES.md`) | Legal review by counsel still required before paid launch; legal entity to be named |
-| Support & incident documentation | Partially implemented | `OPERATIONS.md` covers runbooks; no ticketing/SLA definitions |
-| Deployment | Staging live at zero cost (Cloudflare Worker + D1 + KV, backend container behind a Quick Tunnel, bundle model) | Not an always-on host: the API is offline while the operator machine is off. See `HOSTING_REPORT_2026-10.md` |
+| Visual assets licensing | Implemented & tested | `ASSET_INVENTORY.md` – only material that needs no credit is served: original SVGs and screenshots, two CC0 photographs from Wikimedia Commons; the CC BY / CC BY-SA photos are kept, not served. `npm run asset-licences` (CI) checks every image file against the licence register |
+| Privacy policy, terms of use | Implemented (in-app pages, Indonesian; status and owner inputs in [LEGAL_AND_PRIVACY.md](LEGAL_AND_PRIVACY.md)) | Legal review by counsel still required before paid launch; legal entity to be named |
+| Support & incident documentation | Partially implemented | `OPERATIONS.md` covers runbooks, monitoring and a minimal incident procedure; no ticketing, on-call or SLA |
+| Data export and deletion requests | Implemented & tested | Owner self-service ZIP export; account/organisation deletion requests executed by an operator (anonymisation, audited, no hard delete). No grace period and no owner transfer; retention periods are an owner decision |
+| Deployment | Staging live at zero cost (Cloudflare Worker + D1 + KV, backend container behind a Quick Tunnel, bundle model) | Not an always-on host: the API is offline while the operator machine is off. See [DEPLOYMENT.md](DEPLOYMENT.md) |
 | Continuous training workflow | Implemented, awaiting credentials | GitHub Actions calls the deployed job API; requires `ICP_API_BASE_URL`/`ICP_ADMIN_TOKEN` |
 
 ## External account requirements (itemised)

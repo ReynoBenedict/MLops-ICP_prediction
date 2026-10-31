@@ -6,9 +6,68 @@
 
 1. **Decrees** (Keputusan Menteri ESDM, PDF) from the official archive `https://www.migas.esdm.go.id/post/harga-minyak-mentah` - one per month 2019-01..2026-09. Text-layer PDFs are parsed directly; scanned PDFs (2019-2021) are OCR'd (Tesseract, up to 6 pages). The operative clause read is "Harga rata-rata Minyak Mentah Indonesia untuk bulan <M> <Y> ditetapkan sebesar US$ N/barrel".
 2. **Monthly announcements** (HTML articles on `migas.esdm.go.id`), which state the month's value, the decree number and the previous month's value.
-3. **Reconciliation**: `verified` = two independent official observations agree (decree text + announcement, or announcement + the next month's back-reference); `single_source` = one observation; `conflict` = official observations disagree; `missing` = no observation.
+3. **Reconciliation**: `verified` = at least two observations agree with at least one strong official source (decree text + announcement, announcement + the next month's back-reference, decree OCR + back-reference; the legacy CSV can also be the second, weak observation), **or** a machine-readable decree text layer alone; `single_source` = one observation; `conflict` = official observations disagree; `missing` = no observation.
+
+   Because `verified` covers several situations, the product never shows the bare word. `GET /data/verification` reports what actually backs each month (`basis`): `two_documents` (two or more distinct ESDM documents state the value), `decree_text` (decree text layer, a second document is not necessarily recorded), `document_plus_legacy` (one ESDM document + the legacy archive), `single_document`, `ocr_single` (`machine_extracted`), `conflict`, `no_evidence` (value in the dataset but no evidence row recorded). Benchmarks and FX are `provider_published` (EIA, World Bank, Bank Indonesia data as retrieved), never ESDM-verified.
+
+   Evidence persistence: until 2026-10-19 evidence rows were stored only for months whose value was added or changed by an ingestion, so months whose official value equalled the legacy value had none (75 of 93 in the local store). Ingestion now records evidence for every month idempotently, and `icp-api backfill-evidence [--dry-run]` records the missing rows from the stored reconciliation state (additive; values are never changed; skips observations that disagree with the active value). On a copy of the local store it inserted 194 rows and produced 84 `two_documents`, 2 `decree_text`, 6 `single_document`, 1 `ocr_single` months.
+
+   **Dissenting readings (since 2026-10-20).** A reading of a month that differs from the value used is
+   stored with `verification_status = dissent` and is never used to classify the month (`classify_icp_month`
+   ignores `dissent` and `rejected` rows). `GET /data/verification` lists such readings per month
+   (`dissent[]`: value, kind, reference, a neutral reason, and the source URL for operators only) with a
+   "Sumber berbeda" label and a `dissent_months` count; `/data/evidence` relabels differing ICP readings as
+   `dissent`; the provenance report has a "Sumber berbeda" column. Previously `backfill-evidence` skipped these
+   readings, the 5 superseded legacy CSV values were invisible, and the 2021-10 back-reference 81.52 was
+   stored as `verified` although it differs (ingestion stored every reading with the month's status).
+   `icp-api backfill-dissent [--dry-run]` adds the missing readings (additive, idempotent) and
+   `icp-api verify-provenance` (read-only) checks month by month that the value, label and evidence agree.
+   On the local store (after a backup) the backfill inserted 4 readings: 2019-04 announcement 63.81
+   (outvoted 2:1 by the decree text and the next month's back-reference, 68.31), 2020-02 back-reference
+   57.18, 2021-10 back-reference 81.52, 2021-11 back-reference 80.15; 9 differing readings belong to months
+   outside the active range (2016-11, 2018-10..12) and are only counted. `verify-provenance` then reports
+   93 months, 0 disagreements, 0 gaps and 7 months with a dissenting reading (the 4 above plus the
+   superseded legacy values of 2022-01, 2022-03 and 2023-07).
 4. **Acceptance into the dataset** (bounded to the archive range, 2019-01 onward): `verified`; `single_source` when the observation is an announcement (HTML text); and OCR-only decrees whose operative clause names the archive month **and** whose decree number was read (stored as `machine_extracted`, flagged until a second source confirms). Weak sources (next month's back-reference, the legacy CSV) corroborate but never create conflicts; when two or more sources agree against one dissenting announcement, the majority stands and the dissent is recorded. Remaining conflicts block the month.
-5. **Source defects found**: the archive PDF linked for 2023-07 is a different document (a Dec-2022 amendment letter), so July 2023 rests on its announcement; the archive links for 2024-07..2024-11 return HTTP 404, so those months rest on announcements and back-references; the April-2019 announcement states US$63.81 while the decree text and the May-2019 back-reference state US$68.31 (majority rule); the 2020-10 decree download failed repeatedly (server side) and the month rests on its announcement; the September-2026 decree text carries number 276.K/MG.03/MEM.M/2026 while the announcement cites 395.K/MG.03/MEM.M/2026 - the value (112.81) agrees, the numbering difference is recorded, not resolved.
+5. **Source defects found**: the archive PDF linked for 2023-07 is a different document (a Dec-2022 amendment letter), so July 2023 rests on its announcement; the archive links for 2024-07..2024-11 return HTTP 404, so those months rest on announcements and back-references; the April-2019 announcement states US$63.81 while the decree text and the May-2019 back-reference state US$68.31 (majority rule); the 2020-10 decree download failed repeatedly (server side) and the month rests on its announcement; the decree numbers recorded before 2026-10-25 for 26 text-layer decrees were wrong (a regulation cited in the considerations, not the decree's own number) - see [Decree numbers](#decree-numbers-corrected-2026-10-25).
+
+## Decree numbers (corrected 2026-10-25)
+
+Until 2026-10-25 the decree parser recorded the first `Nomor <n>.K/...` in a decree's text as its number.
+When the decree's own number is not in the text layer, that first match is a regulation cited in the
+considerations (Menimbang/Mengingat) - the ICP formula decree in force - so one number was attached to
+many months. The documents themselves (cached copies, checksums equal to the stored evidence) show:
+
+| Months | Recorded before | What the document shows | Recorded now |
+|---|---|---|---|
+| 2026-08 | 276.K/MG.03/MEM.M/2026 | Title block `NOMOR 3 5 2 . K/MG. 03/MEM.M/2026 TENTANG HARGA MINYAK MENTAH INDONESIA BULAN AGUSTUS 2026` (digits spaced out in the text layer, which the old pattern could not read) and annex header `NOMOR : 352.K/MG.03/MEM.M/2026, TANGGAL : 8 September 2026`; 276.K is cited in Menimbang (c) and Mengingat (11) as *"Keputusan Menteri ... Nomor 276.K/MG.03/MEM.M/2026 tanggal 30 Juni 2026 tentang Formula Harga Minyak Mentah Indonesia"* | 352.K/MG.03/MEM.M/2026 (the August announcement cites the same number) |
+| 2026-09 | 276.K/MG.03/MEM.M/2026 | Page 1 has no text layer (scan); annex header `NOMOR : 395.K/MG.03/MEM.M/2026, TANGGAL : 7 Oktober 2026 ... BULAN SEPTEMBER 2026`; signed 7 October 2026; 276.K is the cited formula decree (Mengingat 11) | 395.K/MG.03/MEM.M/2026 (the September announcement cites the same number) |
+| 2022-04 .. 2024-06 (23 text-layer decrees) | 61.K/MG.01/MEM.M/2022 | Decrees signed electronically by the Director General of Oil and Gas on behalf of the Minister; the `NOMOR :` and `TANGGAL :` fields are empty in the text layer. 61.K/MG.01/MEM.M/2022 is the formula decree cited in Mengingat (9) (with its amendments 380.K/MG.01/MEM.M/2023 and 63.K/MG.01/MEM.M/2024) | none (the number is not readable from the decree; the month's announcement, where one exists, still records the number it cites, e.g. 48.K/MG.03/DJM/2022 for April 2022) |
+| 2020-03 | 71K/12/MEM/2020 | No title block in the text layer (only a stamped `79. K/12/MEM/2020` on page 1 and an annex header reading `79.K/MEM/2020`, which disagree); 71 K/12/MEM/2020 is the formula decree cited in Mengingat (8) | none |
+
+The 47 decrees read by OCR (23 of 2019-2021, 2022-01..2022-03, 2022-08 and 2024-12..2026-07) were re-read
+with the corrected parser and give the numbers already recorded; they did not change. The corrected parser (`icp_ml.sources.esdm_icp.decree_own_number`)
+accepts a number only from the decree's title block (or, when the title block is unreadable, the annex
+header) naming the same month as the operative clause, and returns none when such blocks disagree.
+
+One recorded number is deliberately left as it is: `decrees.json` keeps `305.K/MG.01/MEM.M/2022` for the
+document linked as July 2023 (`2023-07_655aaac6.pdf`, sha256 `655aaac6…`, method `none`, no value). That
+document is not a monthly ICP decree: it is the cover letter `B-497/MG.01/SJH.1/2022` of 29 December 2022 with
+a copy of *"Keputusan Menteri ESDM Nomor 305.K/MG.01/MEM.M/2022 tanggal 27 Desember 2022 tentang Perubahan
+Kedua atas Keputusan Menteri ESDM Nomor 61.K/MG.01/MEM.M/2022 tentang Formula Harga Minyak Mentah Indonesia"*
+(title block `NOMOR : 305.K/MG.01/MEM.M/2022 TENTANG PERUBAHAN KEDUA ATAS ...`, signed 27 December 2022). So
+305.K is that document's own number; the corrected parser returns none for it only because it accepts numbers
+from monthly ICP title blocks. The record has no value, is not evidence for any month (not in
+`source_evidence` or `reconciliation.json`; July 2023 rests on its announcement) and is not shown anywhere;
+`recheck_decree_numbers` skips value-less records on purpose.
+
+Correction applied with `icp-api repair-decree-references --apply` after `icp-api backup`
+(`var/backups/20261025T075817Z`, which also holds copies of `decrees.json`, `reconciliation.json` and
+`reconciliation.csv`): 28 `source_evidence.reference` cells (26 documents; 2026-08 and 2026-09 each had
+two retrievals) and the same 26 numbers in `var/sources/esdm/decrees.json` and `reconciliation.json`. No
+value, status, basis or dataset version changed (`icp-api verify-provenance`: 93 months, 0 disagreements).
+The public snapshot additionally withholds any decree number that is attached to more than one month or
+contradicted by the month's announcement.
 
 ## Coverage summary
 
@@ -49,8 +108,8 @@
 | 2026-05 | 106.56 | verified | announcement, announcement_backref, decree_ocr | 228.K/MG.03/MEM.M/2026 |
 | 2026-06 | 83.45 | verified | announcement, announcement_backref, decree_ocr | 282.K/MG.03/MEM.M/2026 |
 | 2026-07 | 81.68 | verified | announcement, announcement_backref, decree_ocr | 319.K/MG.03/MEM.M/2026 |
-| 2026-08 | 89.43 | verified | announcement, announcement_backref, decree_text | 276.K/MG.03/MEM.M/2026 |
-| 2026-09 | 112.81 | verified | announcement, decree_text | 276.K/MG.03/MEM.M/2026 |
+| 2026-08 | 89.43 | verified | announcement, announcement_backref, decree_text | 352.K/MG.03/MEM.M/2026 |
+| 2026-09 | 112.81 | verified | announcement, decree_text | 395.K/MG.03/MEM.M/2026 |
 
 ## Unresolved
 
@@ -94,7 +153,7 @@ None.
 | 2019-12 | 67.18 | verified | announcement, decree_ocr | 4K/12/MEM/2020 | 67.18 | +0.00 |
 | 2020-01 | 65.38 | verified | announcement, announcement_backref, decree_ocr | 38K/12/MEM/2020 | 65.38 | +0.00 |
 | 2020-02 | 56.61 | verified | announcement, announcement_backref, decree_text | 68.K/12/MEM/2020 | 56.61 | +0.00 |
-| 2020-03 | 34.23 | verified | announcement, decree_text | 71K/12/MEM/2020 | 34.23 | +0.00 |
+| 2020-03 | 34.23 | verified | announcement, decree_text |  | 34.23 | +0.00 |
 | 2020-04 | 20.66 | verified | decree_text | 95K/12/MEM/2020 | 20.66 | +0.00 |
 | 2020-05 | 25.67 | single_source | decree_ocr | 107.K/12/MEM/2020 | 25.67 | +0.00 |
 | 2020-06 | 36.68 | verified | announcement, announcement_backref, decree_ocr | 134K/12/MEM/2020 | 36.68 | +0.00 |
@@ -121,7 +180,7 @@ None.
 | 2022-03 | 113.50 | verified | announcement, decree_ocr | 33.K/MG.03/DJM/2022 | 99.12 | +14.38 |
 | 2022-04 | 102.51 | verified | announcement, announcement_backref, decree_text | 48.K/MG.03/DJM/2022 | 102.51 | +0.00 |
 | 2022-05 | 109.61 | verified | announcement, announcement_backref, decree_text | 54.K/MG.03/DJM/2022 | 109.61 | +0.00 |
-| 2022-06 | 117.62 | verified | announcement, decree_text | 61.K/MG.01/MEM.M/2022 | 117.62 | +0.00 |
+| 2022-06 | 117.62 | verified | announcement, decree_text | 75.K/MG.03/DJM/2022 | 117.62 | +0.00 |
 | 2022-07 | 106.73 | verified | announcement, announcement_backref, decree_text | 111.K/MG.03/DJM/2022 | 106.73 | +0.00 |
 | 2022-08 | 94.17 | verified | announcement, announcement_backref, decree_ocr | 129.K/MG.03/DJM/2022 | 94.17 | +0.00 |
 | 2022-09 | 86.07 | verified | announcement, announcement_backref, decree_text | 140.K/MG.03/DJM/2022 | 86.07 | +0.00 |
@@ -137,11 +196,11 @@ None.
 | 2023-07 | 75.06 | single_source | announcement | 272.K/MG.03/DJM/2023 | 80.96 | -5.90 |
 | 2023-08 | 82.59 | verified | announcement, decree_text | 324.K/MG.03/DJM/2023 | 82.59 | +0.00 |
 | 2023-09 | 90.17 | verified | announcement, announcement_backref, decree_text | 341.K/MG.03/DJM/2023 | 90.17 | +0.00 |
-| 2023-10 | 86.72 | verified | announcement, decree_text | 61.K/MG.01/MEM.M/2022 | 86.72 | +0.00 |
-| 2023-11 | 79.63 | verified | announcement, decree_text | 61.K/MG.01/MEM.M/2022 | 79.63 | +0.00 |
-| 2023-12 | 75.51 | verified | decree_text | 61.K/MG.01/MEM.M/2022 | 75.51 | +0.00 |
-| 2024-01 | 77.12 | verified | announcement_backref, decree_text | 61.K/MG.01/MEM.M/2022 | 77.12 | +0.00 |
-| 2024-02 | 80.09 | verified | announcement, announcement_backref, decree_text | 61.K/MG.01/MEM.M/2022 | 80.09 | +0.00 |
+| 2023-10 | 86.72 | verified | announcement, decree_text |  | 86.72 | +0.00 |
+| 2023-11 | 79.63 | verified | announcement, decree_text |  | 79.63 | +0.00 |
+| 2023-12 | 75.51 | verified | decree_text |  | 75.51 | +0.00 |
+| 2024-01 | 77.12 | verified | announcement_backref, decree_text |  | 77.12 | +0.00 |
+| 2024-02 | 80.09 | verified | announcement, announcement_backref, decree_text |  | 80.09 | +0.00 |
 | 2024-03 | 83.78 | verified | announcement, announcement_backref, decree_text | 213.K/MG.03/DJM/2024 | 83.78 | +0.00 |
 | 2024-04 | 87.61 | verified | announcement, decree_text | 238.K/MG.03/DJM/2024 | 87.61 | +0.00 |
 | 2024-05 | 79.78 | verified | announcement, announcement_backref, decree_text | 261.K/MG.03/DJM/2024 | 79.78 | +0.00 |
@@ -171,10 +230,10 @@ None.
 | 2026-05 | 106.56 | verified | announcement, announcement_backref, decree_ocr | 228.K/MG.03/MEM.M/2026 | - | - |
 | 2026-06 | 83.45 | verified | announcement, announcement_backref, decree_ocr | 282.K/MG.03/MEM.M/2026 | - | - |
 | 2026-07 | 81.68 | verified | announcement, announcement_backref, decree_ocr | 319.K/MG.03/MEM.M/2026 | - | - |
-| 2026-08 | 89.43 | verified | announcement, announcement_backref, decree_text | 276.K/MG.03/MEM.M/2026 | - | - |
-| 2026-09 | 112.81 | verified | announcement, decree_text | 276.K/MG.03/MEM.M/2026 | - | - |
+| 2026-08 | 89.43 | verified | announcement, announcement_backref, decree_text | 352.K/MG.03/MEM.M/2026 | - | - |
+| 2026-09 | 112.81 | verified | announcement, decree_text | 395.K/MG.03/MEM.M/2026 | - | - |
 
 ## Acceptance check
 
-- September 2026: official value 112.81 (verified; evidence: announcement, decree_text; decree numbers read from the documents: 276.K/MG.03/MEM.M/2026, 395.K/MG.03/MEM.M/2026). Independently checked against the announcement article `/post/Tensi-Geopolitik-Memanas-ICP-September-2026-Melonjak-ke-Angka-US-112-81-per-Barel` (published 2026-10-13) and the archive decree `Kepmen_ICP_Bulan_September_2026.pdf` (text layer).
+- September 2026: official value 112.81 (verified; evidence: announcement, decree_text; decree number 395.K/MG.03/MEM.M/2026 of 7 October 2026, read from the decree's annex header and cited by the announcement). Independently checked against the announcement article `/post/Tensi-Geopolitik-Memanas-ICP-September-2026-Melonjak-ke-Angka-US-112-81-per-Barel` (published 2026-10-13) and the archive decree `Kepmen_ICP_Bulan_September_2026.pdf` (text layer).
 - Unverified legacy values are superseded in the metadata store (evidence `rejected`), never deleted; `data/raw/dataset.csv` is untouched.

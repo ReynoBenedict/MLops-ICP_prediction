@@ -52,7 +52,12 @@ Source of truth: `infra/cloudflare/d1/migrations/*.sql`. Tables:
 - **`saved_scenarios`, `alert_rules`, `alert_events`, `report_runs`, `usage_events`** (0004):
   tenant-scoped product data; `alert_events` is unique per `(rule_id, dedupe_key)`; `report_runs`
   keeps one object key per generated format.
-- **`app_schema`**: one row per applied migration.
+- **`plan_change_requests`** (0005): customer plan-change requests and their resolution; a partial unique index
+  allows one pending request per organisation.
+- **`deletion_requests`** (0006): account/organisation deletion requests and their resolution; one pending
+  request per (organisation, scope, account). 0006 also adds `organizations.deleted_at` and `users.deleted_at`;
+  executing a request anonymises rows in place and never deletes them.
+- **`app_schema`**: one row per applied migration (current schema version: 6).
 
 Rules for new migrations:
 - Name them `NNNN_description.sql`, numbered contiguously, using SQLite syntax that D1 supports.
@@ -70,6 +75,13 @@ Rules for new migrations:
 | `models/` | `models/production.json` (pointer), `models/bundles/index.json`, `models/bundles/<version>/{model.skops, meta.json, intervals.json, interval_coverage.json, model_card.md, backtest_metrics.csv, backtest_predictions.csv}` | bundle files write-once; the two pointer files are overwritten by `icp-api export-model` | keep (the operator's MLflow store is the primary copy) |
 | `mlflow/` | `mlflow/<experiment>/<run>/artifacts/...`, `mlflow/<experiment>/models/m-…/` | written by MLflow (paid topology only) | keep artifacts of registered versions; unregistered candidate runs may be pruned after 90 days via `mlflow gc` (manual) |
 
+- **Retention in the zero-cost topology (Workers KV).** KV has no lifecycle rules, so the Worker applies the
+  same policy as the R2 rules above: it sets `expirationTtl` on KV PUTs under `exports/forecasts/` (180 days)
+  and `exports/reports/` (365 days) (`EXPORT_TTL_SECONDS` in `apps/gateway/src/index.ts`). Every other prefix
+  (datasets, models) never expires. The TTL applies only to objects written after this Worker version is
+  deployed (2026-10-20 change); exports written earlier keep no expiry and can be pruned manually
+  (`wrangler kv key list --prefix exports/` + delete) after a database backup. KV free plan: 1 GB storage,
+  1,000 writes/day.
 - **Write-once enforcement.** Locally: an atomic hard-link create. On R2: `PutObject` with
   `If-None-Match: *`. Through the Worker/KV: `PUT` with `If-None-Match: *`, checked by the Worker
   before writing; KV is eventually consistent, so this is best-effort, which is safe because every
@@ -80,11 +92,20 @@ Rules for new migrations:
 - **Integrity.** Dataset reads verify SHA-256 against the metadata row and fail closed with
   `DATASET_INTEGRITY_ERROR`.
 - **Deletion.** The application never deletes objects. Retention runs only through R2 lifecycle
-  rules or an explicit operator action.
+  rules, the equivalent KV `expirationTtl` on export objects, or an explicit operator action. Executing a deletion request anonymises database rows; report and
+  forecast-export files already generated stay unchanged (they can contain scenario names, never credentials). Organisation data exports are built in memory
+  and never written to the object store.
+- **Audit retention.** `icp-api audit-prune [--older-than-days N] [--apply]` deletes only `audit_events` rows
+  older than the period (`AUDIT_RETENTION_DAYS`, default 0 = keep everything). It is a dry run unless
+  `--apply` is given, is never scheduled, and records its own `audit.prune` event.
 - **Downloads.**
   - Exports and dataset versions are streamed by the backend through the gateway. No R2 credentials
     or presigned URLs reach the browser.
-  - The Worker caches anonymous export downloads at the edge, because they are immutable.
+  - Exports are tenant data: the backend sends `Cache-Control: private, no-store` and the Worker
+    never edge-caches them. The only API answers the Worker keeps are last-known-good copies of the two
+    anonymous public answers (`GET /public/market-snapshot`, `GET /plans`), in the `OBJECTS` KV namespace
+    under the reserved `edge-cache/` prefix, which the data plane refuses (contract C2,
+    [OPERATIONS.md](OPERATIONS.md#stale-public-data-last-known-good-copies-at-the-gateway)).
 
 ## Credentials
 

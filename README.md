@@ -29,6 +29,10 @@ This is a **portfolio project with a public staging deployment**, not a producti
 - There is no uptime guarantee, no monitoring with alerting and no load testing.
 - Payment, e-mail delivery and several account features are not implemented
   (see [Known limitations](#known-limitations)).
+- From 2026-10-23 to 2026-10-27 the product was transformed locally: a design system, a public site built
+  around the latest official ICP and its source documents, a redesigned workspace, reliability, security,
+  performance and accessibility work. Nothing of it is deployed yet. Report:
+  [docs/PRODUCT_TRANSFORMATION_2026-10.md](docs/PRODUCT_TRANSFORMATION_2026-10.md).
 
 ## Live demo
 
@@ -41,7 +45,11 @@ trial organisation from the landing page.
 
 The staging deployment was last updated on 2026-10-17 and does not yet include the access model
 described below (public website, customer workspace and operations console with server-side
-enforcement); it takes effect there with the next deployment.
+enforcement), the v6 security and privacy changes (export, deletion requests, quotas, throttle, headers)
+or the 2026-10 product transformation; they take effect there with the next deployment, which also needs
+migrations 0005 to 0008 applied to D1 (staging is at schema 4) and the decree-reference repair described in
+the transformation report. Until then the staging landing shows loading placeholders indefinitely whenever the backend is
+offline.
 
 When the backend was online on 2026-10-17, the following passed against the public URL: the
 repository smoke test (11 of 11 checks) and an end-to-end feature check (18 of 18: registration,
@@ -53,13 +61,14 @@ sign-out).
 
 | Area | What it does |
 |---|---|
+| Public site | The latest official ICP with its ESDM decree and announcement, change from the previous month, Brent and the rupiah equivalent, a 24-month ICP vs Brent chart with a table view; the forecast's existence and issue date without its values; a tour of the workspace with real screenshots; the measured forecast error next to "repeat last month"; plans; a stored public copy, clearly labelled, when the backend is offline |
 | Market summary | Latest official ICP, monthly and yearly change, Brent/Dubai/WTI, JISDOR USD/IDR, rupiah equivalent, data freshness |
 | Price exploration | ICP vs a chosen benchmark over 1, 3, 5 years or all, ICP-benchmark spread, rupiah view, missing months shown as gaps, CSV download, per-month verification status |
-| Forecasts | 1-6 month horizon from the latest official month; "estimate awaiting publication" vs "future forecast" labels; empirical 50/80/95 % ranges; per-month input assumptions with their source; forecast history and CSV export |
+| Forecasts | 1-6 month horizon from the latest official month; "estimate awaiting publication" vs "future forecast" labels; empirical 50/80/95 % ranges; per-month input assumptions with their source and a flag for assumptions the active method ignores; per-month accuracy stated with its test period, number of cases and the "repeat last month" baseline on the same cases, plus a warning when measured coverage falls short; forecast history and CSV export |
 | Scenarios | Saved benchmark/FX assumptions per month, compared side by side (up to four) against a no-assumption baseline |
-| Insights | Rule-based observations (material changes, unusual spreads, FX context, forecast shifts, data quality), each traceable to a dataset version |
+| Insights | A deterministic insight engine in the backend (no AI service): rules for price changes, trends, ICP-benchmark spread, exchange rate, forecast outlook with its measured skill, and data freshness and verification. Each insight carries its evidence (datasets and versions, periods, inputs, method in plain language) and is written in Indonesian or English from server templates; the feed opens each item in a detail view |
 | Reports and alerts | Branded PDF, Excel and CSV reports (monthly market, forecast, scenario comparison, data provenance); alert rules with an in-app inbox |
-| Accounts | Self-service organisation sign-up (trial plan), members and roles, API keys, plan entitlements enforced on the server |
+| Accounts | Self-service organisation sign-up (trial plan), members and roles, API keys with an enforced monthly quota, plan entitlements enforced on the server, in-app plan-change requests that an operator approves (no payment), an owner data export (ZIP) and account/organisation deletion requests that an operator executes (anonymisation, no hard delete) |
 | Platform operations | Operator area for dataset versions and source evidence, model evaluation and promotion, background jobs, system health, audit log, tenant administration |
 
 Feature availability depends on the plan (for example, the trial plan limits the forecast horizon
@@ -76,20 +85,19 @@ cannot act inside customer organisations. Details: [docs/SECURITY.md](docs/SECUR
 
 ## Screenshots
 
-| Landing page | Market summary |
-|---|---|
-| <img src="docs/screenshots/after-v2/1440-landing-top.png" alt="Landing page" width="420"> | <img src="docs/screenshots/ux-v3/after/1440-ringkasan.png" alt="Market summary" width="420"> |
+| Landing page (full page) | Market summary | Mobile (390 px) |
+|---|---|---|
+| <img src="docs/evidence/2026-10-25-transformation/after/17-landing-1440-full.jpg" alt="Landing page with the official ICP panel" width="300"> | <img src="docs/evidence/2026-10-25-transformation/after/18-ringkasan-1440-full.jpg" alt="Market summary" width="420"> | <img src="docs/evidence/2026-10-25-transformation/after/14-ringkasan-390-kpis-first.jpg" alt="Market summary on a phone, headline value first" width="180"> |
 
-| Forecast | Forecast with a benchmark scenario |
-|---|---|
-| <img src="docs/screenshots/ux-v3/after/1440-proyeksi.png" alt="Forecast page" width="420"> | <img src="docs/screenshots/after-v2/1440-proyeksi-skenario-top.png" alt="Forecast with a Brent scenario" width="420"> |
+| Forecast | Stale scenario comparison | Data status |
+|---|---|---|
+| <img src="docs/evidence/2026-10-25-transformation/after/23-forecast-3-month-run-1440.jpg" alt="Forecast result" width="300"> | <img src="docs/evidence/2026-10-25-transformation/after/34-scenario-comparison-stale-after-edit-1440.jpg" alt="Comparison labelled stale after a scenario edit" width="300"> | <img src="docs/evidence/2026-10-25-transformation/after/37-data-status-popover-1440.jpg" alt="Data status popover" width="300"> |
 
-| Reports | Mobile (390 px) |
-|---|---|
-| <img src="docs/screenshots/ux-v3/after/1440-laporan.png" alt="Reports page" width="420"> | <img src="docs/screenshots/ux-v3/after/390-ringkasan.png" alt="Market summary on mobile" width="200"> |
-
-Screenshots were taken from the local application with test accounts. More captures, including
-the operator area and error states, are in [docs/screenshots/](docs/screenshots/).
+Screenshots were taken on 2026-10-26/27 from a local production build with the local test organisation,
+before the final integration changes: the landing image still compares the model with 6,09 for "repeat last
+month"; the app now shows 6,06, measured on the same 69 cases.
+Before/after pairs, error and outage states and the operator area are indexed in
+[docs/evidence/2026-10-25-transformation/](docs/evidence/2026-10-25-transformation/INDEX.md).
 
 ## System architecture
 
@@ -134,7 +142,7 @@ options are not used by the current deployment. Details: [docs/ARCHITECTURE.md](
 
 | Layer | Technologies |
 |---|---|
-| Frontend | React 19, TypeScript, Vite, React Router, Recharts, Lucide icons |
+| Frontend | React 19, TypeScript, Vite, React Router, Recharts (workspace charts only; the public chart is plain SVG), Lucide icons, self-hosted IBM Plex Sans and Serif; design system in [docs/DESIGN_SYSTEM.md](docs/DESIGN_SYSTEM.md) |
 | Gateway and hosting | Cloudflare Workers (static assets, rate limiting), Wrangler, Cloudflare Quick Tunnel |
 | Backend | Python 3.10-3.12, FastAPI, Pydantic, Uvicorn, ReportLab and openpyxl for reports |
 | Data engineering | pandas, httpx, PyMuPDF and Tesseract OCR for ESDM decrees, DVC for the original raw files |
@@ -155,8 +163,8 @@ options are not used by the current deployment. Details: [docs/ARCHITECTURE.md](
 **Reconciliation.** Each ICP month is read from the decree (text layer or OCR) and from the
 announcement, and the values are compared. A month is accepted when sources agree, flagged when it
 rests on a single source, and blocked when sources conflict. The reconciled local dataset covers
-2019-01 to 2026-09 (93 months, no gaps): 86 months confirmed by two sources, 6 by the announcement
-only and 1 by OCR only. The process corrected four values in the original CSV and filled 14
+2019-01 to 2026-09 (93 months, no gaps): 86 months confirmed (84 by two agreeing ESDM documents, 2 by
+the decree text), 6 by a single document and 1 by OCR only. The process corrected four values in the original CSV and filled 14
 missing months. Evidence and policy: [docs/DATA_RECONCILIATION.md](docs/DATA_RECONCILIATION.md).
 
 **Principles.** Missing months are shown as gaps and never interpolated; partial months never enter
@@ -177,7 +185,9 @@ is evaluated with a **rolling-origin backtest** (69 origins, 2020-12 to 2026-08)
 - **hold-last**: benchmarks are unknown and held at their last value (a genuinely future month
   without a user scenario).
 
-Mean absolute error in USD per barrel, on the comparison set common to all methods:
+Mean absolute error in USD per barrel, on the backtest cases common to all methods (66 at one month; the app shows
+v5 on its own 69 cases: 0.84 and 6.11, against 6.06 for persistence on those same cases; see
+[FORECASTING_METHODOLOGY.md](docs/FORECASTING_METHODOLOGY.md) §5):
 
 | Method | Observed, 1 month | Observed, 3 months | Hold-last, 1 month | Hold-last, 3 months |
 |---|---|---|---|---|
@@ -232,13 +242,14 @@ legacy/              The previous Streamlit application and course evidence (ref
 
 ### Install and run locally
 
-`data/raw/wti.csv` is tracked with DVC and no public DVC remote is configured, so a fresh clone uses
-the WTI file shipped in `data/seed/` instead:
+WTI is seeded from the Git-tracked `data/seed/wti.csv` (EIA monthly mean, the series the production
+model was trained on). The legacy DVC file `data/raw/wti.csv` is not used by default; `SEED_WTI_PATH`
+still overrides the path.
 
 ```bash
 npm install
-SEED_WTI_PATH=data/seed/wti.csv npm run setup     # PowerShell: $env:SEED_WTI_PATH="data/seed/wti.csv"; npm run setup
-npm run dev                                       # API on :8000, web app on http://localhost:5173
+npm run setup
+npm run dev          # API on :8000, web app on http://localhost:5173
 ```
 
 `npm run setup` creates the Python virtual environment, generates local secrets into `.env` and
@@ -282,7 +293,7 @@ npm run staging:backend     # starts the backend container, opens a Quick Tunnel
 Keep the process running. The tunnel hostname is stored only in a gitignored local file and passed
 to Wrangler at deploy time; a plain `wrangler deploy --env staging` deploys a placeholder backend
 URL. The full runbook, free-tier limits and the alternatives that were evaluated are in
-[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) and [docs/HOSTING_REPORT_2026-10.md](docs/HOSTING_REPORT_2026-10.md).
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) (the hosting evaluation of 2026-10-17 is archived in [docs/archive/](docs/archive/HOSTING_REPORT_2026-10.md)).
 
 ## Testing and quality
 
@@ -291,11 +302,16 @@ npm test          # pytest, plus Vitest for the web app and the gateway
 npm run check     # lint, type checks, OpenAPI contract drift, all tests, builds, secret scan
 ```
 
-Last full run (`npm run check`, 2026-10-19): ruff, mypy and ESLint clean; contract in sync;
-**162 Python tests, 48 web tests and 20 gateway tests passed**; web and Worker builds succeeded;
-secret scan without findings. The Python suite includes a dedicated access-control suite (guest,
-customer roles, API keys, operators, cross-organisation ids, logout, temporary passwords, plan
-limits).
+Last full run (2026-10-27, each gate of `npm run check` run separately): ruff, mypy, TypeScript and ESLint
+clean; contract in sync; **1,227 Python test items, 254 web tests and 83 gateway tests passed**; web and
+Worker (dry-run) builds succeeded; the landing bundle guard passed (154,156 B gzip against a 160,000 B
+budget); secret scan without findings. Details, before and after numbers and evidence:
+[docs/PRODUCT_TRANSFORMATION_2026-10.md](docs/PRODUCT_TRANSFORMATION_2026-10.md) §8-§10. The Python count
+is large because parametrised tests run one item per case (for example wording checks and seeded random
+insight contexts). The suite includes dedicated access-control and security suites (guest,
+customer roles, API keys, operators, cross-organisation ids, every route, report injection, sign-in
+throttle, quota, export, deletion requests, plan limits). A separate CI job runs pip-audit, npm audit, bandit
+and the secret scan; details in [docs/REMEDIATION_REPORT_2026-10.md](docs/REMEDIATION_REPORT_2026-10.md).
 
 The tests cover the API, storage adapters (SQLite and a simulated D1 protocol), the gateway's
 internal data plane, accounts and entitlements, forecasting semantics, prediction equality between
@@ -314,10 +330,13 @@ deployed environment.
   requires; the Worker's internal D1/KV routes reject requests without it.
 - Users authenticate with server-side sessions; roles, plans and organisation boundaries are
   enforced by the backend. Operator access uses separate tokens.
+- Sign-in failures are throttled per (e-mail, IP) with an account-wide ceiling, API keys have a monthly
+  quota, reports and exports neutralise injected markup and spreadsheet formulas, and API responses carry
+  framing, CSP and resource-policy headers.
 - A secret scan runs as part of `npm run check`.
 
 No formal security audit or penetration test has been carried out. See
-[docs/SECURITY.md](docs/SECURITY.md).
+[docs/SECURITY.md](docs/SECURITY.md) and [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md).
 
 ## Known limitations
 
@@ -327,17 +346,21 @@ No formal security audit or penetration test has been carried out. See
   or process is.
 - Free-tier quotas apply (for example Workers KV allows 1,000 writes per day; every report,
   forecast export and dataset version uses writes). Limits stop the service rather than incur cost.
-- The public market snapshot takes about five seconds on staging because of many storage round
-  trips through the Worker.
+- The public market snapshot took about five seconds on the 2026-10-17 staging release because of many
+  storage round trips through the Worker. The transformation (not deployed) reads it with 3 statements
+  instead of 12 and serves repeats from a 60-second in-process memo with none; staging latency has not been
+  re-measured.
 - Continuous training through GitHub Actions is not active: the staging backend serves a bundle
   and refuses training jobs.
 
 **Product**
-- No payment integration; plans are changed by an operator.
+- No payment integration; customers request a plan change in the app and an operator applies it.
 - No e-mail delivery: alerts are in-app only, and invitations and password resets are handed over
   manually.
-- Monthly API quotas are counted but not enforced.
-- No multi-factor authentication and no account self-deletion.
+- No multi-factor authentication. Account and organisation deletion is a request that an operator
+  executes (anonymisation); there is no owner transfer and no automatic grace period.
+- Rate limits and sign-in counters are kept in memory, so the backend must run as a single instance
+  (enforced by configuration).
 - Future-month forecasts depend on user-supplied benchmark scenarios (see the evaluation above).
 
 **Operational and production-readiness gaps**
@@ -348,26 +371,32 @@ Further detail: [docs/COMMERCIAL_READINESS.md](docs/COMMERCIAL_READINESS.md).
 
 ## Roadmap
 
-1. Move the backend to a persistent host so the staging API no longer depends on a personal machine.
-2. Reduce storage round trips for the market snapshot and other read-heavy endpoints.
+1. Deploy the 2026-10 transformation to staging, then move the backend to a persistent host so the staging
+   API no longer depends on a personal machine.
+2. Measure the storage round trips on D1 after deployment and reduce them further for read-heavy endpoints.
 3. Add uptime monitoring, alerting and structured log retention.
 4. Security hardening: MFA, account lockout policy, an external review.
 5. Load testing of the gateway and backend.
-6. Complete the missing product pieces: e-mail delivery, enforced API quotas, payment integration.
+6. Complete the missing product pieces: e-mail delivery, payment integration, owner transfer.
 7. Volatility-aware prediction ranges for future months.
 
 ## Documentation
 
+Start at the index, [docs/README.md](docs/README.md). The authoritative documents:
+
 | Topic | Documents |
 |---|---|
-| Architecture and storage | [ARCHITECTURE](docs/ARCHITECTURE.md), [STORAGE](docs/STORAGE.md), [ENVIRONMENTS](docs/ENVIRONMENTS.md) |
+| Architecture and storage | [ARCHITECTURE](docs/ARCHITECTURE.md), [STORAGE](docs/STORAGE.md) |
+| Design system | [DESIGN_SYSTEM](docs/DESIGN_SYSTEM.md) |
+| Latest change report | [PRODUCT_TRANSFORMATION_2026-10](docs/PRODUCT_TRANSFORMATION_2026-10.md) |
+| Local development, testing and CI | [DEVELOPMENT](docs/DEVELOPMENT.md) |
+| API and access control | [API](docs/API.md) |
+| Security | [SECURITY](docs/SECURITY.md), [THREAT_MODEL](docs/THREAT_MODEL.md) |
 | Data | [DATA_SOURCES](docs/DATA_SOURCES.md), [DATA_DICTIONARY](docs/DATA_DICTIONARY.md), [DATA_RECONCILIATION](docs/DATA_RECONCILIATION.md) |
-| Forecasting | [FORECASTING_METHODOLOGY](docs/FORECASTING_METHODOLOGY.md) |
-| API and security | [API](docs/API.md), [SECURITY](docs/SECURITY.md) |
-| Deployment and operations | [DEPLOYMENT](docs/DEPLOYMENT.md), [OPERATIONS](docs/OPERATIONS.md), [MIGRATION](docs/MIGRATION.md) |
-| Product readiness and legal | [COMMERCIAL_READINESS](docs/COMMERCIAL_READINESS.md), [LEGAL_NOTICES](docs/LEGAL_NOTICES.md), [ASSET_INVENTORY](docs/ASSET_INVENTORY.md) |
-| Project reports | [Release](docs/RELEASE_REPORT_2026-10.md), [Frontend](docs/FRONTEND_IMPROVEMENT_REPORT_2026-10.md), [Hosting](docs/HOSTING_REPORT_2026-10.md), [UX v3](docs/UX_V3_REPORT_2026-10.md) |
-| History | [Original course-project README](docs/history/course-milestones-README.md) |
+| Forecasting and insights | [FORECASTING_METHODOLOGY](docs/FORECASTING_METHODOLOGY.md), [INSIGHT_ENGINE](docs/INSIGHT_ENGINE.md) |
+| Deployment, configuration and operations | [DEPLOYMENT](docs/DEPLOYMENT.md), [ENVIRONMENTS](docs/ENVIRONMENTS.md), [OPERATIONS](docs/OPERATIONS.md) |
+| Product readiness and legal | [COMMERCIAL_READINESS](docs/COMMERCIAL_READINESS.md), [LEGAL_AND_PRIVACY](docs/LEGAL_AND_PRIVACY.md), [ASSET_INVENTORY](docs/ASSET_INVENTORY.md) |
+| History and evidence | [MIGRATION](docs/MIGRATION.md), [archived reports](docs/archive/), [evidence index](docs/evidence/README.md) |
 
 ## License and attribution
 
@@ -375,12 +404,18 @@ The source code is released under the [MIT License](LICENSE).
 
 Third-party material keeps its own terms:
 
-- **Photographs** on the landing page come from Wikimedia Commons under CC BY 4.0, CC BY-SA 4.0
-  and CC BY-SA 2.0; authors and links are listed in [docs/ASSET_INVENTORY.md](docs/ASSET_INVENTORY.md)
-  and credited in the app.
+- **Fonts**: IBM Plex Sans and IBM Plex Serif, self-hosted under the SIL Open Font License 1.1
+  (licence files in `apps/web/public/fonts/`).
+- **Photographs**: the app shows two photographs from Wikimedia Commons under CC0 1.0 (no attribution
+  required, so the site shows no credit line), navy-toned and decorative: behind the landing's closing
+  call to action and behind the sign-in panel. Source, author, licence check, edits and checksums are in
+  [docs/ASSET_INVENTORY.md](docs/ASSET_INVENTORY.md), whose licence register `npm run asset-licences`
+  checks. Three Wikimedia Commons photographs (CC BY 4.0, CC BY-SA 4.0, CC BY-SA 2.0) used by an earlier
+  landing page are kept, not served, in `docs/assets/photos/`, with the attribution to show if they are
+  ever used again.
 - **Data**: EIA series are public domain; the World Bank Pink Sheet is CC BY 4.0 and requires
   attribution; ICP values are published by ESDM and JISDOR rates by Bank Indonesia. See
-  [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) and [docs/LEGAL_NOTICES.md](docs/LEGAL_NOTICES.md).
+  [docs/DATA_SOURCES.md](docs/DATA_SOURCES.md) and [docs/LEGAL_AND_PRIVACY.md](docs/LEGAL_AND_PRIVACY.md).
 - **Libraries** are used under their own licences (for example React and Recharts under MIT,
   Lucide icons under ISC).
 

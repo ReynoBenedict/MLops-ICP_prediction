@@ -5,7 +5,7 @@
 | Component | Code | Runtime (target) | Runtime (local) | Why there |
 |---|---|---|---|---|
 | Web app | `apps/web` (React, Vite, TS, Recharts) | Cloudflare Workers Static Assets | Vite dev server or `wrangler dev` | Static SPA; global edge delivery |
-| API gateway | `apps/gateway` (Worker, TS) | Cloudflare Workers | `wrangler dev` (workerd) | Request limits, rate limiting, request IDs, shared-secret injection, edge caching of immutable exports. **No business logic.** |
+| API gateway | `apps/gateway` (Worker, TS) | Cloudflare Workers | `wrangler dev` (workerd) | Request limits, rate limiting, request IDs, shared-secret injection, replacement of non-JSON upstream error pages by the JSON error envelope, and a last-known-good copy in KV of the two anonymous public answers (`GET /public/market-snapshot`, `GET /plans`), served marked stale while the backend is unreachable (contract C2, [OPERATIONS.md](OPERATIONS.md#stale-public-data-last-known-good-copies-at-the-gateway)). No other API response is cached at the edge. **No business logic.** |
 | Backend | `backend/icp_api` (FastAPI) | Docker image `infra/docker/api.Dockerfile`; staging: operator machine behind a Cloudflare Quick Tunnel (`docs/DEPLOYMENT.md`) | `uvicorn` / Docker | Needs pandas, scikit-learn and MLflow, which do not run in the Workers runtime; long-running jobs need a persistent process |
 | ML pipeline | `pipeline/icp_ml` | Same Python process / job worker subprocesses | Same | One implementation of features, training and forecasting, shared by training and serving |
 | App metadata | migrations in `infra/cloudflare/d1` | **Cloudflare D1** (via the Worker's internal data plane; REST API also supported) | SQLite file `var/metadata.db` | Relational, low volume, SQLite dialect on both sides |
@@ -63,12 +63,16 @@ uses the same `MetadataRepository` with three transports:
    - applies the edge rate limiter (forecast and general buckets);
    - assigns or propagates `X-Request-ID`;
    - drops client headers it does not forward (cookies, any forged `X-Gateway-Secret`);
-   - adds `X-Gateway-Secret` and `CF-Connecting-IP`, then forwards with a 30 s timeout. Idempotent
-     requests are retried once on connection failure;
-   - refuses upstream redirects.
+   - adds `X-Gateway-Secret` and `CF-Connecting-IP`, then forwards with `UPSTREAM_TIMEOUT_MS` (30 s locally,
+     90 s on staging and production; 8 s for the anonymous public snapshot and plans, which fall back to
+     their last-known-good copy). Idempotent requests are retried once on connection failure, inside the
+     same deadline;
+   - refuses upstream redirects and replaces non-JSON upstream error pages with the JSON error envelope.
 3. The backend middleware:
    - verifies the gateway secret, constant-time (`REQUIRE_GATEWAY_SECRET=true` in deployment);
-   - enforces body size and request timeout;
+   - enforces body size and the request timeout (`REQUEST_TIMEOUT_SECONDS`, 30 s); data-plane retries
+     (D1, KV through the Worker) stop at the same deadline (timeout budget in
+     [OPERATIONS.md](OPERATIONS.md#timeout-budget));
    - binds the request ID to every log line, emits Prometheus metrics, and adds security headers.
 4. Routers validate input with Pydantic. Responses are validated against the same models.
    Authorization is decided server-side (`require_admin`). Errors use one envelope:
@@ -110,7 +114,9 @@ Full description: [FORECASTING_METHODOLOGY.md](FORECASTING_METHODOLOGY.md). In s
 - Exit code 75 marks a transient failure, which is retried with exponential backoff up to
   `max_attempts`.
 - A reaper fails jobs whose heartbeat goes stale, for example after an instance restart.
-- Jobs run on the instance that accepted them. Deploy a single always-on backend instance.
+- Jobs run on the instance that accepted them. Deploy a single always-on backend instance. This is
+  enforced: `icp-api serve` always starts one uvicorn worker and `API_INSTANCES` other than 1 refuses to
+  start, because rate limits and sign-in counters also live in process memory.
   Scaling to several backend instances would need an external queue.
 
 ## Security model
@@ -144,12 +150,13 @@ Details: [SECURITY.md](SECURITY.md).
 
 ## Frontend conventions
 
-- **Design system.** One stylesheet (`apps/web/src/styles.css`) holds tokens for surface, ink, brand, series and status colours, plus spacing, radii, elevation and type scale. Shared primitives live in `apps/web/src/components/ui.tsx`: PageHeader, Panel, Kpi, Delta, Badge/StatusBadge, Button, Callout, ErrorState, EmptyState, Skeleton, Segmented, Tabs, Pager and Stat. Charts live in `components/charts.tsx`: TimeSeriesChart, MetricBars and CoverageGrid. Pages only compose these.
-- **Theme.** Light theme first: warm off-white canvas, white panels, navy ink, a deep-teal brand accent for UI chrome, and a navy sidebar. Icons are Lucide (`lucide-react`, the only UI dependency added).
+- **Design system.** [DESIGN_SYSTEM.md](DESIGN_SYSTEM.md) is the authority. Styles live in `apps/web/src/styles/` (see its "Implementation" section): `tokens.css` (every token: surface, ink, brand, status, value-kind and series colours, type scale, spacing, radii, elevation, motion), `base.css` (self-hosted IBM Plex fonts, reset, focus, utilities), `components.css` (shared primitives), then one file per area (`shell.css`, `public.css`, `market.css`, `flows.css`, `ops.css`), imported in that order by `main.tsx`. API response types beyond the generated contract live in `src/api/product-types.ts` (formerly `api/v5.ts`); identical concurrent GETs are shared through `sharedGet` in `src/api/client.ts`. Operator strings (`i18n/ops.ts`) load only with the operations pages. Shared primitives live in `apps/web/src/components/ui.tsx`: PageHeader, Panel, Kpi, Delta, Badge/StatusBadge, Button, Callout, ErrorState, EmptyState, Skeleton, Segmented, Tabs, Pager and Stat. Charts live in `components/charts.tsx`: TimeSeriesChart, MetricBars and CoverageGrid. Pages only compose these.
+- **Theme.** Light theme first: a cool paper canvas, white panels with 1 px lines and no shadow, navy ink, teal as the single interactive colour, a light sidebar for customers and a dark (`--navy-deep`) sidebar for the operator console. Icons are Lucide (`lucide-react`, the only UI dependency added).
 - **Charts.**
   - One y-axis (USD/bbl), recessive grid, 2 px lines, hover tooltips, and a legend for two or more series.
   - A Chart/Table toggle where a table adds value, so values are never available only through colour or hover.
-  - Series colours were validated for colour-vision deficiency and contrast on the white surface: ICP `#1d6fb8`, WTI/oil `#e8692f`, comparison `#6250d6`. The brand teal is never used as a data series because it reads as grey for colour-blind users.
+  - Series colours were validated for colour-vision deficiency and contrast on the white surface; the values are the `--series-*` tokens in DESIGN_SYSTEM.md (official ICP first, then Brent, Dubai, WTI). The interactive teal is never a data series.
+  - Recharts is used inside the workspace only. Public pages draw their own small SVG charts (`components/public/`) and must not import `components/charts.tsx`; CI fails if the JavaScript that `index.html` loads up front, or the chunk of a lazily loaded public route (methodology, legal and auth pages) or anything it imports statically, contains Recharts (`scripts/check-landing-bundle.mjs`; against the repository's own build it also checks that every lazy public page still has a chunk named after it).
 - **Honest gaps.** Missing months render as line breaks plus shaded bands. They are never interpolated. The holdout chart shades months that have no complete feature rows.
 - **Derived context.** Overview month-over-month and year-over-year changes, 12-month highs and lows, and the latest common spread month are computed client-side from `/data/history` (`src/lib/market.ts`). A change is only reported when both months were actually observed.
 - **Status.** Status badges always pair an icon and a text label with the colour. Up/down deltas carry an explicit sign.
