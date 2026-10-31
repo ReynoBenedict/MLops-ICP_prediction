@@ -1,5 +1,10 @@
-# Continuous integration: lint, type checks, tests, contract drift, builds and secret scan.
+# Continuous integration: lint, type checks, tests, contract drift, builds, bundle and asset-licence
+# guards, and secret scan.
 # Runs entirely inside the CI runner; it does not deploy anything.
+#
+# Third-party actions are pinned to full commit SHAs (resolved from the public GitHub API
+# `repos/<owner>/<repo>/git/ref/tags/<tag>` on 2026-10-20; the tag is kept in the trailing comment).
+# To update: re-resolve the tag, compare with the action's release page, then bump SHA and comment.
 name: CI
 
 on:
@@ -15,29 +20,34 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  PIP_VERSION: "26.2.1" # same pip as the developer virtualenv on 2026-10-20
+
 jobs:
   check:
     name: Lint, typecheck, test, build
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
+    env:
+      # Data-dependent tests use Git-tracked inputs only (data/raw/dataset.csv, data/seed/*.csv) and
+      # FAIL instead of skipping when those are missing, so a green run always means the full suite ran.
+      ICP_REQUIRE_DATA: "1"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.11"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
           cache: npm
 
-      # Raw datasets are DVC-managed. Without a configured DVC remote, tests that need the
-      # repository data are skipped (they are marked to skip when data/raw/*.csv is absent).
       - name: Python environment
         run: |
           python -m venv .venv
-          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install "pip==${PIP_VERSION}"
           .venv/bin/python -m pip install -e ".[api,cloud,dev]" -c requirements/constraints.txt
 
       - name: Node dependencies
@@ -52,11 +62,77 @@ jobs:
       - name: API contract is up to date
         run: npm run contracts:check
 
+      # pytest's `-ra` (pyproject) lists every skip in the log; with ICP_REQUIRE_DATA=1 the data
+      # fixtures fail instead of skipping. Remaining expected skips: OCR tests without the tesseract
+      # binary / DVC-only decree PDFs (pipeline/tests/test_sources.py).
       - name: Tests
         run: npm test
 
       - name: Build web app and Worker (dry run, no deploy)
         run: npm run build
 
+      # The JavaScript index.html loads up front (entry, modulepreloads, their static imports) must not
+      # contain the charting library (Recharts); prints the landing JS size, raw and gzip.
+      - name: Landing bundle guard
+        run: |
+          node scripts/check-landing-bundle.mjs --self-test
+          node scripts/check-landing-bundle.mjs apps/web/dist --max-gzip-bytes 160000
+
+      # Every image under apps/web/public/ has a row in the licence register of docs/ASSET_INVENTORY.md
+      # with a licence that needs no credit (the site shows none) and the SHA-256 of the shipped file;
+      # no image is bundled from apps/web/src or inlined as a data:image URI. Self-test, then the check.
+      - name: Asset licence guard
+        run: npm run asset-licences
+
+      # Also scans the freshly built bundles (apps/web/dist, apps/gateway/dist).
       - name: Secret scan
         run: npm run secret-scan
+
+  security:
+    name: Dependency audit, static analysis, secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+
+      # Pinned tool versions (pip-audit 2.10.1 and bandit 1.9.4 were run locally on 2026-10-20).
+      - name: Security tools
+        run: |
+          python -m venv .secvenv
+          .secvenv/bin/python -m pip install "pip==${PIP_VERSION}"
+          .secvenv/bin/python -m pip install pip-audit==2.10.1 bandit==1.9.4
+
+      # Audits the exact pinned dependency set the backend image installs (no resolution, no install).
+      - name: pip-audit (requirements/constraints.txt)
+        run: .secvenv/bin/pip-audit -r requirements/constraints.txt --no-deps --disable-pip --progress-spinner off
+
+      # Production dependencies of the web app and the Worker (reads package-lock.json only).
+      # Fails on moderate or higher (stricter than "high").
+      - name: npm audit (production dependencies)
+        run: npm audit --omit=dev --audit-level=moderate
+
+      # Medium+ findings fail the job. `--ignore-nosec` makes inline `# nosec` markers ineffective:
+      # a finding can only be resolved by changing the code, never by a suppression comment.
+      - name: bandit
+        run: .secvenv/bin/bandit -r backend/icp_api pipeline/icp_ml -ll --ignore-nosec -q
+
+      # Self-test of every rule, then the scan (values are never printed).
+      - name: Secret scan
+        run: |
+          node scripts/secret-scan.mjs --self-test
+          node scripts/secret-scan.mjs
+
+      # Software bill of materials (CycloneDX) for both ecosystems; generation must succeed.
+      - name: SBOM (CycloneDX)
+        run: |
+          .secvenv/bin/pip-audit -r requirements/constraints.txt --no-deps --disable-pip --progress-spinner off -f cyclonedx-json -o sbom-python.cdx.json
+          npm sbom --sbom-format cyclonedx --omit dev --package-lock-only > sbom-npm.cdx.json
+          ls -l sbom-python.cdx.json sbom-npm.cdx.json

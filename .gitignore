@@ -39,10 +39,12 @@ coverage.xml
 junit.xml
 .ipynb_checkpoints
 
-# --- Node / Cloudflare ------------------------------------------------------------------------
+# --- Node / Cloudflare / Vercel -----------------------------------------------------------------
 node_modules/
 dist/
 .wrangler/
+# Vercel CLI project links (ids only). The deploy folder itself is generated under var/deploy/ (ignored above).
+.vercel/
 *.tsbuildinfo
 apps/gateway/worker-configuration.d.ts
 

@@ -1,5 +1,6 @@
 {
   "name": "icp-platform",
+  "version": "2.0.0",
   "private": true,
   "description": "ICP forecasting platform monorepo: React web app, Cloudflare Worker gateway, FastAPI backend, ML pipeline.",
   "license": "MIT",
@@ -18,6 +19,7 @@
     "stop": "node scripts/stop.mjs",
     "smoke": "node scripts/smoke.mjs",
     "staging:backend": "node scripts/staging-backend.mjs",
+    "staging:vercel": "node scripts/vercel-backend.mjs",
     "api": "node scripts/py.mjs -m icp_api.cli serve --reload",
     "bootstrap": "node scripts/py.mjs -m icp_api.cli bootstrap",
     "mlflow:ui": "node scripts/mlflow-ui.mjs",
@@ -31,8 +33,10 @@
     "typecheck": "node scripts/py.mjs -m mypy && npm run typecheck -w @icp/contracts && npm run typecheck -w @icp/web && npm run typecheck -w @icp/gateway",
     "test": "npm run test:py && npm run test -w @icp/web && npm run test -w @icp/gateway",
     "test:py": "node scripts/py.mjs -m pytest",
-    "check": "npm run lint && npm run typecheck && npm run contracts:check && npm run test && npm run build && node scripts/secret-scan.mjs",
-    "secret-scan": "node scripts/secret-scan.mjs"
+    "check": "npm run lint && npm run typecheck && npm run contracts:check && npm run test && npm run build && npm run landing-guard && npm run asset-licences && node scripts/secret-scan.mjs",
+    "secret-scan": "node scripts/secret-scan.mjs",
+    "landing-guard": "node scripts/check-landing-bundle.mjs",
+    "asset-licences": "node scripts/check-asset-licences.mjs --self-test && node scripts/check-asset-licences.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
