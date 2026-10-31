@@ -1,0 +1,146 @@
+{
+  "backup": "C:\\Users\\User\\PycharmProjects\\MLops\\MLops-ICP_prediction_OLD\\var\\backups\\20261020T024313Z",
+  "work_dir": "C:\\Users\\User\\AppData\\Local\\Temp\\claude\\ux7\\q\\restore-rehearsal-20261020T025442Z",
+  "port": 18765,
+  "steps": [
+    {
+      "step": "copy",
+      "seconds": 0.8,
+      "files": 625,
+      "bytes": 36514038,
+      "metadata_sha_equal": true
+    },
+    {
+      "step": "integrity",
+      "metadata": "ok",
+      "schema_version": 6,
+      "mlflow": "ok",
+      "row_counts": {
+        "alert_events": 8,
+        "alert_rules": 6,
+        "api_keys": 1,
+        "app_schema": 6,
+        "audit_events": 552,
+        "dataset_versions": 11,
+        "deletion_requests": 3,
+        "forecast_runs": 122,
+        "ingestion_runs": 11,
+        "jobs": 5,
+        "model_promotions": 5,
+        "organizations": 18,
+        "plan_change_requests": 8,
+        "report_runs": 37,
+        "saved_scenarios": 53,
+        "sessions": 143,
+        "source_documents": 144,
+        "source_evidence": 2257,
+        "usage_events": 82,
+        "users": 26
+      },
+      "mlflow_experiments": 2,
+      "mlflow_artifact_locations_point_into_live_var": 1
+    },
+    {
+      "step": "start",
+      "seconds_to_live": 4.16,
+      "pid": 29396
+    },
+    {
+      "step": "health_ready",
+      "status": 200,
+      "overall": "ready",
+      "checks": {
+        "metadata_store": "ok",
+        "schema_version": "ok",
+        "object_store": "ok",
+        "model_bundle": "ok",
+        "production_model": "ok",
+        "datasets": "ok",
+        "job_runner": "ok"
+      }
+    },
+    {
+      "step": "system_status",
+      "status": 200,
+      "schema_version": 7,
+      "expected": 7,
+      "model_source": "bundle",
+      "metadata_backend": "sqlite"
+    },
+    {
+      "step": "public_market_snapshot",
+      "status": 200,
+      "icp_period": "2026-09",
+      "icp_usd": 112.81
+    },
+    {
+      "step": "compare_live_snapshot",
+      "identical": true
+    },
+    {
+      "step": "read /api/v1/data/summary",
+      "status": 200,
+      "shape": [
+        "datasets",
+        "icp_idr",
+        "relationships"
+      ]
+    },
+    {
+      "step": "read /api/v1/datasets/active",
+      "status": 200,
+      "shape": [
+        "datasets"
+      ]
+    },
+    {
+      "step": "read /api/v1/models",
+      "status": 200,
+      "shape": [
+        "alias",
+        "model_name",
+        "production_version",
+        "versions"
+      ]
+    },
+    {
+      "step": "read /api/v1/forecasts/latest",
+      "status": 200,
+      "shape": [
+        "created_at",
+        "dataset_versions",
+        "duration_ms",
+        "error_code",
+        "error_message",
+        "export_available",
+        "forecast_origin",
+        "horizon"
+      ]
+    },
+    {
+      "step": "read /api/v1/data/verification",
+      "status": 200,
+      "shape": [
+        "counts",
+        "dataset",
+        "dissent_months",
+        "earliest_period",
+        "history_years",
+        "legend",
+        "months"
+      ]
+    },
+    {
+      "step": "latest_forecast_detail",
+      "id": "fc_01a146c3a844d4992afd7e75",
+      "model_version": "5",
+      "origin": null
+    },
+    {
+      "step": "stop",
+      "returncode": 1,
+      "total_seconds": 6.83
+    }
+  ],
+  "source_backup_unchanged": true
+}

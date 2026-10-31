@@ -1,0 +1,267 @@
+....................................................................F... [  7%]
+.......F.....EEE.E.............EEEEEE................................... [ 15%]
+........................................................................ [ 22%]
+........................................................................ [ 30%]
+........................................................................ [ 38%]
+........................................................................ [ 45%]
+........................................................................ [ 53%]
+........................................................................ [ 61%]
+........................................................................ [ 68%]
+........................................................................ [ 76%]
+......................................EEEEEEEEEEEEEEEEE...............EE [ 84%]
+EEE..................................................EEEE............... [ 91%]
+EEE..................................................................... [ 99%]
+....                                                                     [100%]
+=================================== ERRORS ====================================
+_______ ERROR at setup of test_training_registers_but_does_not_promote ________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+---------------------------- Captured stderr setup ----------------------------
+2026/10/20 09:15:58 INFO mlflow.agent.hint: Load the `instrumenting-with-mlflow-tracing` skill at C:\Users\User\PycharmProjects\MLops\MLops-ICP_prediction_OLD\.venv\lib\site-packages\mlflow\assistant\skills\instrumenting-with-mlflow-tracing\SKILL.md before writing any tracing code; it ships with this MLflow install. Set MLFLOW_DISABLE_AGENT_HINT=1 to silence this.
+______ ERROR at setup of test_validate_promote_forecast_export_rollback _______
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_________ ERROR at setup of test_retrain_compare_promote_and_rollback _________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_ ERROR at setup of test_bundle_mode_serves_identical_forecasts_without_mlflow _
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_____ ERROR at setup of test_forecast_points_disclose_period_and_baseline _____
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_______ ERROR at setup of test_model_card_has_an_evaluation_disclosure ________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+___ ERROR at setup of test_export_csv_carries_evaluation_and_usage_columns ____
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+__________ ERROR at setup of test_post_forecast_flags_ignored_inputs __________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+________ ERROR at setup of test_scenario_compare_flags_ignored_inputs _________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_ ERROR at setup of test_forecast_report_from_a_stored_run_is_clipped_and_uses_official_values _
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_________________ ERROR at setup of test_history_depth[trial] _________________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+________________ ERROR at setup of test_history_depth[starter] ________________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_____________ ERROR at setup of test_history_depth[professional] ______________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+______________ ERROR at setup of test_history_depth[enterprise] _______________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+________ ERROR at setup of test_forecast_horizon_on_every_path[trial] _________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_______ ERROR at setup of test_forecast_horizon_on_every_path[starter] ________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_____ ERROR at setup of test_forecast_horizon_on_every_path[professional] _____
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+______ ERROR at setup of test_forecast_horizon_on_every_path[enterprise] ______
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+__________ ERROR at setup of test_insights_feature_gate[True-trial] ___________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_________ ERROR at setup of test_insights_feature_gate[True-starter] __________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_______ ERROR at setup of test_insights_feature_gate[True-professional] _______
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+________ ERROR at setup of test_insights_feature_gate[True-enterprise] ________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+__________ ERROR at setup of test_insights_feature_gate[False-trial] __________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_________ ERROR at setup of test_insights_feature_gate[False-starter] _________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+______ ERROR at setup of test_insights_feature_gate[False-professional] _______
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_______ ERROR at setup of test_insights_feature_gate[False-enterprise] ________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_ ERROR at setup of test_scenario_saved_under_a_bigger_plan_cannot_run_beyond_the_new_plan _
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_ ERROR at setup of test_customers_see_system_forecasts_clipped_to_their_plan _
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_ ERROR at setup of test_points_carry_mode_matched_backtest_evaluation_and_notes _
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_ ERROR at setup of test_published_actual_is_exposed_without_rewriting_the_record _
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_ ERROR at setup of test_scenario_inputs_report_whether_the_method_uses_them __
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+______ ERROR at setup of test_customer_model_card_hides_build_internals _______
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+____________ ERROR at setup of test_members_roles_and_seat_limits _____________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+________ ERROR at setup of test_entitlements_are_enforced_server_side _________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_____ ERROR at setup of test_public_snapshot_insights_and_latest_forecast _____
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_____________ ERROR at setup of test_scenarios_alerts_and_reports _____________
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_ ERROR at setup of test_hostile_scenario_names_give_valid_reports_without_fetching _
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+_ ERROR at setup of test_unexpected_report_failure_does_not_leak_exception_text _
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+____ ERROR at setup of test_rejected_report_requests_leave_no_failed_rows _____
+E   AssertionError: {'attempt': 1, 'cancel_requested': 0, 'created_at': '2026-10-20T02:15:53.311Z', 'error_code': 'DATA_INSUFFICIENT', ...}
+    assert 'failed' == 'succeeded'
+      
+      - succeeded
+      + failed
+================================== FAILURES ===================================
+E   AssertionError: assert 'degraded' == 'ok'
+      
+      - ok
+      + degraded
+C:\Users\User\PycharmProjects\MLops\MLops-ICP_prediction_OLD\backend\tests\test_api.py:31: AssertionError: assert 'degraded' == 'ok'
+E   KeyError: 'wti'
+C:\Users\User\PycharmProjects\MLops\MLops-ICP_prediction_OLD\backend\tests\test_api.py:202: KeyError: 'wti'
+============================== warnings summary ===============================
+.venv\lib\site-packages\fastapi\testclient.py:1
+  C:\Users\User\PycharmProjects\MLops\MLops-ICP_prediction_OLD\.venv\lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+2 failed, 899 passed, 1 warning, 39 errors in 65.29s (0:01:05)
+exit=1

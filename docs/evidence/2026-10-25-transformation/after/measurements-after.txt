@@ -1,0 +1,270 @@
+ICP Intelligence: "after" measurements, 2026-10-27 (local time WIB; JSON timestamps are UTC, 2026-10-26)
+
+Build under test: production build of the current tree (npm run build -w @icp/web, output in the QA scratch folder),
+served by vite preview on 127.0.0.1:4176 with /api proxied to the local FastAPI backend on :8000 (the same backend the
+baseline used). Baseline numbers come from measurements-before.txt (frozen build of the original UI on :4173, 2026-10-25).
+Headless Chrome through playwright-core, device scale 1, reduced motion (except perf, which uses no-preference as at
+baseline), Indonesian unless stated. One browser at a time. Raw data: QA scratch folder data-after/*.json|*.log.
+Staging (icp-gateway-staging) was not re-checked: nothing was deployed, it still serves the 2026-10-17 release.
+
+Two after builds appear below. "after (first run)" is the build of 2026-10-27 01:12 WIB on :4176, which sections 1 and
+3-7 measured. "after (integration build)" is a later build of 2026-10-27 18:30 WIB, after the main agent's integration
+changes and review D's fixes. It was served by vite preview on 127.0.0.1:4180 and is the subject of section 8, of the
+added lines in sections 2, 3 and 7, and of images 46-53. Its raw data is in the QA scratch folders data-after-int/,
+int-zoom/, int-shots/ and int-work/. Performance (section 1) and the matrix, states and journeys (sections 4-6) were not
+re-run on the integration build.
+
+1. PERFORMANCE (qa/perf.mjs, production build via vite preview, 3 runs each, median, 1440x900, HTTP cache disabled;
+   fast3g = 1.6 Mbps down / 750 kbps up / 150 ms RTT + 4x CPU). Times in ms from navigation start, sizes in KB transferred.
+   before: http://127.0.0.1:4173 at 2026-10-25T07:33:34.918Z   after: http://127.0.0.1:4176 at 2026-10-26T18:37:18.427Z
+   page        profile  metric          before    after   change
+   /           desktop  LCP                 204      236   +16 %
+   /           desktop  content ready       240      214   -11 %
+   /           desktop  DCL                  63       59   -6 %
+   /           desktop  requests             17       12   -29 %
+   /           desktop  js KB             162.8    155.8
+   /           desktop  css KB             13.5     14.1
+   /           desktop  font KB               0     65.3
+   /           desktop  img KB              107     54.8
+   /           desktop  api KB              2.8      4.8
+   /           desktop  total KB          288.1    296.7   LCP element before: DIV.kpi-value, after: H1 (1 of 3 runs recorded one)
+   /ringkasan  desktop  LCP                 504      684   +36 %
+   /ringkasan  desktop  content ready       632      697   +10 %
+   /ringkasan  desktop  DCL                  62       65   +5 %
+   /ringkasan  desktop  requests             31       24   -23 %
+   /ringkasan  desktop  js KB             285.3    306.2
+   /ringkasan  desktop  css KB             13.5     19.8
+   /ringkasan  desktop  font KB               0     65.3
+   /ringkasan  desktop  img KB                0        0
+   /ringkasan  desktop  api KB             71.6     71.6
+   /ringkasan  desktop  total KB          372.4    464.7   LCP element before: P.chart-summary, after: P.page-desc
+   /           fast3g   LCP               2,356    2,176   -8 %
+   /           fast3g   content ready     2,611    2,657   +2 %
+   /           fast3g   DCL               1,456    1,568   +8 %
+   /           fast3g   requests             17       12   -29 %
+   /           fast3g   js KB             162.8    155.8
+   /           fast3g   css KB             13.5     14.1
+   /           fast3g   font KB               0     65.3
+   /           fast3g   img KB              107     54.8
+   /           fast3g   api KB              2.8      4.8
+   /           fast3g   total KB          288.1    296.7   LCP element before: IMG., after: H1.
+   /ringkasan  fast3g   LCP               4,368    3,148   -28 %
+   /ringkasan  fast3g   content ready     5,430    3,887   -28 %
+   /ringkasan  fast3g   DCL               1,464    1,571   +7 %
+   /ringkasan  fast3g   requests             31       24   -23 %
+   /ringkasan  fast3g   js KB             285.3    306.2
+   /ringkasan  fast3g   css KB             13.5     19.8
+   /ringkasan  fast3g   font KB               0     65.3
+   /ringkasan  fast3g   img KB                0        0
+   /ringkasan  fast3g   api KB             71.6     71.6
+   /ringkasan  fast3g   total KB          372.4    464.7   LCP element before: P.chart-summary, after: P.page-desc
+   LCP per run (after): desktop /: none, 236, none; desktop /ringkasan: 664, 684, 776; fast3g /: 2176, 2352, 2176; fast3g /ringkasan: 3316, 3148, 3148
+
+2. BUNDLES (raw / gzip level 9, bytes)
+   baseline index.html loads: index-CIVmssBh.js 260,353 / 79,733; ui-BcYJV8W_.js 251,698 / 79,869; activity-DyxJrteh.js 261 / 219; bell-CARND4yQ.js 317 / 254; flask-conical-CgaTMJw5.js 590 / 352; building-complex-C2RqxInS.js 439 / 274; chart-line-C-A9Eqz7.js 234 / 207; database-B6vM9kmb.js 270 / 220; file-text-GXK_GZtX.js 412 / 269; toast-CMZEzMps.js 1,676 / 810; index-C3c6FJ2U.css 65,266 / 13,390
+   after (first run) index.html loads:    index-BoluKFv5.js 272,949 / 83,384; ui-CL6-rwJp.js 214,683 / 69,492; index-Wpbg22Ci.css 75,695 / 13,974
+   after (first run) CSS files (lazy area sheets load with their pages): flows-dx89yxIR.css 19,468 / 3,792; index-Wpbg22Ci.css 75,695 / 13,974; layout-BjBEFrdy.css 12,259 / 2,795; market-rUN0cRGT.css 10,514 / 2,278; ops-DTeVIBik.css 6,311 / 1,797
+   after (integration build) index.html loads: index-NLcfG7Ow.js 275,081 / 84,223; ui-DWDm5D3n.js 216,345 / 69,933; index-BHhoMwvZ.css 76,318 / 14,098
+   after (integration build) CSS files: flows-Cukb1dnQ.css 19,544 / 3,824; index-BHhoMwvZ.css 76,318 / 14,098; layout-CrKL2J9K.css 12,113 / 2,761; market-CYTexLIb.css 10,619 / 2,295; ops-Bq9eLj8o.css 6,071 / 1,726
+   entry CSS (the one stylesheet index.html loads): baseline 65,266 / 13,390; after (first run) 75,695 / 13,974; after (integration build) 76,318 / 14,098 (+623 / +124 B against the first run)
+   landing guard (scripts/check-landing-bundle.mjs, --max-gzip-bytes 160000), after (first run), from guard-after.txt: exit 0, "OK: no Recharts code"
+   assets/index-BoluKFv5.js                    272949 B     83384 B gzip
+   assets/ui-CL6-rwJp.js                       214683 B     69492 B gzip
+   total                                       487632 B    152876 B gzip  (476.2 KiB, 149.3 KiB gzip; 2 files)
+   landing guard, after (integration build), from int-work/guard-int.txt (run with --src apps/web/src, so the source cross-check ran): exit 0, "OK: no Recharts code ... (source cross-checked)"
+   assets/index-NLcfG7Ow.js                    275081 B     84223 B gzip
+   assets/ui-DWDm5D3n.js                       216345 B     69933 B gzip
+   total                                       491426 B    154156 B gzip  (479.9 KiB, 150.5 KiB gzip; 2 files)
+   change against the first run: +3,794 B raw / +1,280 B gzip; 5,844 B gzip below the 160,000 B budget
+   lazily loaded public routes, integration build (added to the landing, gzip): MethodologyPage 2,025; LegalPages 11,993; AuthPages 4,486
+   photographs: the first-run build still copied 6 unused photos into img/ (hero-refinery.*, editorial-tanker.*, editorial-port.*;
+   681,713 B). The integration build's img/ holds only img/product/*.webp (8 files, 502,186 B; "6 files" corrected 2026-10-27); the photos now live in
+   docs/assets/photos/ and are not served.
+
+3. ACCESSIBILITY (axe-core 4.10, tags wcag2a/2aa/21a/21aa/22aa; 14 routes x 1440/390 = 28 runs)
+   before: 16 rule hits / 136 nodes in total; without the verified sidebar color-contrast false positive: 56 nodes (definition-list/dlitem on /metodologi and /akun)
+   before per route: /metodologi 1440: definition-list(1) dlitem(16); /metodologi 390: definition-list(1) dlitem(16); /ringkasan 1440: color-contrast(10); /harga 1440: color-contrast(10); /proyeksi 1440: color-contrast(10); /skenario 1440: color-contrast(10); /insight 1440: color-contrast(10); /laporan 1440: color-contrast(10); /pemberitahuan 1440: color-contrast(10); /akun 1440: color-contrast(10) definition-list(1) dlitem(10); /akun 390: definition-list(1) dlitem(10)
+   after:  0 rule hits / 0 nodes in 28 runs
+   after, operator console (6 routes x 1440/390, new): WCAG 0 rule hits, best-practice 0
+   focus walk (Tab forward to the end and back; 15 pages x 1440/390 = 30 runs): stops without indicator 0, entirely hidden under a sticky header 0, partly hidden 0
+   text-only zoom 200 % on /ringkasan: before h1 28px -> 28px, body 14.5px -> 14.5px; after (first run) h1 24px -> 24px, body 15px -> 15px;
+                                       after (integration build) h1 24px -> 48px, body 15px -> 30px (qa/a11y.mjs zoom unchanged, "scales": true)
+   browser zoom 200 % on /ringkasan (720 CSS px): before scrollWidth 720/720, after (first run) 720/720, after (integration build) 720/720
+
+4. VISUAL MATRIX (qa/v2/matrix2.mjs; before: 84 captures, guest + member; after: 120 captures, guest + member + operator)
+   horizontal overflow: before 0/84, after 0/120
+   elements outside the viewport outside scroll containers: before 1584, after 3282 (all in the closed off-canvas drawer aside#sidebar at <= 768 px, inert)
+   console errors: before 0, after 0; HTTP errors >= 400: before 0, after 0
+   after only: skeletons left after load 0; pages without exactly one h1 0; role=alert after load 0; uppercase text nodes 0
+   document height (px), before -> after:
+   route                          320            390            768           1024           1440           1920
+   /                    8,330->10,014   7,676->9,042   6,134->6,858   6,584->6,365   3,672->5,502   3,672->5,502
+   /metodologi           6,602->6,428   5,838->5,815   3,881->3,991   3,948->4,004   3,710->3,701   3,710->3,701
+   /masuk                    900->900       900->900       900->900       900->900       900->900       900->900
+   /daftar                 919->1,021     919->1,021       900->921       900->953       900->900       900->900
+   /syarat               7,267->7,238   6,081->6,200   4,991->4,508   4,880->4,517   4,641->4,044   4,641->4,044
+   /privasi              9,090->9,001   7,591->7,659   5,943->5,398   5,806->5,407   5,567->4,923   5,567->4,923
+   /ringkasan            6,006->5,511   5,299->4,829   3,635->3,439   3,512->3,117   2,734->2,586   2,512->2,454
+   /harga                8,491->8,670   7,639->7,884   4,055->5,094   3,594->4,675   3,196->3,232   3,038->3,153
+   /proyeksi            11,389->3,901   9,980->3,360   5,842->2,305   6,392->2,349   4,501->2,013   4,156->1,991
+   /skenario             1,429->1,418   1,258->1,299   1,139->1,103   1,098->1,094       900->900       900->900
+   /insight              2,798->2,684   2,309->2,323   1,667->1,658   1,630->1,657   1,182->1,167   1,182->1,167
+   /laporan              3,516->3,839   3,269->3,362   2,053->1,986   2,016->1,985   1,452->1,444   1,040->1,425
+   /pemberitahuan        1,343->1,358   1,195->1,165   1,034->1,091     990->1,078       900->900       900->900
+   /akun                10,973->8,284  10,365->7,576   6,119->5,126   5,417->4,315   4,047->3,353   3,771->3,230
+   /operasi                  -->2,070       -->1,815       -->1,274       -->1,233         -->900         -->900
+   /operasi/data            -->14,060      -->12,824       -->5,662       -->5,754       -->4,026       -->3,658
+   /operasi/model           -->10,093       -->9,313       -->6,418       -->5,814       -->3,957       -->3,617
+   /operasi/pekerjaan        -->3,654       -->3,296       -->1,605       -->1,804       -->1,391       -->1,317
+   /operasi/audit            -->8,007       -->6,963       -->1,694       -->2,931       -->1,659       -->1,659
+   /operasi/organisasi       -->6,133       -->5,623       -->2,725       -->2,778       -->1,990       -->1,990
+
+   Notes on the numbers above:
+   - Desktop "/" LCP: two of the three runs recorded no largest-contentful-paint entry; the median is the one run
+     that did (236 ms, element H1). Content ready (h1 present, no .skeleton left) is available for all runs.
+   - Desktop "/ringkasan" LCP is 180 ms slower than baseline (504 -> 684 ms). The LCP element is now the page
+     description paragraph, painted with the self-hosted IBM Plex Sans (65.3 KB of fonts; the baseline loaded no web
+     font). PERF's own after-measurement on 2026-10-26 shows the same (684 ms), so this is a real cost, not noise.
+   - The elements "outside the viewport" counted in section 4 were re-checked on every member and operator route at
+     320, 390 and 768 (offenders-after.json): 0 outside the closed drawer, and the drawer is inert in all 42 renders.
+     The after count is higher because the operator console (new) and a longer member navigation are included.
+   - Document heights: "/" is longer at most widths (product tour, sources and plans sections); "/proyeksi" is much
+     shorter because the result, assumptions, accuracy and history views became tabs.
+
+5. STATES (qa/v2/states2.mjs; every API call simulated in the browser; nothing is written)
+   530 on every call (HTML body, like an offline Cloudflare tunnel):
+     guest "/" 1440 and 390     first explained state at 0.29 s / 0.28 s; at 8 s: h1 present, 0 skeletons, exactly 1 role=alert
+                                ("Data pasar belum dapat dimuat ... belum ada salinan publik tersimpan"), Retry + ESDM link, 0 "-" values
+                                (baseline: 2 identical alerts, "-" KPIs, a message about numbers that were not shown)
+     member "/" 1440 and 390    explained at 1.82 s / 1.85 s (one whoami retry), same single alert, header "Buka ruang kerja"
+     member "/ringkasan"        explained at 1.84 s; URL stays /ringkasan; h1 "Sesi Anda belum dapat diperiksa", 1 alert, Retry,
+                                no password field (baseline: redirected to /masuk?next=%2Fringkasan)
+     recovery                   API restored + Retry -> "Ringkasan pasar", no password prompt (1440 and 390)
+     operator "/operasi"        same session-unconfirmed explanation with Retry
+     guest "/ringkasan"         /masuk?next=%2Fringkasan (expected for a guest; unchanged)
+   API hangs (never answered), 1440:
+     guest "/"                  h1 + navigation at 1 s; market panel skeleton with the line "Memuat ICP resmi terbaru dan riwayat
+                                bulanannya..." until the 10 s public timeout; first explained state 10.18 s; at 12 s and 40 s:
+                                0 skeletons, 1 alert with Retry (baseline: 8 skeletons for 35 s, then 2 alerts)
+     guest "/" 390              explained at 10.27 s
+     member "/"                 1 s: the 2 s session-wait skeleton; 3 s: landing h1 + navigation, no Masuk/Buat akun while the
+                                session is checked; 9 s: header "Buka ruang kerja"; explained at 10.29 s
+                                (baseline: whole-page skeleton to 35 s, about 70 s before any message)
+     member "/ringkasan"        1-6 s: page skeleton (no brand, navigation or text) while whoami runs (8 s timeout);
+                                8.17 s: "Sesi Anda belum dapat diperiksa" + "Server lambat menjawab", Retry, URL kept
+                                (baseline: skeleton for 35 s, then sent to /masuk)
+   Stale public copy (real snapshot and plans served with X-ICP-Cache: stale, X-ICP-Cached-At 2026-10-26T15:00:00Z):
+                                "Layanan analitik belum menjawab saat ini. Angka ini salinan publik terakhir yang tersimpan pada
+                                26 Okt 2026, 22.00 WIB." (English equivalent); no "Mutakhir"; 0 alerts (1440, 390, en 1440)
+   Partial failure on /ringkasan (/insights and /data/verification answer 500): one ErrorState with Retry naming
+                                "Tidak tersedia saat ini: insight dan bukti per bulan.", ICP card shows "Bukti tidak tersedia"
+   Slow (only /data/history and /forecasts/latest hang): at 9.5 s one notice "Data masih dimuat ... menunggu hingga 35 detik"
+   Data-status popover: role=dialog, lists ICP, Brent, Dubai, WTI, JISDOR with period and status; Escape closes it and
+                                returns focus to the trigger (1440, 390)
+   Report outcome unknown (POST /reports answered 504 by a mock): warn callout "Server tidak menjawab dalam batas waktu
+                                layanan" explaining the outcome is unknown, "Periksa daftar sekarang" + "Coba lagi"; the retry sent
+                                the same Idempotency-Key (2 attempts, identical key, 40 characters)
+   Empty states: /pemberitahuan (real, 0 rules), /skenario and /skenario?tab=bandingkan and /laporan (list emptied by a mock),
+                                unknown route (member and guest), /insight?kategori=xyz ("Tidak ada insight dalam kategori ini." +
+                                "Tampilkan semua kategori"); each with an explanation and a next step
+   English: "/" and "/ringkasan" at 1440 and 390: lang=en, 0 Indonesian leftovers by the baseline word heuristic
+                                (baseline: 4 Indonesian dataset names on /ringkasan)
+
+6. JOURNEYS (qa/v2/journeys2.mjs, member of the local test organisation)
+   forecast    interval buttons 50% / 95% / 80% set ?tingkat=50 / ?tingkat=95 / (none); after a reload on ?tingkat=95 the
+               95% button stays pressed and the header reads "Rentang 95% USD/bbl"; 3-month forecast in 1.70 s,
+               POST /forecasts 201, ?proyeksi=<id>, focus on the "Hasil proyeksi" heading, status "Hasil proyeksi diperbarui."
+   scenario    run (Brent 95, 1.54 s); edit to 90 and save: stale callout "Asumsi skenario diubah setelah hasil ini dibuat" with
+               "Jalankan ulang"; re-run: callout gone, result for 90 (Okt 2026 USD 88,74); compare two scenarios (1.84 s);
+               edit one to 125: comparison callout "Perbandingan ini tidak lagi sesuai ..." + 2 stale tags, still shown after a
+               reload; restoring 120 removes the label. Archive dialog: alertdialog, focus on "Batal" with a 2px teal outline,
+               6 Tabs stay inside, Batal and Escape close it, focus returns to the archive button, 2 -> 2 scenarios
+   report      Laporan pasar bulanan, PDF + CSV, generated in 2.06 s; both downloads (PDF 75,592 B "%PDF-1.4"; CSV 856 B,
+               UTF-8 BOM, same header as baseline); download buttons type="button"; exactly 1 POST /reports; list 17 -> 18
+               (baseline: 3 POST /reports for 1 generate + 2 downloads)
+   insight     sheet opens, Back closes it, second Back returns to /ringkasan; deep link opens it, Escape closes it;
+               "Salin tautan" (ghost) shows a 2px teal outline when reached with Tab
+   language    EN: lang=en, h1 "Market overview", navigation in sentence case, survives a reload
+   sign-out    lands on "/", one toast "Anda telah keluar. Sampai jumpa lagi.", token removed; Back -> /masuk?next=%2Fringkasan,
+               no private shell; the old token gets 401 on /org
+
+7. POLICY V4 GUARDS
+   Guest pages (6 public routes x id/en x 1440/390, scrolled through): 0 forecast values on screen out of 298 value strings
+   from 46 forecast runs (qa/v2/guest-guard.mjs). The only matches inside API responses were substrings of observed Brent
+   monthly averages in the public snapshot's "recent" series (68.1345 for 2025-04 and 85.3991 for 2026-06 contain
+   "68.13" and "85.39", which are interval bounds of older runs): benchmark observations, not forecasts.
+   Product screenshots (apps/web/public/img/product/*.webp, re-captured 2026-10-27): both guards of the capture script
+   passed for all 8 frames (no result headings; none of 274 forecast value strings inside any frame).
+   Integration build (same script, run against :4180): 0 forecast values on screen in all 24 route/locale/width runs, out of 298
+   value strings from 46 runs. The API matches are the same two Brent observations (68.1345 for 2025-04, 85.3991 for 2026-06).
+   The guest images 46 (landing, 200 % text) and 51 (mocked conflict month) contain none of the 38 value strings of the latest
+   system forecast (prediction and interval bounds).
+
+8. INTEGRATION BUILD (2026-10-27, 18:30-18:45 WIB; build of the tree as of 18:13, the last web source change; vite preview :4180)
+   Build: npm run build -w @icp/web -- --outDir <QA scratch>/qa/int-dist --emptyOutDir; tsc and vite build passed (int-work/build.txt).
+   Bundle numbers: section 2.
+
+   8a. Text-only zoom 200 %, baseline check (qa/a11y.mjs zoom, QA_OUT=qa/after-int, QA_DATA=qa/data-after-int; data-after-int/a11y-zoom.json)
+       Chrome text size 200 % (CDP Page.setFontSizes standard 32, fixed 26) on /ringkasan at 1440:
+       h1 24px -> 48px, body 15px -> 30px (baseline 28 -> 28 and 14.5 -> 14.5; first after run 24 -> 24 and 15 -> 15).
+       Browser zoom 200 % (720 CSS px): scrollWidth 720/720, no overflow. The two "clipped" entries are the same as in the
+       first run: a visually hidden table caption and the three-line clamp of an insight teaser.
+
+   8b. Text-only zoom 200 %, all routes (qa/v2/textzoom-int.mjs: copy of the review D checker as re-run by fix D, output in
+       qa/int-zoom/; every non-GET API request aborted; operator pages with the local operator token, never printed)
+       63 route/width runs: 6 public, 9 member (including the not-found page) and 6 operator routes at 1440, 768 and 390.
+       The probe measures every visible text node, including button and chip labels and SVG chart text, against the viewport
+       and every clipping ancestor.
+       fonts at 200 %: root 32 px; body 15 -> 30 px on every route; h1 24 -> 48 px (workspace, operator, sign-in and
+                       registration), 36 -> 52 px (methodology and legal pages), 54 -> 68 px (landing)
+       header height:  public 61 -> 89 px at 1440 and 768, 91 px at 390; member 56 -> 73 px at 1440, 81 px at 768 and 390;
+                       operator 56 px (unchanged; it fits). --sticky-top equals the measured header height in 57/57 runs
+                       that have a header (/masuk and /daftar have none). Every h1 starts below the header.
+       horizontal page overflow 0/63; controls whose label spills out of their box 0; text nodes below 20 px 0;
+       sticky elements under the header 0
+       text cut by a clipping ancestor: 8 text nodes, all on /ringkasan (3 at 1440, 2 at 768, 3 at 390), all inside
+                       p.insight-brief-body, the overview's three-line clamp of insight teasers (full text on /insight)
+       ellipsis (single-line by design): the app top-bar product name (30 runs at 768 and 390; at 390 it is shortened to
+                       "IC…" and is no longer covered by the data-status button); two long source URLs on /operasi/data;
+                       one audit actor id on /operasi/audit at 768; the file picker label "Pilih berkas…" on /operasi/data at
+                       768, whose line box overhangs its overflow:hidden span by 2 px vertically (not cut horizontally)
+       desktop sidebar on /ringkasan at 1440: 5 of 7 main navigation links visible without scrolling (review D measured 1 of
+                       7 before its fixes; int-shots/facts.json, image 47); that the whole sidebar scrolls is fix D's
+                       statement and was not measured here
+       Tab walk at 200 % (/metodologi, /harga, /skenario at 1440 and 390; 25/19/42/31/27/16 stops): 0 fully hidden, 0 off
+                       screen; 1 partly covered: the focusable .table-scroll region on /harga at 1440, which is taller than
+                       the viewport (as in review D's run before the fixes)
+       axe-core at 100 % (wcag2a/2aa/21a/21aa/22aa), 12 scans (/, /masuk, /ringkasan, /harga, /laporan, /operasi/data at
+                       1440 and 390): 0 violations
+       console and page errors: 0; write requests blocked by the safety net: 0
+
+   8c. Targeted states (qa/v2/integration-shots.mjs; int-shots/facts.json; every non-GET API request aborted unless mocked)
+       landing, 390, 200 % text (image 46): end labels "112,81" and "114,16" do not overlap; x labels do not overlap; every
+                       chart label lies inside the panel; tick text 25 px; no page overflow; header 91 px
+       /harga, 390, 200 % (image 48): "Menampilkan 12 dari 36 bulan" and "Tampilkan semua (36)" wrap inside the viewport
+                       (text 33-345 px of 390; review D measured the first starting at -37 px and the button cut)
+       /laporan, 390, 200 % (image 49): top bar 81 px (--sticky-top 81px), product name ends in an ellipsis and is not
+                       covered by the data-status button, h1 below the header, no overflow
+       report, 1440 (image 50; POST /reports mocked: the first answer a 504 after 1.5 s, the retry a 409 IDEMPOTENCY_IN_PROGRESS
+                       with Retry-After 15 and details.retry_after_seconds 15):
+                       working text "Membuat laporan pasar bulanan…"; after the 504 "Server tidak menjawab dalam batas waktu
+                       layanan"; after "Coba lagi" the title "Laporan ini masih dibuat di server", whose body ends "Permintaan
+                       pertama dikirim 27 Okt 2026, 18.38 WIB." (the first send, 18:38:25 WIB; the retry went at 18:38:28).
+                       The callout has its own line "Tombol Coba lagi aktif kembali dalam 15 detik." ("11 detik" 3 s later);
+                       "Coba lagi" and "Buat laporan" are disabled; "Periksa daftar sekarang" stays enabled; focus is inside the
+                       result; 2 POSTs with the same Idempotency-Key and body; none reached the server
+       conflict month on the landing, 1440 (image 51; the public snapshot rewritten in the browser the way the backend
+                       withholds a conflict month: icp_usd, mom_change_pct and icp_idr null, the newest month's ICP in
+                       "recent" null, icp_evidence.basis "conflict"):
+                       headline "nilai ditahan: dokumen resmi belum sepakat"; chip "Sumber tidak sepakat"; rupiah fact
+                       "ditahan sampai dokumen resmi ICP sepakat"; legend "Bulan dengan nilai ditahan (dokumen resmi belum
+                       sepakat)"; screen-reader summary "Nilai September 2026 ditahan karena dokumen resmi belum sepakat";
+                       table row "Sep 2026 | ditahan (dokumen resmi belum sepakat) | 114,16 | -"; only the Brent end label
+                       (114,16) is drawn; the real September value (112,81) appears nowhere on the page
+       boot note, 1440 (image 52; /ringkasan with a stored session, /auth/whoami held for 4 s, then released):
+                       0.9 s: placeholder without text; 2.5 s: "Memeriksa sesi Anda di server…" inside the role=status
+                       placeholder; after the release: "Ringkasan pasar", note gone; whoami called once
+                       (first run, image 45: no text at all until the 8 s whoami timeout)
+       slow page chunk, 1440 (image 53; OverviewPage chunk delayed 4.5 s, whoami answered at 158 ms): at 2.5 s the signed-in
+                       shell shows "Memuat halaman…", not the session text (review D finding RD-01 / RD-8); the page then
+                       renders "Ringkasan pasar"

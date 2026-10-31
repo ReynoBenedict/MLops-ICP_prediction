@@ -1,0 +1,129 @@
+Baseline measurements, 2026-10-25 (frozen build http://127.0.0.1:4173 + local backend). Raw output of the QA scripts.
+
+== perf.mjs (3 runs, median; 1440x900; cache disabled; fast3g = 1.6 Mbps/750 kbps/150 ms RTT + 4x CPU)
+Base http://127.0.0.1:4173, 3 runs each, median, viewport 1440x900, cache disabled. Times in ms from navigation start; sizes in KB transferred (encoded).
+| Page | Profile | DCL | Load | LCP | Content ready | Requests | JS KB | CSS KB | Font KB | Img KB | HTML KB | API KB | Total KB | API latency ms (median) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| / | desktop | 63 | 63 | 204 | 240 | 17 | 162.8 | 13.5 | 0 | 107 | 1 | 2.8 | 288.1 | public/market-snapshot 26; plans 12 |
+| /ringkasan | desktop | 62 | 62 | 504 | 632 | 31 | 285.3 | 13.5 | 0 | 0 | 1 | 71.6 | 372.4 | auth/whoami 6; alerts/events 8; org 28; reports 30; data/summary 56; data/history 45; forecasts/latest 81; plans 13; data/verification 86; insights 74 |
+| / | fast3g | 1456 | 1457 | 2356 | 2611 | 17 | 162.8 | 13.5 | 0 | 107 | 1 | 2.8 | 288.1 | public/market-snapshot 159; plans 189 |
+| /ringkasan | fast3g | 1464 | 1466 | 4368 | 5430 | 31 | 285.3 | 13.5 | 0 | 0 | 1 | 71.6 | 372.4 | auth/whoami 175; alerts/events 176; org 208; reports 173; data/summary 272; data/history 278; forecasts/latest 301; plans 220; data/verification 423; insights 251 |
+
+
+== axe-core 4.10 (wcag2a, wcag2aa, wcag21a, wcag21aa, wcag22aa)
+axe / 1440: rules=0 nodes=0  | incompleteContrast=3
+axe /metodologi 1440: rules=2 nodes=17 definition-list(serious,1) dlitem(serious,16) | incompleteContrast=0
+axe /masuk 1440: rules=0 nodes=0  | incompleteContrast=0
+axe /daftar 1440: rules=0 nodes=0  | incompleteContrast=0
+axe /syarat 1440: rules=0 nodes=0  | incompleteContrast=0
+axe /privasi 1440: rules=0 nodes=0  | incompleteContrast=1
+axe / 390: rules=0 nodes=0  | incompleteContrast=3
+axe /metodologi 390: rules=2 nodes=17 definition-list(serious,1) dlitem(serious,16) | incompleteContrast=0
+axe /masuk 390: rules=0 nodes=0  | incompleteContrast=0
+axe /daftar 390: rules=0 nodes=0  | incompleteContrast=0
+axe /syarat 390: rules=0 nodes=0  | incompleteContrast=0
+axe /privasi 390: rules=0 nodes=0  | incompleteContrast=0
+axe /ringkasan 1440: rules=1 nodes=10 color-contrast(serious,10) | incompleteContrast=19
+axe /harga 1440: rules=1 nodes=10 color-contrast(serious,10) | incompleteContrast=35
+axe /proyeksi 1440: rules=1 nodes=10 color-contrast(serious,10) | incompleteContrast=23
+axe /skenario 1440: rules=1 nodes=10 color-contrast(serious,10) | incompleteContrast=0
+axe /insight 1440: rules=1 nodes=10 color-contrast(serious,10) | incompleteContrast=0
+axe /laporan 1440: rules=1 nodes=10 color-contrast(serious,10) | incompleteContrast=0
+axe /pemberitahuan 1440: rules=1 nodes=10 color-contrast(serious,10) | incompleteContrast=0
+axe /akun 1440: rules=3 nodes=21 color-contrast(serious,10) definition-list(serious,1) dlitem(serious,10) | incompleteContrast=2
+axe /ringkasan 390: rules=0 nodes=0  | incompleteContrast=12
+axe /harga 390: rules=0 nodes=0  | incompleteContrast=25
+axe /proyeksi 390: rules=0 nodes=0  | incompleteContrast=9
+axe /skenario 390: rules=0 nodes=0  | incompleteContrast=0
+axe /insight 390: rules=0 nodes=0  | incompleteContrast=0
+axe /laporan 390: rules=0 nodes=0  | incompleteContrast=0
+axe /pemberitahuan 390: rules=0 nodes=0  | incompleteContrast=0
+axe /akun 390: rules=2 nodes=11 definition-list(serious,1) dlitem(serious,10) | incompleteContrast=2
+Note: the color-contrast nodes on member pages at 1440 are a verified false positive (sidebar background rgb(14,46,74) not seen by axe; real ratios 6.3-9.05:1).
+
+== matrix.mjs (document height, overflow, console errors per capture)
+guest / 320: h=8330 overflow=false sw=320 offenders=0 errors=0 http=0 url=/
+guest /metodologi 320: h=6602 overflow=false sw=320 offenders=0 errors=0 http=0 url=/metodologi
+guest /masuk 320: h=900 overflow=false sw=320 offenders=0 errors=0 http=0 url=/masuk
+guest /daftar 320: h=919 overflow=false sw=320 offenders=0 errors=0 http=0 url=/daftar
+guest /syarat 320: h=7267 overflow=false sw=320 offenders=0 errors=0 http=0 url=/syarat
+guest /privasi 320: h=9090 overflow=false sw=320 offenders=0 errors=0 http=0 url=/privasi
+guest / 390: h=7676 overflow=false sw=390 offenders=0 errors=0 http=0 url=/
+guest /metodologi 390: h=5838 overflow=false sw=390 offenders=0 errors=0 http=0 url=/metodologi
+guest /masuk 390: h=900 overflow=false sw=390 offenders=0 errors=0 http=0 url=/masuk
+guest /daftar 390: h=919 overflow=false sw=390 offenders=0 errors=0 http=0 url=/daftar
+guest /syarat 390: h=6081 overflow=false sw=390 offenders=0 errors=0 http=0 url=/syarat
+guest /privasi 390: h=7591 overflow=false sw=390 offenders=0 errors=0 http=0 url=/privasi
+guest / 768: h=6134 overflow=false sw=768 offenders=0 errors=0 http=0 url=/
+guest /metodologi 768: h=3881 overflow=false sw=768 offenders=0 errors=0 http=0 url=/metodologi
+guest /masuk 768: h=900 overflow=false sw=768 offenders=0 errors=0 http=0 url=/masuk
+guest /daftar 768: h=900 overflow=false sw=768 offenders=0 errors=0 http=0 url=/daftar
+guest /syarat 768: h=4991 overflow=false sw=768 offenders=0 errors=0 http=0 url=/syarat
+guest /privasi 768: h=5943 overflow=false sw=768 offenders=0 errors=0 http=0 url=/privasi
+guest / 1024: h=6584 overflow=false sw=1024 offenders=0 errors=0 http=0 url=/
+guest /metodologi 1024: h=3948 overflow=false sw=1024 offenders=0 errors=0 http=0 url=/metodologi
+guest /masuk 1024: h=900 overflow=false sw=1024 offenders=0 errors=0 http=0 url=/masuk
+guest /daftar 1024: h=900 overflow=false sw=1024 offenders=0 errors=0 http=0 url=/daftar
+guest /syarat 1024: h=4880 overflow=false sw=1024 offenders=0 errors=0 http=0 url=/syarat
+guest /privasi 1024: h=5806 overflow=false sw=1024 offenders=0 errors=0 http=0 url=/privasi
+guest / 1440: h=3672 overflow=false sw=1440 offenders=0 errors=0 http=0 url=/
+guest /metodologi 1440: h=3710 overflow=false sw=1440 offenders=0 errors=0 http=0 url=/metodologi
+guest /masuk 1440: h=900 overflow=false sw=1440 offenders=0 errors=0 http=0 url=/masuk
+guest /daftar 1440: h=900 overflow=false sw=1440 offenders=0 errors=0 http=0 url=/daftar
+guest /syarat 1440: h=4641 overflow=false sw=1440 offenders=0 errors=0 http=0 url=/syarat
+guest /privasi 1440: h=5567 overflow=false sw=1440 offenders=0 errors=0 http=0 url=/privasi
+guest / 1920: h=3672 overflow=false sw=1920 offenders=0 errors=0 http=0 url=/
+guest /metodologi 1920: h=3710 overflow=false sw=1920 offenders=0 errors=0 http=0 url=/metodologi
+guest /masuk 1920: h=900 overflow=false sw=1920 offenders=0 errors=0 http=0 url=/masuk
+guest /daftar 1920: h=900 overflow=false sw=1920 offenders=0 errors=0 http=0 url=/daftar
+guest /syarat 1920: h=4641 overflow=false sw=1920 offenders=0 errors=0 http=0 url=/syarat
+guest /privasi 1920: h=5567 overflow=false sw=1920 offenders=0 errors=0 http=0 url=/privasi
+member /ringkasan 320: h=6006 overflow=false sw=320 offenders=66 errors=0 http=0 url=/ringkasan
+member /harga 320: h=8491 overflow=false sw=320 offenders=66 errors=0 http=0 url=/harga
+member /proyeksi 320: h=11389 overflow=false sw=320 offenders=66 errors=0 http=0 url=/proyeksi
+member /skenario 320: h=1429 overflow=false sw=320 offenders=66 errors=0 http=0 url=/skenario
+member /insight 320: h=2798 overflow=false sw=320 offenders=66 errors=0 http=0 url=/insight
+member /laporan 320: h=3516 overflow=false sw=320 offenders=66 errors=0 http=0 url=/laporan
+member /pemberitahuan 320: h=1343 overflow=false sw=320 offenders=66 errors=0 http=0 url=/pemberitahuan
+member /akun 320: h=10973 overflow=false sw=320 offenders=66 errors=0 http=0 url=/akun
+member /ringkasan 390: h=5299 overflow=false sw=390 offenders=66 errors=0 http=0 url=/ringkasan
+member /harga 390: h=7639 overflow=false sw=390 offenders=66 errors=0 http=0 url=/harga
+member /proyeksi 390: h=9980 overflow=false sw=390 offenders=66 errors=0 http=0 url=/proyeksi
+member /skenario 390: h=1258 overflow=false sw=390 offenders=66 errors=0 http=0 url=/skenario
+member /insight 390: h=2309 overflow=false sw=390 offenders=66 errors=0 http=0 url=/insight
+member /laporan 390: h=3269 overflow=false sw=390 offenders=66 errors=0 http=0 url=/laporan
+member /pemberitahuan 390: h=1195 overflow=false sw=390 offenders=66 errors=0 http=0 url=/pemberitahuan
+member /akun 390: h=10365 overflow=false sw=390 offenders=66 errors=0 http=0 url=/akun
+member /ringkasan 768: h=3635 overflow=false sw=768 offenders=66 errors=0 http=0 url=/ringkasan
+member /harga 768: h=4055 overflow=false sw=768 offenders=66 errors=0 http=0 url=/harga
+member /proyeksi 768: h=5842 overflow=false sw=768 offenders=66 errors=0 http=0 url=/proyeksi
+member /skenario 768: h=1139 overflow=false sw=768 offenders=66 errors=0 http=0 url=/skenario
+member /insight 768: h=1667 overflow=false sw=768 offenders=66 errors=0 http=0 url=/insight
+member /laporan 768: h=2053 overflow=false sw=768 offenders=66 errors=0 http=0 url=/laporan
+member /pemberitahuan 768: h=1034 overflow=false sw=768 offenders=66 errors=0 http=0 url=/pemberitahuan
+member /akun 768: h=6119 overflow=false sw=768 offenders=66 errors=0 http=0 url=/akun
+member /ringkasan 1024: h=3512 overflow=false sw=1024 offenders=0 errors=0 http=0 url=/ringkasan
+member /harga 1024: h=3594 overflow=false sw=1024 offenders=0 errors=0 http=0 url=/harga
+member /proyeksi 1024: h=6392 overflow=false sw=1024 offenders=0 errors=0 http=0 url=/proyeksi
+member /skenario 1024: h=1098 overflow=false sw=1024 offenders=0 errors=0 http=0 url=/skenario
+member /insight 1024: h=1630 overflow=false sw=1024 offenders=0 errors=0 http=0 url=/insight
+member /laporan 1024: h=2016 overflow=false sw=1024 offenders=0 errors=0 http=0 url=/laporan
+member /pemberitahuan 1024: h=990 overflow=false sw=1024 offenders=0 errors=0 http=0 url=/pemberitahuan
+member /akun 1024: h=5417 overflow=false sw=1024 offenders=0 errors=0 http=0 url=/akun
+member /ringkasan 1440: h=2734 overflow=false sw=1440 offenders=0 errors=0 http=0 url=/ringkasan
+member /harga 1440: h=3196 overflow=false sw=1440 offenders=0 errors=0 http=0 url=/harga
+member /proyeksi 1440: h=4501 overflow=false sw=1440 offenders=0 errors=0 http=0 url=/proyeksi
+member /skenario 1440: h=900 overflow=false sw=1440 offenders=0 errors=0 http=0 url=/skenario
+member /insight 1440: h=1182 overflow=false sw=1440 offenders=0 errors=0 http=0 url=/insight
+member /laporan 1440: h=1452 overflow=false sw=1440 offenders=0 errors=0 http=0 url=/laporan
+member /pemberitahuan 1440: h=900 overflow=false sw=1440 offenders=0 errors=0 http=0 url=/pemberitahuan
+member /akun 1440: h=4047 overflow=false sw=1440 offenders=0 errors=0 http=0 url=/akun
+member /ringkasan 1920: h=2512 overflow=false sw=1920 offenders=0 errors=0 http=0 url=/ringkasan
+member /harga 1920: h=3038 overflow=false sw=1920 offenders=0 errors=0 http=0 url=/harga
+member /proyeksi 1920: h=4156 overflow=false sw=1920 offenders=0 errors=0 http=0 url=/proyeksi
+member /skenario 1920: h=900 overflow=false sw=1920 offenders=0 errors=0 http=0 url=/skenario
+member /insight 1920: h=1182 overflow=false sw=1920 offenders=0 errors=0 http=0 url=/insight
+member /laporan 1920: h=1040 overflow=false sw=1920 offenders=0 errors=0 http=0 url=/laporan
+member /pemberitahuan 1920: h=900 overflow=false sw=1920 offenders=0 errors=0 http=0 url=/pemberitahuan
+member /akun 1920: h=3771 overflow=false sw=1920 offenders=0 errors=0 http=0 url=/akun
+(offenders=66 on member pages <= 768 px = the closed off-canvas drawer, inert and translated off-screen)

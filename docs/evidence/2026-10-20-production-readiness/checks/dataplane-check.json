@@ -1,0 +1,78 @@
+[
+  {
+    "sql": "DROP TABLE users",
+    "status": 403,
+    "want": 403,
+    "reached_d1": false,
+    "pass": true
+  },
+  {
+    "sql": "CREATE TABLE x (a)",
+    "status": 403,
+    "want": 403,
+    "reached_d1": false,
+    "pass": true
+  },
+  {
+    "sql": "ALTER TABLE users ADD COLUMN pwn TEXT",
+    "status": 403,
+    "want": 403,
+    "reached_d1": false,
+    "pass": true
+  },
+  {
+    "sql": "PRAGMA writable_schema = 1",
+    "status": 403,
+    "want": 403,
+    "reached_d1": false,
+    "pass": true
+  },
+  {
+    "sql": "ATTACH DATABASE 'x.db' AS y",
+    "status": 403,
+    "want": 403,
+    "reached_d1": false,
+    "pass": true
+  },
+  {
+    "sql": "SELECT 1; DROP TABLE users",
+    "status": 403,
+    "want": 403,
+    "reached_d1": false,
+    "pass": true
+  },
+  {
+    "sql": "sElEcT 1 /* x */ ; DeLeTe FROM users",
+    "status": 403,
+    "want": 403,
+    "reached_d1": false,
+    "pass": true
+  },
+  {
+    "sql": "BEGIN",
+    "status": 403,
+    "want": 403,
+    "reached_d1": false,
+    "pass": true
+  },
+  {
+    "sql": "SELECT password_hash FROM users",
+    "status": 200,
+    "want": 200,
+    "reached_d1": true,
+    "pass": true
+  },
+  {
+    "sql": "PRAGMA table_info(\"users\")",
+    "status": 200,
+    "want": 200,
+    "reached_d1": true,
+    "pass": true
+  },
+  {
+    "sql": "SELECT 1 without secret",
+    "status": 401,
+    "want": 401,
+    "pass": true
+  }
+]

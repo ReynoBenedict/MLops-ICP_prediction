@@ -1,0 +1,21 @@
+PASS  route /ringkasan (member) - h1="Harga Minyak Mentah Indonesia" overflow=false signedIn=true errorCallouts=0 newConsole=0
+PASS  route /harga (member) - h1="Riwayat harga dan hubungan antar-acuan" overflow=false signedIn=true errorCallouts=0 newConsole=0
+PASS  route /proyeksi (member) - h1="Proyeksi Harga Minyak Mentah Indonesia" overflow=false signedIn=true errorCallouts=0 newConsole=0
+PASS  route /skenario (member) - h1="Bandingkan skenario harga acuan dan kurs" overflow=false signedIn=true errorCallouts=0 newConsole=0
+PASS  route /insight (member) - h1="Apa yang terjadi pada data" overflow=false signedIn=true errorCallouts=0 newConsole=0
+PASS  route /laporan (member) - h1="Laporan siap pakai dan pemberitahuan" overflow=false signedIn=true errorCallouts=0 newConsole=0
+PASS  route /akun (member) - h1="Pengaturan akun" overflow=false signedIn=true errorCallouts=0 newConsole=0
+PASS  chart reveal plays on first show - running when the first line appears: [chart-reveal,chart-reveal,chart-reveal,chart-reveal,shimmer,shimmer]
+PASS  no animation left running after the reveal - []
+PASS  hover does not replay chart animation; tooltip shows - running after hover: [] tooltip=true
+PASS  range change replays the reveal once - [background-color,box-shadow,color,background-color,box-shadow,color,chart-reveal,chart-reveal,chart-reveal,chart-reveal]
+PASS  forecast run shows busy state and reveals the result - {"found":true,"busy":true,"focused":"H2","reveal":true}
+PASS  mobile drawer focus management and inert when closed - {"inertBefore":true,"focusIn":"Tutup navigasi","focusBack":true,"inertAfter":true,"open":false}
+PASS  drawer closes after navigating - {"path":"/proyeksi","open":false}
+PASS  logout: server called, redirected to public home, feedback shown, token cleared - {"path":"/","toast":"Anda telah keluar. Sampai jumpa lagi.","token":null}
+PASS  private page after logout shows the sign-in gate, no member data - {"text":true,"signout":false}
+PASS  all requests same-origin
+PASS  no console errors or exceptions during the run
+
+console:
+

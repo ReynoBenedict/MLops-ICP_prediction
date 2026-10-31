@@ -1,0 +1,136 @@
+[
+  {
+    "check": "operator raises plan for seats",
+    "pass": true,
+    "detail": 200
+  },
+  {
+    "check": "temporary password expiry is returned with the invitation",
+    "pass": true,
+    "detail": {
+      "top": [
+        "member",
+        "note",
+        "temporary_password"
+      ],
+      "member_has_expiry": true
+    }
+  },
+  {
+    "check": "admin cannot reset/demote/disable a peer admin",
+    "pass": true,
+    "detail": [
+      403,
+      403,
+      403
+    ]
+  },
+  {
+    "check": "admin can still reset a viewer",
+    "pass": true,
+    "detail": 200
+  },
+  {
+    "check": "owner can reset an admin",
+    "pass": true,
+    "detail": 200
+  },
+  {
+    "check": "only the requester withdraws a deletion request",
+    "pass": true,
+    "detail": [
+      201,
+      404,
+      404,
+      200
+    ]
+  },
+  {
+    "check": "export holds only the owner's sessions, no hashes, no operator name",
+    "pass": true,
+    "detail": {
+      "session_users": 1,
+      "only_owner": true,
+      "scrypt_hash_present": false,
+      "token_hash_key_present": false,
+      "operator_name_present": false,
+      "files": 17,
+      "operator_name_locations": []
+    }
+  },
+  {
+    "check": "idle session is refused and revoked server-side",
+    "pass": true,
+    "detail": {
+      "status": 401,
+      "revoked": true
+    }
+  },
+  {
+    "check": "sign out everywhere else ends the other session and keeps the current one",
+    "pass": true,
+    "detail": {
+      "revoked": 1
+    }
+  },
+  {
+    "check": "session list exposes no token material or raw user agent",
+    "pass": true,
+    "detail": [
+      "created_at",
+      "current",
+      "device",
+      "expires_at",
+      "id",
+      "idle_expires_at",
+      "last_seen_at"
+    ]
+  },
+  {
+    "check": "operator creates an order",
+    "pass": true,
+    "detail": 201
+  },
+  {
+    "check": "checkout moves the order to pending",
+    "pass": true,
+    "detail": 200
+  },
+  {
+    "check": "webhook rejects bad signature, bad amount and wrong environment; order untouched",
+    "pass": true,
+    "detail": [
+      401,
+      409,
+      409,
+      "pending"
+    ]
+  },
+  {
+    "check": "valid notification applies once; replay is idempotent; signature not stored",
+    "pass": true,
+    "detail": {
+      "replay_duplicate": true,
+      "events": 1,
+      "status": "paid"
+    }
+  },
+  {
+    "check": "late 'pending' after 'paid' is ignored (200, no change)",
+    "pass": true,
+    "detail": [
+      200,
+      "paid"
+    ]
+  },
+  {
+    "check": "no automatic plan change on paid",
+    "pass": true,
+    "detail": "professional"
+  },
+  {
+    "check": "EMAIL_ENABLED=true is refused at start-up",
+    "pass": true,
+    "detail": "ConfigError: EMAIL_ENABLED=true is not supported yet: no e-mail provider is integrated"
+  }
+]
