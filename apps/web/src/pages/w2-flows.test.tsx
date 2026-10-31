@@ -523,7 +523,8 @@ describe("reports: explicit outcomes", () => {
     fireEvent.click(screen.getByRole("button", { name: "Buat laporan" }));
     await screen.findByText("Laporan siap diunduh");
     const rows = await screen.findAllByRole("row");
-    const oldRow = rows.find((r) => r.textContent?.includes("1 Okt 2026"))!;
+    // Not a plain substring: on the 11th, 21st or 31st the new report's "31 Okt 2026" contains "1 Okt 2026".
+    const oldRow = rows.find((r) => /(?<!\d)1 Okt 2026/.test(r.textContent ?? ""))!;
     expect(within(oldRow).queryByText("Baru")).toBeNull();
     // With the list readable again, the unreadable plan is explained with a retry (one error at a time).
     const planError = (await screen.findByText("Paket organisasi tidak dapat dimuat")).closest(".callout") as HTMLElement;
