@@ -26,7 +26,7 @@ env:
 jobs:
   check:
     name: Lint, typecheck, test, build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       # Data-dependent tests use Git-tracked inputs only (data/raw/dataset.csv, data/seed/*.csv) and
@@ -44,11 +44,13 @@ jobs:
           node-version: "22"
           cache: npm
 
+      # `ingest` brings the PDF parsers (PyMuPDF, pdfplumber) that the decree-repair and source tests
+      # exercise; only the tesseract binary is absent, so the OCR tests skip.
       - name: Python environment
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install "pip==${PIP_VERSION}"
-          .venv/bin/python -m pip install -e ".[api,cloud,dev]" -c requirements/constraints.txt
+          .venv/bin/python -m pip install -e ".[api,cloud,dev,ingest]" -c requirements/constraints.txt
 
       - name: Node dependencies
         run: npm ci
@@ -90,7 +92,7 @@ jobs:
 
   security:
     name: Dependency audit, static analysis, secret scan
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
