@@ -27,6 +27,7 @@ from icp_api.storage.repository import MetadataRepository, Page, new_id, utcnow
 from icp_api.storage.sql import StorageError
 from icp_ml.features import MissingFeatureData
 from icp_ml.forecasting import ForecastInputError, make_forecast
+from icp_ml.sources.base import jakarta_today
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,7 @@ class ForecastService:
         org_id: str | None = None,
         scenario_id: str | None = None,
         horizon_max: int = 6,
+        idempotency: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         started = time.perf_counter()
         fid = new_id("fc")
@@ -92,11 +94,11 @@ class ForecastService:
             "request_id": request_id,
             "requested_by": actor,
             "horizon": horizon,
-            "params": {"horizon": horizon, "scenario": scenario},
+            "params": {"horizon": horizon, "scenario": scenario, **(idempotency or {})},
             "scenario": scenario or None,
             "model_name": self.models.model_name,
             "workflow": workflow,
-            "issue_date": (today or date.today()).isoformat(),
+            "issue_date": (today or jakarta_today()).isoformat(),
             "org_id": org_id,
             "scenario_id": scenario_id,
         }
@@ -214,6 +216,17 @@ class ForecastService:
         if row is None:
             raise ApiError(404, "NOT_FOUND", "Forecast not found.")
         return row
+
+    def find_idempotent(self, key: str, actor: str, org_id: str | None, since: str) -> dict[str, Any] | None:
+        """The caller's own successful run stored under ``Idempotency-Key`` ``key`` after ``since``
+        (audit v7 DATA-02). Scoped by organisation and requesting principal; failed runs are not replayed."""
+        rows = self.repo.db.query(
+            "SELECT id FROM forecast_runs WHERE requested_by = ? AND COALESCE(org_id, '') = ? "
+            "AND status = 'succeeded' AND created_at >= ? "
+            "AND json_extract(params_json, '$.idempotency_key') = ? ORDER BY created_at DESC LIMIT 1",
+            (actor, org_id or "", since, key),
+        )
+        return self.repo.get_forecast(rows[0]["id"]) if rows else None
 
     def get_visible(self, forecast_id: str, org_id: str | None, operator: bool = False) -> dict[str, Any]:
         """Tenant view of a forecast: the organisation's own runs or a published system forecast.

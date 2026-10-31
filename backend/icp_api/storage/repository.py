@@ -9,7 +9,11 @@ from __future__ import annotations
 import base64
 import json
 import secrets
+import threading
 import time
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -18,6 +22,60 @@ from icp_api.storage.sql import IntegrityError, SqlExecutor, StorageError
 
 ACTIVE_JOB_STATUSES = ("queued", "running")
 TERMINAL_JOB_STATUSES = ("succeeded", "failed", "cancelled")
+
+# Per-request read cache, opened by the request middleware (``request_read_cache``). A few rows are read
+# many times while answering one request - the active dataset versions up to 41 times for one market
+# report - and on D1 every statement is an HTTP round trip through the gateway. Inside a request they are
+# read once; any write to those tables in this process clears the cache, and outside a request (jobs,
+# CLI) nothing is cached. The raw rows (scalar column values) are cached and decoded on every call, so
+# each caller gets fresh objects exactly as from an uncached read.
+_request_reads: ContextVar[dict[Any, Any] | None] = ContextVar("icp_request_reads", default=None)
+
+
+@contextmanager
+def request_read_cache() -> Iterator[None]:
+    token = _request_reads.set({})
+    try:
+        yield
+    finally:
+        _request_reads.reset(token)
+
+
+def _cached_rows(key: Any, load: Callable[[], list[dict[str, Any]]]) -> list[dict[str, Any]]:
+    cache = _request_reads.get()
+    if cache is None:
+        return load()
+    if key not in cache:
+        cache[key] = load()
+    return list(cache[key])
+
+
+def _forget_reads() -> None:
+    cache = _request_reads.get()
+    if cache is not None:
+        cache.clear()
+
+
+# Process-wide counter of writes to the rows the public market snapshot is computed from: dataset
+# activations, source evidence and system forecast runs. The snapshot memo (services/public_snapshot.py)
+# keys on it, so after such a write in this process the next snapshot is computed afresh, and a memo hit
+# needs no database read at all. It is advanced after the write, so a snapshot computed concurrently is
+# stored under the old value and never reused afterwards. Job worker processes write through their own
+# copy of this module, so the API's job runner advances it after every job attempt (services/jobs.py);
+# writes by any other process (the operator CLI) are picked up when the memo expires
+# (SNAPSHOT_MEMO_SECONDS).
+_snapshot_data_lock = threading.Lock()
+_snapshot_data_generation = 0
+
+
+def snapshot_data_generation() -> int:
+    return _snapshot_data_generation
+
+
+def snapshot_data_changed() -> None:
+    global _snapshot_data_generation
+    with _snapshot_data_lock:
+        _snapshot_data_generation += 1
 
 
 def utcnow() -> str:
@@ -78,6 +136,23 @@ def _decode(row: dict[str, Any] | None) -> dict[str, Any] | None:
     return out
 
 
+# Paged listings: one constant SELECT per table (``_page`` never builds a table name into SQL).
+_PAGE_SELECT = {
+    "alert_events": "SELECT * FROM alert_events",
+    "audit_events": "SELECT * FROM audit_events",
+    "dataset_versions": "SELECT * FROM dataset_versions",
+    "deletion_requests": "SELECT * FROM deletion_requests",
+    "forecast_runs": "SELECT * FROM forecast_runs",
+    "ingestion_runs": "SELECT *, started_at AS created_at FROM ingestion_runs",
+    "jobs": "SELECT * FROM jobs",
+    "model_promotions": "SELECT * FROM model_promotions",
+    "organizations": "SELECT * FROM organizations",
+    "plan_change_requests": "SELECT * FROM plan_change_requests",
+    "report_runs": "SELECT * FROM report_runs",
+    "saved_scenarios": "SELECT * FROM saved_scenarios",
+}
+
+
 class MetadataRepository:
     def __init__(self, db: SqlExecutor):
         self.db = db
@@ -93,12 +168,8 @@ class MetadataRepository:
             where = [*where, "(created_at < ? OR (created_at = ? AND id < ?))"]
             params = [*params, created_at, created_at, row_id]
         clause = f"WHERE {' AND '.join(where)}" if where else ""
-        select = (
-            "SELECT *, started_at AS created_at FROM ingestion_runs"
-            if table == "ingestion_runs"
-            else f"SELECT * FROM {table}"  # noqa: S608 - table is an internal constant
-        )
-        # Table names and WHERE fragments are internal constants; every user value is a bound parameter.
+        select = _PAGE_SELECT[table]  # KeyError for anything else: table names are internal constants
+        # WHERE fragments are internal constants; every user value is a bound parameter.
         sql = f"{select} {clause} ORDER BY created_at DESC, id DESC LIMIT ?"
         rows = self.db.query(sql, (*params, limit + 1))
         items = [_decode(r) for r in rows[:limit]]
@@ -107,6 +178,7 @@ class MetadataRepository:
 
     # -- dataset versions --------------------------------------------------------------------
     def insert_dataset_version(self, row: dict[str, Any]) -> dict[str, Any]:
+        _forget_reads()
         self.db.execute(
             "INSERT INTO dataset_versions (id, dataset, version, object_key, sha256, size_bytes, row_count, "
             "period_start, period_end, source, source_detail, quality_json, diff_json, parent_version_id, "
@@ -145,14 +217,24 @@ class MetadataRepository:
         return self._one("SELECT * FROM dataset_versions WHERE dataset = ? AND sha256 = ?", (dataset, sha256))
 
     def get_active_dataset(self, dataset: str) -> dict[str, Any] | None:
-        return self._one("SELECT * FROM dataset_versions WHERE dataset = ? AND is_active = 1", (dataset,))
+        if _request_reads.get() is None:
+            return self._one("SELECT * FROM dataset_versions WHERE dataset = ? AND is_active = 1", (dataset,))
+        # inside a request: every active version is read with one statement, once
+        rows = _cached_rows(
+            "active_datasets", lambda: self.db.query("SELECT * FROM dataset_versions WHERE is_active = 1")
+        )
+        return _decode(next((r for r in rows if r["dataset"] == dataset), None))
 
     def activate_dataset_version(self, dataset: str, version_id: str) -> None:
-        changed = self.db.execute(
-            "UPDATE dataset_versions SET is_active = CASE WHEN id = ? THEN 1 ELSE 0 END "
-            "WHERE dataset = ? AND EXISTS (SELECT 1 FROM dataset_versions WHERE id = ? AND dataset = ?)",
-            (version_id, dataset, version_id, dataset),
-        )
+        _forget_reads()
+        try:
+            changed = self.db.execute(
+                "UPDATE dataset_versions SET is_active = CASE WHEN id = ? THEN 1 ELSE 0 END "
+                "WHERE dataset = ? AND EXISTS (SELECT 1 FROM dataset_versions WHERE id = ? AND dataset = ?)",
+                (version_id, dataset, version_id, dataset),
+            )
+        finally:
+            snapshot_data_changed()
         if changed == 0:
             raise StorageError(f"dataset version {version_id} not found for {dataset}")
 
@@ -186,6 +268,13 @@ class MetadataRepository:
         return self._one("SELECT * FROM source_documents WHERE sha256 = ?", (sha256,))
 
     def insert_evidence(self, rows: list[dict[str, Any]]) -> int:
+        try:
+            return self._insert_evidence_rows(rows)
+        finally:
+            if rows:
+                snapshot_data_changed()
+
+    def _insert_evidence_rows(self, rows: list[dict[str, Any]]) -> int:
         n = 0
         for e in rows:
             self.db.execute(
@@ -211,6 +300,52 @@ class MetadataRepository:
             n += 1
         return n
 
+    def all_evidence(self, dataset: str) -> list[dict[str, Any]]:
+        """Every evidence row of a dataset (verification summaries; no paging)."""
+        rows = self.db.query(
+            "SELECT period, value, kind, verification_status, source_url, document_sha256, reference, created_at, "
+            "note FROM source_evidence WHERE dataset = ? ORDER BY period, created_at",
+            (dataset,),
+        )
+        return [dict(r) for r in rows]
+
+    @staticmethod
+    def evidence_key(e: dict[str, Any]) -> tuple[Any, ...]:
+        value = e.get("value")
+        return (
+            str(e["period"]),
+            str(e["kind"]),
+            None if value is None else round(float(value), 4),
+            str(e["verification_status"]),
+            str(e.get("source_url") or ""),
+            e.get("document_sha256") or None,
+        )
+
+    def insert_missing_evidence(self, dataset: str, rows: list[dict[str, Any]]) -> int:
+        """Idempotent: insert only rows whose (period, kind, value, status, source) is not stored yet."""
+        have = {self.evidence_key(e) for e in self.all_evidence(dataset)}
+        fresh: list[dict[str, Any]] = []
+        for e in rows:
+            k = self.evidence_key({**e, "dataset": dataset})
+            if k not in have:
+                have.add(k)
+                fresh.append({**e, "dataset": dataset})
+        return self.insert_evidence(fresh) if fresh else 0
+
+    def correct_decree_reference(
+        self, dataset: str, period: str, document_sha256: str, reference: str | None
+    ) -> int:
+        """Correct the decree number stored with the evidence rows read from one decree document.
+        Only ``reference`` changes; values, statuses and sources are never touched."""
+        try:
+            return self.db.execute(
+                "UPDATE source_evidence SET reference = ? WHERE dataset = ? AND period = ? "
+                "AND document_sha256 = ? AND kind IN ('decree_text', 'decree_ocr') AND reference IS NOT ?",
+                (reference, dataset, period, document_sha256, reference),
+            )
+        finally:
+            snapshot_data_changed()
+
     def list_evidence(
         self, dataset: str, period: str | None = None, limit: int = 200
     ) -> list[dict[str, Any]]:
@@ -230,13 +365,16 @@ class MetadataRepository:
         """Latest evidence row per period (status + kind), for provenance views."""
         rows = self.db.query(
             "SELECT e.period, e.verification_status, e.kind, e.value, e.source_url, e.reference FROM source_evidence e "
-            "JOIN (SELECT period, MAX(created_at) AS mx FROM source_evidence WHERE dataset = ? GROUP BY period) m "
-            "ON m.period = e.period AND m.mx = e.created_at WHERE e.dataset = ? ORDER BY e.period",
+            "JOIN (SELECT period, MAX(created_at) AS mx FROM source_evidence WHERE dataset = ? "
+            "AND verification_status != 'dissent' GROUP BY period) m "  # outvoted readings never decide a status
+            "ON m.period = e.period AND m.mx = e.created_at WHERE e.dataset = ? "
+            "AND e.verification_status != 'dissent' ORDER BY e.period",
             (dataset, dataset),
         )
         return {r["period"]: dict(r) for r in rows}
 
     def insert_ingestion_run(self, row: dict[str, Any]) -> None:
+        _forget_reads()
         self.db.execute(
             "INSERT INTO ingestion_runs (id, dataset, connector, status, started_at, finished_at, job_id, requested_by, summary_json, version_id) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -259,9 +397,12 @@ class MetadataRepository:
         return self._page("ingestion_runs", where, params, limit, cursor)
 
     def latest_ingestion_runs(self) -> dict[str, dict[str, Any]]:
-        rows = self.db.query(
-            "SELECT r.* FROM ingestion_runs r JOIN (SELECT dataset, MAX(started_at) AS mx FROM ingestion_runs GROUP BY dataset) m "
-            "ON m.dataset = r.dataset AND m.mx = r.started_at"
+        rows = _cached_rows(
+            "latest_ingestion_runs",
+            lambda: self.db.query(
+                "SELECT r.* FROM ingestion_runs r JOIN (SELECT dataset, MAX(started_at) AS mx FROM ingestion_runs GROUP BY dataset) m "
+                "ON m.dataset = r.dataset AND m.mx = r.started_at"
+            ),
         )
         return {r["dataset"]: d for r in rows if (d := _decode(r)) is not None}
 
@@ -366,6 +507,13 @@ class MetadataRepository:
 
     # -- forecasts ---------------------------------------------------------------------------
     def insert_forecast(self, row: dict[str, Any]) -> None:
+        try:
+            self._insert_forecast_row(row)
+        finally:
+            if row.get("workflow") == "system":  # the public snapshot's teaser shows the latest one
+                snapshot_data_changed()
+
+    def _insert_forecast_row(self, row: dict[str, Any]) -> None:
         self.db.execute(
             "INSERT INTO forecast_runs (id, created_at, request_id, requested_by, status, horizon, model_name, "
             "model_version, model_run_id, icp_dataset_version_id, wti_dataset_version_id, last_observed_period, "

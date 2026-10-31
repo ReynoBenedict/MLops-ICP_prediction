@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
@@ -22,6 +23,24 @@ from fastapi.testclient import TestClient
 ROOT = Path(__file__).resolve().parents[2]
 ADMIN_TOKEN = "test-admin-token-0123456789abcdefghijklmnop"
 GATEWAY_SECRET = "test-gateway-secret-0123456789abcdefghijkl"
+# Test inputs come only from files tracked in Git, so a clean CI checkout (no `dvc pull`) runs the
+# same suite as a developer machine: the ICP history (data/raw/dataset.csv is tracked) and the
+# EIA-based WTI seed (data/seed/wti.csv). data/raw/wti.csv is DVC-only and absent in CI.
+SEED_ICP = ROOT / "data" / "raw" / "dataset.csv"
+SEED_WTI = ROOT / "data" / "seed" / "wti.csv"
+
+
+def require_data(*paths: Path) -> None:
+    """Skip when tracked test data is missing, or fail when ICP_REQUIRE_DATA=1 (set in CI)."""
+    missing = [str(p.relative_to(ROOT)) for p in paths if not p.is_file()]
+    if not missing:
+        return
+    message = f"test datasets missing: {', '.join(missing)}"
+    if os.getenv("ICP_REQUIRE_DATA") == "1":
+        pytest.fail(
+            message + " (ICP_REQUIRE_DATA=1: data-dependent tests must not be skipped)", pytrace=False
+        )
+    pytest.skip(message)
 
 
 @pytest.fixture(scope="session")
@@ -55,6 +74,8 @@ def env_dir(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         "MLFLOW_ARTIFACT_ROOT": str(base / "mlartifacts"),
         "MODEL_NAME": "ICP_Test_Model",
         "SEED_DIR": str(ROOT / "data" / "seed"),
+        "SEED_ICP_PATH": str(SEED_ICP),
+        "SEED_WTI_PATH": str(SEED_WTI),
         "TRAINING_CONFIG_PATH": str(base / "training.yaml"),
         "ADMIN_API_TOKENS": f"tester:{ADMIN_TOKEN}",
         "GATEWAY_SHARED_SECRET": GATEWAY_SECRET,
@@ -63,6 +84,7 @@ def env_dir(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
         "RATE_LIMIT_FORECAST_PER_MINUTE": "1000",
         "RATE_LIMIT_DEFAULT_PER_MINUTE": "1000",
         "RATE_LIMIT_ADMIN_PER_MINUTE": "1000",
+        "RATE_LIMIT_AUTH_PER_MINUTE": "1000",
     }
     saved = {k: os.environ.get(k) for k in env}
     os.environ.update(env)
@@ -76,8 +98,7 @@ def env_dir(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path]:
 
 @pytest.fixture(scope="session")
 def app(env_dir: Path) -> Any:
-    if not (ROOT / "data" / "raw" / "dataset.csv").is_file():
-        pytest.skip("repository datasets not present (run `dvc pull`)")
+    require_data(SEED_ICP, SEED_WTI)
     from icp_api.main import create_app
     from icp_api.settings import load_settings
 
@@ -188,6 +209,76 @@ def d1sim() -> type[D1Simulator]:
 
 
 # --- Worker internal data plane simulator -----------------------------------------------------
+# Mirror of the Worker's statement allow-list (apps/gateway/src/index.ts: SQL_ALLOWED_START,
+# SQL_PRAGMA_TABLE_INFO, SQL_FORBIDDEN_WORD, sqlSkeleton, sqlRejection, MAX_SQL_PARAMS). Keep in sync:
+# every repository test that runs over the gateway simulator then proves the backend only issues
+# statements the real Worker accepts.
+SQL_ALLOWED_START = re.compile(r"^(SELECT|INSERT|UPDATE|DELETE|WITH)\b", re.IGNORECASE)
+SQL_PRAGMA_TABLE_INFO = re.compile(
+    r'^PRAGMA\s+table_info\(\s*"?[A-Za-z_][A-Za-z0-9_]*"?\s*\)\s*;?\s*$', re.IGNORECASE
+)
+SQL_FORBIDDEN_WORD = re.compile(
+    r"\b(ATTACH|DETACH|PRAGMA|VACUUM|REINDEX|ANALYZE|CREATE|DROP|ALTER|BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)\b",
+    re.IGNORECASE,
+)
+MAX_SQL_PARAMS = 100
+
+
+def sql_skeleton(sql: str) -> str:
+    """SQL with string literals, quoted identifiers and comments blanked out (keywords remain)."""
+    out: list[str] = []
+    i, n = 0, len(sql)
+    while i < n:
+        ch = sql[i]
+        if ch in "'\"`[":
+            close = "]" if ch == "[" else ch
+            j = i + 1
+            while j < n:
+                if sql[j] == close:
+                    if close != "]" and j + 1 < n and sql[j + 1] == close:  # doubled quote
+                        j += 2
+                        continue
+                    break
+                j += 1
+            out.append(" _ ")
+            i = j
+        elif ch == "-" and sql[i + 1 : i + 2] == "-":
+            while i < n and sql[i] != "\n":
+                i += 1
+            out.append(" ")
+        elif ch == "/" and sql[i + 1 : i + 2] == "*":
+            end = sql.find("*/", i + 2)
+            i = n if end < 0 else end + 1
+            out.append(" ")
+        else:
+            out.append(ch)
+        i += 1
+    return "".join(out)
+
+
+def sql_rejection(sql: str) -> str | None:
+    """Same decision as the Worker's `sqlRejection`: an error message, or None when allowed."""
+    trimmed = sql.strip()
+    if SQL_PRAGMA_TABLE_INFO.match(trimmed):
+        return None
+    skeleton = sql_skeleton(trimmed).strip()
+    if not SQL_ALLOWED_START.match(skeleton):
+        return "statement type not allowed on the data plane"
+    semicolon = skeleton.find(";")
+    if semicolon >= 0 and skeleton[semicolon + 1 :].strip():
+        return "only one statement per request"
+    if SQL_FORBIDDEN_WORD.search(skeleton):
+        return "statement contains a keyword not allowed on the data plane"
+    return None
+
+
+def _d1_error(status: int, message: str) -> httpx.Response:
+    return httpx.Response(
+        status,
+        json={"success": False, "errors": [{"code": 7500, "message": message}], "messages": [], "result": []},
+    )
+
+
 class GatewaySimulator:
     """Behaves like apps/gateway `/api/internal/*`: secret check, D1 envelope over SQLite, KV objects.
 
@@ -195,12 +286,18 @@ class GatewaySimulator:
     tested against the same request/response shapes the real Worker produces.
     """
 
+    # Exposed for tests (conftest is not importable as a module under --import-mode=importlib).
+    SECRET = GATEWAY_SECRET
+    MAX_SQL_PARAMS = MAX_SQL_PARAMS
+    sql_rejection = staticmethod(sql_rejection)
+
     def __init__(self, path: Path, secret: str = GATEWAY_SECRET, fail_first: int = 0, kv: bool = True):
         self.d1 = D1Simulator(path, fail_first=fail_first)
         self.secret = secret
         self.kv = kv
         self.objects: dict[str, tuple[bytes, str]] = {}
         self.calls: list[tuple[str, str]] = []
+        self.rejected: list[str] = []  # statements refused by the allow-list (a backend bug if non-empty)
 
     def apply_migrations(self) -> None:
         self.d1.apply_migrations()
@@ -222,6 +319,19 @@ class GatewaySimulator:
         if path == "/api/internal/d1/query":
             if request.method != "POST":
                 return httpx.Response(405)
+            try:
+                body = json.loads(request.content)
+            except ValueError:
+                return _d1_error(400, "request body is not JSON")
+            sql, params = body.get("sql"), body.get("params") or []
+            if not isinstance(sql, str) or not sql.strip():
+                return _d1_error(400, "sql must be a non-empty string")
+            if not isinstance(params, list) or len(params) > MAX_SQL_PARAMS:
+                return _d1_error(400, "params must be an array of string/number/boolean/null")
+            rejected = sql_rejection(sql)
+            if rejected:
+                self.rejected.append(sql)
+                return _d1_error(403, rejected)
             fake = httpx.Request(
                 "POST", request.url, headers={"authorization": "Bearer d1-token"}, content=request.content
             )

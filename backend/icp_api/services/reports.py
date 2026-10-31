@@ -17,8 +17,13 @@ from __future__ import annotations
 import csv
 import io
 import logging
-from datetime import date
+import re
+import threading
+import unicodedata
+from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
+from xml.sax.saxutils import escape as _xml_escape
 
 import pandas as pd
 
@@ -28,14 +33,122 @@ from icp_api.services.forecasts import ForecastService
 from icp_api.services.insights import InsightService, fmt_idr, fmt_period, fmt_usd
 from icp_api.services.models import ModelService
 from icp_api.services.scenarios import ScenarioService
-from icp_api.storage.objects import ObjectStore
+from icp_api.storage.objects import ObjectNotFound, ObjectStore
 from icp_api.storage.product import ProductRepository
 from icp_api.storage.repository import new_id, utcnow
 from icp_ml.schema import DATASET_SPECS
+from icp_ml.sources.base import jakarta_today
 
 logger = logging.getLogger(__name__)
 
+
+# -- output safety ------------------------------------------------------------------------------
+# Report content mixes fixed text with values that users (scenario names) or third parties (OCR'd
+# decree references, source notes) control. ReportLab's Paragraph interprets an XML-like markup
+# (<img src=...> fetches URLs/files, <font>, <a>), so every dynamic string is escaped before it is
+# wrapped; spreadsheet cells that a spreadsheet application would evaluate as a formula are
+# neutralised (OWASP "CSV injection").
+def esc(value: Any) -> str:
+    """Escape a dynamic value for ReportLab paragraph markup (also quotes ``"`` and ``'``)."""
+    return _xml_escape(str(value), {'"': "&quot;", "'": "&#39;"})
+
+
+def _in_memory_only(name: Any, mode: str = "b") -> Any:
+    """Replacement for ``reportlab.lib.utils.open_for_read``: only file-like objects are accepted.
+
+    ReportLab's own implementation first calls ``open(name)`` on any string - absolute, relative or
+    UNC paths (``\\\\host\\share`` makes Windows connect to that host) - and only consults
+    ``trustedSchemes`` when that fails. Reports never load resources by name (the chart is an
+    in-memory PNG, fonts are the built-in Type 1 set), so every name is refused."""
+    if hasattr(name, "read"):
+        return name
+    raise OSError("report resources must be supplied in memory; file and URL access is disabled")
+
+
+def harden_reportlab() -> None:
+    """Refuse every file/URL access from paragraph markup (defence in depth behind ``esc``).
+
+    Applied at import time and again before each PDF build (ReportLab's lazily initialised
+    ``open_for_read`` re-installs itself into ``reportlab.lib.utils`` the first time any module that
+    imported the original is called). The scheme/host settings additionally reject every URL."""
+    import reportlab.lib.utils as rl_utils
+    import reportlab.pdfbase.pdfdoc as rl_pdfdoc
+    from reportlab import rl_config
+
+    rl_config.trustedSchemes = []
+    rl_config.trustedHosts = ["untrusted.invalid"]
+    rl_utils.open_for_read = _in_memory_only
+    rl_pdfdoc.open_for_read = _in_memory_only
+
+
+# Characters a spreadsheet may treat as the start of a formula, after NFKC folding (which maps the
+# full-width and small forms such as U+FF1D / U+FE66 to "="). U+2212 MINUS SIGN has no NFKC fold.
+_FORMULA_STARTS = frozenset("=+-@\u2212")
+_CONTROL_STARTS = ("\t", "\r", "\n")
+_PLAIN_NUMBER = re.compile(r"^[+-]?\d[\d.,]*%?$")
+# Leading characters a reader or importer may drop before parsing: whitespace and the invisible
+# Unicode categories (Cc control incl. NUL, Cf format incl. U+200B..U+200D, U+2060, U+FEFF BOM,
+# Zs/Zl/Zp separators).
+_INVISIBLE_CATEGORIES = frozenset({"Cc", "Cf", "Zs", "Zl", "Zp"})
+
+
+def _strip_invisible(value: str) -> str:
+    i = 0
+    while i < len(value) and (value[i].isspace() or unicodedata.category(value[i]) in _INVISIBLE_CATEGORIES):
+        i += 1
+    return value[i:]
+
+
+def cell_safe(value: Any) -> Any:
+    """Neutralise text a spreadsheet would evaluate by prefixing ``'`` (OWASP "CSV injection").
+
+    Covers a leading ``= + - @`` also when preceded by whitespace or invisible characters
+    (importers trim them: zero-width space/joiners, BOM, NUL and other control/format characters),
+    full-width / small-form look-alikes, U+2212 and a leading TAB/CR/LF or other control character.
+    Numbers are returned unchanged; plain signed numbers written as text ("+26.1%", "-") stay
+    readable because a spreadsheet evaluates them to the same literal number."""
+    if not isinstance(value, str) or not value:
+        return value
+    if value.startswith(_CONTROL_STARTS) or unicodedata.category(value[0]) == "Cc":
+        return "'" + value
+    stripped = _strip_invisible(value)
+    if not stripped or unicodedata.normalize("NFKC", stripped[0])[:1] not in _FORMULA_STARTS:
+        return value
+    if stripped == "-" or _PLAIN_NUMBER.match(stripped):
+        return value
+    return "'" + value
+
+
+harden_reportlab()
+
 KINDS = ("market_monthly", "forecast", "scenario_comparison", "data_provenance")
+FORMATS = ("pdf", "xlsx", "csv")
+_ERROR_CODE = re.compile(r"^[A-Z][A-Z0-9_]{2,40}: ")
+GENERIC_FAILURE = "REPORT_FAILED: Pembuatan laporan gagal."
+# Suggested wait before retrying a request whose first attempt with the same key is still running.
+IN_PROGRESS_RETRY_SECONDS = 15
+
+
+def _without_files(row: dict[str, Any]) -> dict[str, Any]:
+    """A failed run is stored without object keys: files written before the failure are never offered."""
+    return {k: v for k, v in row.items() if not k.startswith("object_key_")}
+
+
+def _present(row: dict[str, Any]) -> dict[str, Any]:
+    """API view of a stored run. Only a succeeded run lists formats; a failure message that does not
+    start with an error code (older rows kept raw exception text) is shown generically."""
+    ok = row.get("status") == "succeeded"
+    message = row.get("error_message")
+    if message is not None and not _ERROR_CODE.match(str(message)):
+        message = GENERIC_FAILURE
+    return {
+        **row,
+        "label": KIND_LABELS[row["kind"]],
+        "formats": [f for f in FORMATS if ok and row.get(f"object_key_{f}")],
+        "error_message": message,
+    }
+
+
 KIND_LABELS = {
     "market_monthly": "Laporan Pasar Bulanan",
     "forecast": "Laporan Proyeksi ICP",
@@ -53,9 +166,10 @@ BRAND = {
     "line": (0.86, 0.88, 0.91),
 }
 KIND_LEGEND = {
-    "observed": "Teramati (resmi)",
+    "observed": "Teramati (dipublikasikan sumber)",
     "derived": "Turunan",
     "estimate_awaiting_publication": "Estimasi (menunggu publikasi)",
+    "official_published": "ICP resmi sudah terbit (proyeksi lama)",
     "future_forecast": "Proyeksi (bulan mendatang)",
     "scenario": "Asumsi skenario",
     "assumed_hold_last": "Asumsi: nilai terakhir dipertahankan",
@@ -63,7 +177,7 @@ KIND_LEGEND = {
 METHOD_PLAIN = {
     "spread_rule": "Harga acuan bulan target ditambah rata-rata selisih ICP terhadap acuan tersebut pada beberapa bulan terakhir.",
     "naive": "ICP bulan terakhir dipertahankan (acuan pembanding paling sederhana).",
-    "blend": "Kombinasi tertimbang Brent, Dubai dan WTI yang dikalibrasi pada riwayat ICP.",
+    "blend": "Kombinasi tertimbang Brent, Dubai dan WTI; bobotnya diestimasi dari riwayat ICP.",
     "ridge": "Regresi terregularisasi atas harga acuan bulan target dan ICP bulan sebelumnya.",
     "gradient_boosting": "Ensambel pohon keputusan atas harga acuan dan ICP bulan sebelumnya.",
     "random_forest": "Ensambel pohon keputusan atas harga acuan dan ICP bulan sebelumnya.",
@@ -122,8 +236,38 @@ class ReportService:
         self.insights = insights
         self.scenarios = scenarios
         self.objects = objects
+        # Idempotency keys whose first request is still generating (SEC-C-03); see ``reserve_idempotency``.
+        self._in_flight: set[tuple[str, str, str]] = set()
+        self._in_flight_lock = threading.Lock()
 
     # -- public API --------------------------------------------------------------------------
+    @contextmanager
+    def reserve_idempotency(self, key: str, actor: str, org_id: str | None) -> Iterator[None]:
+        """Hold ``Idempotency-Key`` ``key`` of this caller while its request runs.
+
+        A report row is stored only when generation ends, and the request deadline answers 504 while the
+        generation goes on in its worker thread. A retry with the same key during that time would find
+        no stored report and generate a second one, so it is answered ``409 IDEMPOTENCY_IN_PROGRESS``
+        instead; once the first request has ended, a retry gets its stored report (or, after a failure,
+        a new attempt). The reservation is in-process: the API runs as exactly one process (the rate
+        limits rely on that as well)."""
+        slot = (org_id or "", actor, key)
+        with self._in_flight_lock:
+            if slot in self._in_flight:
+                raise ApiError(
+                    409,
+                    "IDEMPOTENCY_IN_PROGRESS",
+                    "Laporan dari permintaan ini masih dibuat. Periksa daftar laporan sebentar lagi.",
+                    {"retry_after_seconds": IN_PROGRESS_RETRY_SECONDS},
+                    headers={"Retry-After": str(IN_PROGRESS_RETRY_SECONDS)},
+                )
+            self._in_flight.add(slot)
+        try:
+            yield
+        finally:
+            with self._in_flight_lock:
+                self._in_flight.discard(slot)
+
     def generate(
         self,
         kind: str,
@@ -133,10 +277,17 @@ class ReportService:
         request_id: str | None,
         formats: tuple[str, ...] = ("pdf", "xlsx", "csv"),
         horizon_max: int = 6,
+        history_floor: str | None = None,
+        include_insights: bool = True,
+        idempotency: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        """``horizon_max`` is the caller's plan horizon, enforced on every forecast the report runs."""
+        """``horizon_max`` is the caller's plan horizon, enforced on every forecast the report runs;
+        ``history_floor`` clips per-month history tables to the plan's history depth."""
         if kind not in KINDS:
             raise ApiError(422, "VALIDATION_ERROR", f"Jenis laporan tidak dikenal: {kind}")
+        if not any(f in formats for f in FORMATS):
+            # a run without any file would be stored and listed as a success with nothing to download
+            raise ApiError(422, "VALIDATION_ERROR", "Pilih minimal satu format laporan (pdf, xlsx, csv).")
         rid = new_id("rpt")
         created = utcnow()
         row: dict[str, Any] = {
@@ -144,12 +295,14 @@ class ReportService:
             "org_id": org_id,
             "created_by": actor,
             "kind": kind,
-            "params": params,
+            "params": {**params, **(idempotency or {})},
             "status": "failed",
             "created_at": created,
         }
         try:
-            content = self._build(kind, params, actor, org_id, request_id, horizon_max)
+            content = self._build(
+                kind, params, actor, org_id, request_id, horizon_max, history_floor, include_insights
+            )
             prefix = f"exports/reports/{created[:4]}/{created[5:7]}/{rid}"
             if "pdf" in formats:
                 row["object_key_pdf"] = f"{prefix}.pdf"
@@ -169,18 +322,37 @@ class ReportService:
                 self.objects.put(row["object_key_csv"], self._csv(content), "text/csv", overwrite=False)
             row.update(status="succeeded", finished_at=utcnow(), summary=content["summary"])
         except ApiError as exc:
+            # A rejected request (unknown or foreign forecast id, plan limit, invalid input) is not a
+            # report run: nothing is stored. Only server-side failures leave a failed row behind.
+            if exc.status < 500:
+                raise
             row.update(error_message=f"{exc.code}: {exc.message}"[:500], finished_at=utcnow())
-            self.repo.insert_report(row)
+            self.repo.insert_report(_without_files(row))
             raise
         except Exception as exc:
-            logger.exception("report generation failed")
-            row.update(error_message=f"{type(exc).__name__}: {exc}"[:500], finished_at=utcnow())
-            self.repo.insert_report(row)
+            # Exception text stays in the server log (with the request id); tenants see a generic code.
+            logger.exception("report generation failed (report %s, request %s)", rid, request_id)
+            row.update(
+                error_message=f"REPORT_FAILED: Pembuatan laporan gagal (ID permintaan {request_id or '-'}).",
+                finished_at=utcnow(),
+            )
+            self.repo.insert_report(_without_files(row))
             raise ApiError(500, "REPORT_FAILED", "Pembuatan laporan gagal.") from exc
         self.repo.insert_report(row)
         if org_id:
             self.repo.record_usage(org_id, None, None, "report.generate", request_id=request_id)
         return self.get(rid, org_id, operator=org_id is None)
+
+    def find_idempotent(self, key: str, actor: str, org_id: str | None, since: str) -> dict[str, Any] | None:
+        """The caller's own successful report stored under ``Idempotency-Key`` ``key`` after ``since``
+        (audit v7 DATA-02), scoped by organisation and requesting principal; failed runs are not replayed."""
+        rows = self.repo.db.query(
+            "SELECT id FROM report_runs WHERE created_by = ? AND COALESCE(org_id, '') = ? "
+            "AND status = 'succeeded' AND created_at >= ? "
+            "AND json_extract(params_json, '$.idempotency_key') = ? ORDER BY created_at DESC LIMIT 1",
+            (actor, org_id or "", since, key),
+        )
+        return self.get(rows[0]["id"], org_id, operator=org_id is None) if rows else None
 
     def get(self, report_id: str, org_id: str | None, operator: bool = False) -> dict[str, Any]:
         row = self.repo.get_report(report_id)
@@ -188,39 +360,35 @@ class ReportService:
         # generated by operators) are not published to tenants.
         if row is None or (not operator and (org_id is None or row.get("org_id") != org_id)):
             raise ApiError(404, "NOT_FOUND", "Laporan tidak ditemukan.")
-        return {
-            **row,
-            "label": KIND_LABELS[row["kind"]],
-            "formats": [f for f in ("pdf", "xlsx", "csv") if row.get(f"object_key_{f}")],
-        }
+        return _present(row)
 
     def list_reports(self, org_id: str | None, limit: int, cursor: str | None) -> dict[str, Any]:
         page = self.repo.list_reports(org_id, limit, cursor, include_platform=False)
-        return {
-            "items": [
-                {
-                    **r,
-                    "label": KIND_LABELS[r["kind"]],
-                    "formats": [f for f in ("pdf", "xlsx", "csv") if r.get(f"object_key_{f}")],
-                }
-                for r in page.items
-            ],
-            "next_cursor": page.next_cursor,
-        }
+        return {"items": [_present(r) for r in page.items], "next_cursor": page.next_cursor}
 
     def download(
         self, report_id: str, fmt: str, org_id: str | None, operator: bool = False
     ) -> tuple[bytes, str, str]:
         row = self.get(report_id, org_id, operator)
+        if row["status"] != "succeeded":
+            # a failed run never offers a file, even when an older row still names one
+            raise ApiError(404, "NOT_FOUND", "Laporan ini gagal dibuat; tidak ada berkas untuk diunduh.")
         key = row.get(f"object_key_{fmt}")
-        if not key:
+        if not key or fmt not in row["formats"]:
             raise ApiError(404, "NOT_FOUND", f"Format {fmt} tidak tersedia untuk laporan ini.")
         media = {
             "pdf": "application/pdf",
             "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             "csv": "text/csv",
         }[fmt]
-        return self.objects.get(key), media, f"icp-intelligence_{row['kind']}_{report_id}.{fmt}"
+        try:
+            data = self.objects.get(key)
+        except ObjectNotFound as exc:
+            logger.error("report file missing from object storage (report %s, format %s)", report_id, fmt)
+            raise ApiError(
+                503, "REPORT_OBJECT_MISSING", "Berkas laporan tidak ditemukan di penyimpanan."
+            ) from exc
+        return data, media, f"icp-intelligence_{row['kind']}_{report_id}.{fmt}"
 
     # -- content assembly --------------------------------------------------------------------
     def _common(self) -> dict[str, Any]:
@@ -230,7 +398,8 @@ class ReportService:
             "market": summary,  # datasets summary; "summary" is the report's own result summary
             "provenance": prov,
             "issued_at": utcnow(),
-            "issue_date": date.today().isoformat(),
+            # the publication date in Indonesia (WIB), like forecast issue dates (ML-04)
+            "issue_date": jakarta_today().isoformat(),
         }
 
     def _build(
@@ -241,6 +410,8 @@ class ReportService:
         org_id: str | None,
         request_id: str | None,
         horizon_max: int = 6,
+        history_floor: str | None = None,
+        include_insights: bool = True,
     ) -> dict[str, Any]:
         base = self._common()
         icp = base["market"]["datasets"].get("icp") or {}
@@ -256,13 +427,13 @@ class ReportService:
             "summary": {},
         }
         if kind == "market_monthly":
-            self._market(content, params)
+            self._market(content, params, include_insights)
         elif kind == "forecast":
             self._forecast(content, params, actor, org_id, request_id, horizon_max)
         elif kind == "scenario_comparison":
             self._scenarios(content, params, actor, org_id, request_id, horizon_max)
         else:
-            self._provenance(content)
+            self._provenance(content, history_floor)
         content["sources"] = self._sources_rows(content["provenance"])
         return content
 
@@ -288,7 +459,7 @@ class ReportService:
         hist = self.datasets.history()
         return hist[-months:]
 
-    def _market(self, content: dict[str, Any], params: dict[str, Any]) -> None:
+    def _market(self, content: dict[str, Any], params: dict[str, Any], include_insights: bool = True) -> None:
         s = content["market"]
         icp, fx = s["datasets"]["icp"], s["datasets"].get("usd_idr") or {}
         period = icp["period_end"]
@@ -355,8 +526,8 @@ class ReportService:
                 )
             )
         content["kpis"] = kpis
-        ins = self.insights.generate()
-        content["insights"] = ins["insights"][:6]
+        # Plan feature `insights` (same rule as GET /insights): without it the section is omitted.
+        content["insights"] = self.insights.generate()["insights"][:6] if include_insights else []
         content["forecast"] = latest_fc
         content["model"] = self._model_plain()
         content["tables"]["Riwayat 12 bulan"] = hist12
@@ -391,8 +562,9 @@ class ReportService:
             rows.append(
                 {
                     "Bulan": fmt_period(p["period"]),
-                    "Jenis": KIND_LEGEND.get(p["kind"], p["kind"]),
+                    "Jenis": KIND_LEGEND.get(p.get("kind_now") or p["kind"], p["kind"]),
                     "Proyeksi (USD/bbl)": round(p["prediction"], 2),
+                    "ICP resmi (USD/bbl)": (p.get("actual") or {}).get("value"),
                     "Rentang 80% bawah": round(iv80[0], 2) if iv80 else None,
                     "Rentang 80% atas": round(iv80[1], 2) if iv80 else None,
                     "Input acuan": "; ".join(
@@ -423,7 +595,20 @@ class ReportService:
             "naive_mae": m.get("baseline_naive_last_mae"),
             "hold_last_mae": m.get("hold_last_h1_mae"),
             "naive_hold_last_mae": m.get("baseline_naive_hold_last_h1_mae"),
+            # Agent D v6: period, n, horizon, mode and baseline on the same backtest cases
+            "eval_text": self._evaluation_text(d["version"]),
         }
+
+    def _evaluation_text(self, version: str) -> list[str]:
+        from icp_api.insights.context import step_evaluation
+
+        facts = self.models.evaluation_facts(version)
+        out = []
+        for mode in ("observed", "hold_last"):
+            ev = step_evaluation(facts, mode, 1)
+            if ev is not None:
+                out.append(ev["summary"]["id"])
+        return out
 
     def _forecast(
         self,
@@ -453,6 +638,16 @@ class ReportService:
             )
         if run["status"] != "succeeded":
             raise ApiError(409, "FORECAST_FAILED", "Proyeksi yang dipilih gagal dan tidak dapat dilaporkan.")
+        # Agent D v6: same read-time view as GET /forecasts/{id} - plan-horizon clip for customers and
+        # official values superseding stale "awaiting publication" labels (the stored record is unchanged).
+        from icp_api.services.explain import explain_run
+
+        evals = self.models.evaluation_facts(run.get("model_version")) if run.get("model_version") else None
+        actuals = {m["period"]: m for m in self.verification_months("icp")}
+        result, _ = explain_run(
+            run, run["result"], evals, actuals, horizon_max if org_id is not None else None
+        )
+        run = {**run, "result": result}
         res = run["result"]
         pts = res["points"]
         hist = self._history_table(24)
@@ -491,6 +686,10 @@ class ReportService:
         ]
         if res.get("warnings"):
             content["sections"].append(("Catatan", " ".join(res["warnings"])))
+        for key in ("ignored_inputs", "coverage_warning"):  # Agent D v6: flagged, never silent
+            note = (res.get("notes") or {}).get(key)
+            if note:
+                content["sections"].append(("Catatan", note["id"]))
 
     def _scenarios(
         self,
@@ -547,41 +746,63 @@ class ReportService:
         }
         content["sections"] = [("Ringkasan", cmp["note"])]
 
-    def _provenance(self, content: dict[str, Any]) -> None:
+    def _provenance(self, content: dict[str, Any], floor: str | None = None) -> None:
+        """Per-month basis of every ICP value (same classification as GET /data/verification),
+        clipped to the caller's plan history (``floor``)."""
+        from icp_api.services.verification import CONFIRMED
+
         content["title"] = "Laporan Sumber & Provenans Data"
-        status = self.datasets.verification_by_period("icp")
-        icp = self.datasets.active("icp").series
+        months = [m for m in self.verification_months("icp") if floor is None or m["period"] >= floor]
         rows = [
             {
-                "Bulan": fmt_period(str(p)),
-                "ICP (USD/bbl)": round(float(v), 2),
-                "Status verifikasi": (status.get(str(p)) or {}).get("status", "legacy_unverified"),
-                "Referensi": (status.get(str(p)) or {}).get("reference") or "",
+                "Bulan": fmt_period(m["period"]),
+                "ICP (USD/bbl)": m["value"],
+                "Dasar nilai": m["label"]["id"],
+                "Dokumen ESDM sepakat": m["documents"],
+                "Referensi": m["reference"] or "",
+                # Agent D v6: differing source readings are listed, never silently dropped
+                "Sumber berbeda": "; ".join(
+                    f"{d['kind_label']['id']}: "
+                    + f"{d['value']:.2f}".replace(".", ",")
+                    + f" ({d['reason']['id']})"
+                    for d in m.get("dissent") or []
+                ),
             }
-            for p, v in icp.items()
+            for m in months
         ]
         content["tables"]["Verifikasi ICP per bulan"] = rows
+        confirmed = sum(1 for m in months if m["basis"] in CONFIRMED)
+        two_docs = sum(1 for m in months if m["basis"] == "two_documents")
         content["kpis"] = [
-            ("Bulan ICP tersedia", str(len(icp)), f"{icp.index.min()} s.d. {icp.index.max()}"),
             (
-                "Terverifikasi ganda",
-                str(sum(1 for r in rows if r["Status verifikasi"] == "verified")),
-                "dua sumber resmi sepakat",
+                "Bulan ICP ditampilkan",
+                str(len(months)),
+                f"{months[0]['period']} s.d. {months[-1]['period']}" if months else "-",
             ),
+            ("Dua dokumen ESDM sepakat", str(two_docs), "keputusan menteri / pengumuman / rujukan"),
             (
-                "Menunggu verifikasi",
-                str(sum(1 for r in rows if r["Status verifikasi"] not in ("verified",))),
-                "satu sumber / OCR / warisan",
+                "Belum dikonfirmasi dua dokumen",
+                str(len(months) - confirmed),
+                "satu dokumen / OCR / arsip lama / bukti belum tercatat",
             ),
         ]
-        content["summary"] = {"months": len(icp)}
+        content["summary"] = {"months": len(months)}
         content["sections"] = [
             (
                 "Ringkasan",
-                "Setiap nilai ICP dilacak ke dokumen sumbernya (keputusan menteri atau pengumuman resmi ESDM). "
-                "Status 'verified' berarti dua dokumen resmi independen menyebutkan nilai yang sama.",
+                "Setiap nilai ICP dilacak ke dokumen sumber yang tercatat (keputusan menteri atau pengumuman resmi ESDM). "
+                "Kolom 'Dasar nilai' menyebut apa yang mendukung nilai tersebut: dua dokumen ESDM yang sepakat, teks keputusan "
+                "menteri, satu dokumen, hasil pembacaan otomatis (OCR), atau bukti yang belum tercatat di sistem.",
             )
         ]
+        if floor:
+            content["sections"].append(
+                ("Cakupan", f"Riwayat dibatasi sesuai paket Anda: mulai {fmt_period(floor)}.")
+            )
+
+    def verification_months(self, dataset: str) -> list[dict[str, Any]]:
+        v = getattr(self.insights, "verification", None)
+        return v.months(dataset) if v is not None else []
 
     # -- renderers ---------------------------------------------------------------------------
     def _pdf(self, c: dict[str, Any]) -> bytes:
@@ -600,6 +821,7 @@ class ReportService:
             TableStyle,
         )
 
+        harden_reportlab()
         navy, teal, amber, ink, muted, line = (
             colors.Color(*BRAND[k]) for k in ("navy", "teal", "amber", "ink", "muted", "line")
         )
@@ -657,7 +879,7 @@ class ReportService:
             canvas.drawString(
                 18 * mm,
                 10 * mm,
-                f"{BRAND['name']} - {c['title']} - diterbitkan {c['issue_date']} (UTC). Bukan nasihat investasi.",
+                f"{BRAND['name']} - {c['title']} - diterbitkan {c['issue_date']} (WIB). Bukan nasihat investasi.",
             )
             canvas.drawRightString(w - 18 * mm, 10 * mm, f"Halaman {doc.page}")
             canvas.restoreState()
@@ -675,9 +897,11 @@ class ReportService:
         )
         story: list[Any] = [
             Spacer(1, 14 * mm),
-            Paragraph(c["title"], h1),
+            Paragraph(esc(c["title"]), h1),
             Paragraph(
-                f"Diterbitkan {c['issue_date']} - data per {c['summary'] and c.get('provenance', {}).get('icp', {}).get('active_version', {}).get('period_end', '-')}",
+                esc(
+                    f"Diterbitkan {c['issue_date']} - data per {c['summary'] and c.get('provenance', {}).get('icp', {}).get('active_version', {}).get('period_end', '-')}"
+                ),
                 ParagraphStyle("sub", parent=body, textColor=colors.white, fontSize=10),
             ),
             Spacer(1, 22 * mm),
@@ -686,7 +910,7 @@ class ReportService:
         if kpis:
             cells = [
                 [
-                    Paragraph(v, kpi_v),
+                    Paragraph(esc(v), kpi_v),
                 ]
                 for _, v, _ in kpis
             ]
@@ -695,7 +919,11 @@ class ReportService:
                 chunk = kpis[i : i + 3]
                 data.append(
                     [
-                        [Paragraph(label, kpi_l), Paragraph(value, kpi_v), Paragraph(note, small)]
+                        [
+                            Paragraph(esc(label), kpi_l),
+                            Paragraph(esc(value), kpi_v),
+                            Paragraph(esc(note), small),
+                        ]
                         for label, value, note in chunk
                     ]
                     + [""] * (3 - len(chunk))
@@ -715,7 +943,7 @@ class ReportService:
             story += [t, Spacer(1, 6)]
             del cells
         for heading, text in c.get("sections", []):
-            story += [Paragraph(heading, h2), Paragraph(text, body)]
+            story += [Paragraph(esc(heading), h2), Paragraph(esc(text), body)]
         if c.get("chart"):
             story += [
                 Paragraph("Grafik", h2),
@@ -730,17 +958,17 @@ class ReportService:
                 continue
             if name.startswith("Riwayat 36"):
                 continue  # in Excel/CSV only
-            story += [Paragraph(name, h2), self._pdf_table(rows, body, small, navy, line)]
+            story += [Paragraph(esc(name), h2), self._pdf_table(rows, body, small, navy, line)]
         model = c.get("model") or {}
         if model.get("available"):
             story += [
                 Paragraph("Metodologi", h2),
                 Paragraph(
-                    f"Metode aktif: <b>{model['method']}</b>. {model['plain']} Pemilihan metode dilakukan dengan uji mundur bergulir (rolling-origin) "
-                    "terhadap seluruh kandidat termasuk acuan paling sederhana; metode yang lebih rumit hanya dipilih bila terbukti lebih akurat.",
+                    f"Metode aktif: <b>{esc(model['method'])}</b>. {esc(model['plain'])} Pemilihan metode dilakukan dengan uji mundur bergulir (rolling-origin) "
+                    "terhadap seluruh kandidat termasuk acuan paling sederhana; metode yang lebih rumit hanya dipilih bila kesalahannya pada uji mundur lebih kecil.",
                     body,
                 ),
-                Paragraph(self._accuracy_plain(model), body),
+                Paragraph(esc(self._accuracy_plain(model)), body),
             ]
         story += [
             Paragraph("Sumber data dan versi", h2),
@@ -758,20 +986,27 @@ class ReportService:
         if c.get("insights"):
             story += [
                 PageBreak(),
-                Paragraph("Insight pasar (dihasilkan otomatis dari data terverifikasi)", h2),
+                Paragraph(
+                    "Insight pasar (dihasilkan otomatis dengan aturan tetap dari data yang tercatat)", h2
+                ),
             ]
             for ins in c["insights"]:
                 story += [
-                    Paragraph(f"<b>{ins['title']}</b>", body),
-                    Paragraph(ins["body"], body),
+                    Paragraph(f"<b>{esc(ins['title'])}</b>", body),
+                    Paragraph(esc(ins["body"]), body),
                     Spacer(1, 4),
                 ]
         doc.build(story, onFirstPage=on_page, onLaterPages=on_page)
         return buf.getvalue()
 
     def _accuracy_plain(self, model: dict[str, Any]) -> str:
+        if model.get("eval_text"):  # Agent D v6: every figure with its period, n, horizon, mode and baseline
+            return " ".join(model["eval_text"]) + (
+                " Untuk bulan yang belum berakhir tanpa skenario harga acuan, tidak ada metode yang jauh lebih baik "
+                "dari 'sama seperti bulan lalu'. Angka uji mundur menggambarkan masa lalu, bukan jaminan."
+            )
         if model.get("mae") is None:
-            return "Statistik akurasi belum tersedia."
+            return "Statistik uji mundur belum tersedia."
         s = (
             f"Pada uji mundur, rata-rata selisih absolut (MAE) estimasi 1 bulan ke depan adalah USD {model['mae']:.2f} per barel ketika harga acuan bulan target sudah diketahui "
             f"(bulan yang telah berakhir, menunggu publikasi), dibanding USD {model['naive_mae']:.2f} bila hanya mengulang ICP bulan lalu. "
@@ -820,9 +1055,9 @@ class ReportService:
                 return Paragraph("-", small)
             if isinstance(v, float):
                 return Paragraph(f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."), small)
-            return Paragraph(str(v), small)
+            return Paragraph(esc(v), small)
 
-        data = [[Paragraph(f"<b>{pretty.get(col, col)}</b>", small) for col in cols]] + [
+        data = [[Paragraph(f"<b>{esc(pretty.get(col, col))}</b>", small) for col in cols]] + [
             [cell(r.get(col)) for col in cols] for r in rows[:60]
         ]
         total = 174
@@ -907,6 +1142,13 @@ class ReportService:
         )
         meta.column_dimensions["A"].width = 18
         meta.column_dimensions["B"].width = 120
+        # Every text cell is stored as a string (never a formula) and neutralised for spreadsheets.
+        for sheet in wb.worksheets:
+            for row_cells in sheet.iter_rows():
+                for cell in row_cells:
+                    if isinstance(cell.value, str):
+                        cell.value = cell_safe(cell.value)
+                        cell.data_type = "s"
         buf = io.BytesIO()
         wb.save(buf)
         return buf.getvalue()
@@ -915,7 +1157,9 @@ class ReportService:
         _, rows = next(((n, r) for n, r in c["tables"].items() if r), ("", []))
         buf = io.StringIO()
         if rows:
-            w = csv.DictWriter(buf, fieldnames=list(rows[0].keys()))
-            w.writeheader()
-            w.writerows(rows)
+            w = csv.writer(buf)
+            cols = list(rows[0].keys())
+            w.writerow([cell_safe(k) for k in cols])
+            for r in rows:
+                w.writerow([cell_safe(r.get(k)) for k in cols])
         return buf.getvalue().encode("utf-8-sig")

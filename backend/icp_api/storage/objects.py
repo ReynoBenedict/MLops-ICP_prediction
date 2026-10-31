@@ -17,15 +17,15 @@ from __future__ import annotations
 import os
 import re
 import secrets
-import time
 from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
 
-from icp_api.storage.sql import StorageError, internal_url
+from icp_api.storage.sql import StorageError, attempt_timeout, backoff_or_give_up, internal_url
 
-_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,511}$")
+# ``\Z`` (not ``$``): ``$`` also matches before a trailing newline, which the Worker's JS regex rejects.
+_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,511}\Z")
 
 
 class ObjectNotFound(StorageError):
@@ -208,6 +208,7 @@ class GatewayObjectStore:
         if not shared_secret:
             raise ValueError("GatewayObjectStore requires the gateway shared secret")
         self.gateway_url = gateway_url
+        self.timeout = timeout
         self._client = httpx.Client(
             timeout=timeout, headers={"x-gateway-secret": shared_secret}, transport=transport
         )
@@ -217,10 +218,18 @@ class GatewayObjectStore:
         return internal_url(self.gateway_url, f"objects/{validate_key(key)}")
 
     def _request(self, method: str, url: str, idempotent: bool, **kw: Any) -> httpx.Response:
+        return self._request_counted(method, url, idempotent, **kw)[0]
+
+    def _request_counted(
+        self, method: str, url: str, idempotent: bool, **kw: Any
+    ) -> tuple[httpx.Response, int]:
+        """Like ``_request`` and also returns the attempt that produced the response."""
         last: Exception | None = None
         for attempt in range(1, self.max_attempts + 1):
+            # bounded by the request deadline, if any (``storage.sql.request_deadline``)
+            timeout = attempt_timeout(self.timeout, idempotent, "object store", attempt, last)
             try:
-                resp = self._client.request(method, url, **kw)
+                resp = self._client.request(method, url, timeout=timeout, **kw)
             except httpx.ConnectError as exc:
                 last = exc
             except httpx.TimeoutException as exc:
@@ -233,20 +242,32 @@ class GatewayObjectStore:
                 elif resp.status_code in (401, 403):
                     raise StorageError("object store rejected the gateway secret")
                 else:
-                    return resp
+                    return resp, attempt
             if attempt < self.max_attempts:
-                time.sleep(0.25 * 2 ** (attempt - 1))
+                backoff_or_give_up(0.25 * 2 ** (attempt - 1), "object store", attempt, last)
         raise StorageError(f"object store unavailable after {self.max_attempts} attempts: {last}")
 
     def put(self, key: str, data: bytes, content_type: str, overwrite: bool = False) -> None:
         headers = {"content-type": content_type}
         if not overwrite:
             headers["if-none-match"] = "*"
-        resp = self._request("PUT", self._url(key), idempotent=False, content=data, headers=headers)
+        resp, attempt = self._request_counted(
+            "PUT", self._url(key), idempotent=False, content=data, headers=headers
+        )
         if resp.status_code == 412:
+            # A 5xx after the Worker already stored the value makes the retry see its own write
+            # (audit v7 DATA-01): identical bytes mean this put succeeded, anything else is a conflict.
+            if attempt > 1 and self._holds(key, data):
+                return
             raise ObjectExists(key)
         if resp.status_code >= 400:
             raise StorageError(f"object store put failed (HTTP {resp.status_code})")
+
+    def _holds(self, key: str, data: bytes) -> bool:
+        try:
+            return self.get(key) == data
+        except StorageError:
+            return False
 
     def get(self, key: str) -> bytes:
         resp = self._request("GET", self._url(key), idempotent=True)

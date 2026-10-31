@@ -22,8 +22,8 @@ def test_liveness_and_request_id(client):
     assert generated.startswith("req_")
 
 
-def test_readiness_reports_real_dependency_state_before_model(client):
-    r = client.get("/health/ready")
+def test_readiness_reports_real_dependency_state_before_model(client, admin):
+    r = client.get("/health/ready", headers=admin)  # dependency detail is operator-only (v6)
     body = r.json()
     checks = {c["name"]: c for c in body["checks"]}
     assert r.status_code == 200 and body["status"] == "degraded"
@@ -156,6 +156,7 @@ def test_settings_accept_the_zero_cost_topology(monkeypatch):
         "ADMIN_API_TOKENS": "ops:" + "t" * 40,
         "CORS_ALLOWED_ORIGINS": "https://icp-gateway-staging.example.workers.dev",
         "RENDER": "true",
+        "API_HOST": "0.0.0.0",
         "PORT": "10000",
         "METRICS_TOKEN": "m" * 40,
     }
@@ -435,7 +436,7 @@ def test_validate_promote_forecast_export_rollback(client, admin, trained_versio
         "wti": {pts[0]["period"]: 70.0}
     }
 
-    ready = client.get("/health/ready").json()
+    ready = client.get("/health/ready", headers=admin).json()
     assert {c["name"]: c["status"] for c in ready["checks"]}["production_model"] == "ok"
     drift = client.get("/api/v1/models/drift", headers=admin).json()
     assert (

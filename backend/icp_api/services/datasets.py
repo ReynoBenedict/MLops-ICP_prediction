@@ -65,6 +65,24 @@ def _slug(provider: str) -> str:
     return "".join(ch if ch.isalnum() else "_" for ch in provider.lower()).strip("_")[:40]
 
 
+def _mark_dissent(items: list[dict[str, Any]], series: pd.Series) -> list[dict[str, Any]]:
+    """Readings stored before v6 kept the month's status ("verified") even when their value differs
+    from the value in use; show them as ``dissent`` (read time; stored rows are unchanged)."""
+    out = []
+    for e in items:
+        p = pd.Period(str(e.get("period")), freq="M")
+        v = e.get("value")
+        if (
+            e.get("verification_status") in ("verified", "single_source", "machine_extracted")
+            and v is not None
+            and p in series.index
+            and abs(float(v) - float(series[p])) > 0.0051
+        ):
+            e = {**e, "verification_status": "dissent"}
+        out.append(e)
+    return out
+
+
 class DatasetService:
     def __init__(self, repo: MetadataRepository, objects: ObjectStore):
         self.repo = repo
@@ -137,16 +155,27 @@ class DatasetService:
             raise ApiError(404, "NOT_FOUND", "Dataset version not found.")
         return row
 
-    def download(self, version_id: str, active_only: bool = False) -> tuple[dict[str, Any], bytes]:
+    def download(
+        self, version_id: str, active_only: bool = False, floor: str | None = None
+    ) -> tuple[dict[str, Any], bytes]:
+        """Stored CSV of a version. ``floor`` (YYYY-MM) clips it to months from that period on - the
+        plan's ``history_years`` rule, the same as ``GET /data/history``."""
         row = self.get_version(version_id)
         if active_only and not row.get("is_active"):
             raise ApiError(404, "NOT_FOUND", "Dataset version not found.")
         try:
-            return row, self.objects.get(row["object_key"])
+            data = self.objects.get(row["object_key"])
         except ObjectNotFound as exc:
             raise ApiError(
                 404, "DATASET_OBJECT_MISSING", "Dataset file is missing from object storage."
             ) from exc
+        if floor is None:
+            return row, data
+        series, _ = parse_csv_bytes(data, row["dataset"])
+        if series is None:
+            raise ApiError(500, "DATASET_INVALID", "Stored dataset file could not be read.")
+        clipped = series[series.index >= pd.Period(floor, freq="M")]
+        return row, series_to_csv_bytes(clipped, row["dataset"])
 
     def list_versions(self, dataset: str | None, limit: int, cursor: str | None) -> Page:
         if dataset is not None:
@@ -189,9 +218,20 @@ class DatasetService:
         months later bounded out of the dataset stay queryable per period, for audit)."""
         spec(dataset)
         items = self.repo.list_evidence(dataset, period)
+        if dataset != "icp":
+            # rows stored before 2026-10-19 stamped provider data "verified"; that word is reserved
+            # for ICP months confirmed by official ESDM documents
+            items = [
+                {**e, "verification_status": "provider_published"}
+                if e.get("verification_status") == "verified"
+                else e
+                for e in items
+            ]
+        active = self.optional(dataset)
+        if dataset == "icp" and active is not None:
+            items = _mark_dissent(items, active.series)
         if period is not None:
             return items
-        active = self.optional(dataset)
         if active is None:
             return items
         periods = {str(p) for p in active.series.index}
@@ -481,6 +521,12 @@ class DatasetService:
                     "version_id": current_row["id"] if current_row else None,
                 }
             )
+            if evidence and current_row:
+                # Evidence is recorded even when the values did not change (first official run over
+                # identical legacy values); idempotent, so repeated runs add nothing.
+                self.repo.insert_missing_evidence(
+                    dataset, [{**e, "dataset_version_id": current_row["id"]} for e in evidence]
+                )
             return {"committed": False, "version": current_row, "run_id": run_id, **summary}
         row, created = self._store(
             dataset,
@@ -494,14 +540,12 @@ class DatasetService:
             provenance,
         )
         self._activate_new(dataset, row)
-        touched = set(diff["added"]) | {c["period"] for c in diff["changed"]}
-        ev_rows = [
-            {**e, "dataset": dataset, "dataset_version_id": row["id"]}
-            for e in (evidence or [])
-            if e["period"] in touched
-        ]
+        # Evidence for every month of the new version, not only the added/changed ones (months whose
+        # value was unchanged still need their source documents recorded); idempotent.
+        periods = {str(p) for p in merged_series.index}
+        ev_rows = [{**e, "dataset_version_id": row["id"]} for e in (evidence or []) if e["period"] in periods]
         if ev_rows:
-            self.repo.insert_evidence(ev_rows)
+            self.repo.insert_missing_evidence(dataset, ev_rows)
         self.repo.insert_ingestion_run(
             {
                 "id": run_id,
@@ -552,7 +596,11 @@ class DatasetService:
                     "period": e.period,
                     "value": e.value,
                     "kind": e.extraction_method,
-                    "verification_status": e.verification_status,
+                    # Market/FX observations are published by their provider; "verified" is reserved
+                    # for ICP months confirmed by official ESDM documents.
+                    "verification_status": "provider_published"
+                    if fetch.dataset != "icp" and e.verification_status == "verified"
+                    else e.verification_status,
                     "source_url": e.source_url,
                     "document_sha256": e.document_sha256,
                     "reference": e.reference,
@@ -567,7 +615,7 @@ class DatasetService:
                     "period": str(p),
                     "value": float(v),
                     "kind": kind,
-                    "verification_status": "verified",
+                    "verification_status": "provider_published",
                     "source_url": fetch.documents[0].url if fetch.documents else fetch.provider,
                     "document_sha256": fetch.documents[0].sha256 if len(fetch.documents) == 1 else None,
                     "retrieved_at": fetch.retrieved_at,

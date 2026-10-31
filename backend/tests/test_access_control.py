@@ -199,6 +199,50 @@ def test_guest_allowed_endpoints_and_snapshot_has_no_forecast_values(client, wor
     assert snap.json()["icp_usd"] and snap.json()["source"] and snap.json()["freshness"]
 
 
+FORECAST_KEYS = {"points", "prediction", "predictions", "lower", "upper", "interval", "intervals", "result"}
+
+
+def _all_keys(obj: Any) -> set[str]:
+    if isinstance(obj, dict):
+        return set(obj) | {k for v in obj.values() for k in _all_keys(v)}
+    if isinstance(obj, list):
+        return {k for v in obj for k in _all_keys(v)}
+    return set()
+
+
+@pytest.mark.parametrize("cap", [0, 3, 24, 36])
+def test_guest_snapshot_extension_is_capped_and_carries_no_forecast_values(client, world, monkeypatch, cap):
+    """Contract C1: guests get recent official history, coverage, evidence and generated_at; never a
+    forecast value anywhere in the payload, and never more than PUBLIC_HISTORY_MONTHS months."""
+    import dataclasses
+
+    c = client.app.state.container
+    monkeypatch.setattr(c, "settings", dataclasses.replace(c.settings, public_history_months=cap))
+    r = client.get(f"{API}/public/market-snapshot")  # no Authorization header
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert {"recent", "coverage", "icp_evidence", "generated_at"} <= set(body)
+    assert len(body["recent"]) <= cap
+    if cap:
+        assert body["recent"] and body["recent"][-1]["period"] == body["icp_period"]
+        assert body["recent"][-1]["icp_usd"] == body["icp_usd"]
+        assert [m["period"] for m in body["recent"]] == sorted(m["period"] for m in body["recent"])
+        assert all(m["icp_usd"] is None or m["icp_usd"] > 0 for m in body["recent"])  # a gap is null, never 0
+    else:
+        assert body["recent"] == []
+    assert body["coverage"]["last_period"] == body["icp_period"]
+    assert 0 <= body["coverage"]["confirmed_months"] <= body["coverage"]["months"]
+    # no forecast values: only the teaser keys, no forecast-shaped key anywhere, no stored prediction
+    assert set(body["latest_forecast"]) == {"available", "issue_date", "forecast_origin", "horizon"}
+    assert not (_all_keys({k: v for k, v in body.items() if k != "latest_forecast"}) & FORECAST_KEYS)
+    assert str(SENTINEL_PREDICTION) not in r.text
+    latest = c.repo.latest_system_forecast()
+    for point in ((latest or {}).get("result") or {}).get("points") or []:
+        for key in ("prediction", "lower", "upper"):
+            if isinstance(point.get(key), float):
+                assert repr(point[key]) not in r.text
+
+
 def test_customer_workspace_is_open_to_members(client, world):
     a = world["a"]
     for who in ("viewer", "analyst"):
@@ -484,7 +528,7 @@ def test_temporary_password_must_be_changed_first(client, world):
 
 def test_readiness_hides_dependency_details_from_non_operators(client, admin):
     public = client.get("/health/ready").json()
-    assert public["checks"] and all(c["detail"] is None and c["latency_ms"] is None for c in public["checks"])
+    assert public["status"] and public["checks"] is None  # v6: status only for non-operators
     operator = client.get("/health/ready", headers=admin).json()
     assert any(c["detail"] for c in operator["checks"])
 

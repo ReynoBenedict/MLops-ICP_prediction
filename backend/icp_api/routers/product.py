@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
+import json
+from datetime import datetime, timezone
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import Response
 from pydantic import ValidationError
 
@@ -12,7 +16,12 @@ from icp_api.entitlements import has_role
 from icp_api.errors import ApiError
 from icp_api.logging_setup import request_id_var
 from icp_api.routers.common import ERRORS, CursorQuery, LimitQuery, container
-from icp_api.routers.forecasts import check_scenario_access, to_model
+from icp_api.routers.forecasts import (
+    IDEMPOTENCY_KEY_PATTERN,
+    IDEMPOTENCY_WINDOW,
+    check_scenario_access,
+    present_one,
+)
 from icp_api.schemas import (
     AlertEventList,
     AlertKind,
@@ -33,7 +42,16 @@ from icp_api.schemas import (
     ScenarioList,
     ScenarioUpdateRequest,
 )
-from icp_api.security import Principal, check_horizon, rate_limit, require_feature, require_user
+from icp_api.security import (
+    Principal,
+    check_feature,
+    check_horizon,
+    member_org_id,
+    rate_limit,
+    require_feature,
+    require_user,
+)
+from icp_api.services.public_snapshot import market_snapshot as public_market_snapshot
 from icp_api.storage.repository import InvalidCursor, utcnow
 
 router = APIRouter(prefix="/api/v1", tags=["product"], responses=ERRORS)
@@ -47,51 +65,31 @@ def _actor(p: Principal) -> dict[str, Any]:
 def _org(p: Principal, request: Request) -> str:
     """The member's own organisation. Scenario and alert endpoints refuse operators (403 FORBIDDEN);
     tenant administration happens under /admin/organizations instead."""
-    assert p.is_user and p.org_id is not None
-    return p.org_id
+    return member_org_id(p)
+
+
+SCENARIO_WRITER = Depends(require_feature("scenarios", allow_operator=False, minimum_role="analyst"))
+ALERT_WRITER = Depends(require_feature("alerts", allow_operator=False, minimum_role="analyst"))
+ALERT_READER = Depends(require_feature("alerts", allow_operator=False))
 
 
 # -- public snapshot --------------------------------------------------------------------------------
 @router.get("/public/market-snapshot", response_model=MarketSnapshot, dependencies=[DEFAULT_RL])
 def market_snapshot(request: Request) -> dict[str, Any]:
+    # The same answer for every caller, memoised in-process (services/public_snapshot.py, SEC-C-01).
     c = container(request)
-    s = c.datasets.summary()
-    icp = s["datasets"].get("icp") or {}
-    brent = s["datasets"].get("brent") or {}
-    fx = s["datasets"].get("usd_idr") or {}
-    latest = c.repo.latest_system_forecast()
-    fc = None
-    if latest and latest.get("result"):
-        # Teaser only: guests learn that a projection exists, never its values (sign-in required).
-        fc = {
-            "available": True,
-            "issue_date": latest["issue_date"],
-            "forecast_origin": latest["forecast_origin"],
-            "horizon": latest["horizon"],
-        }
-    return {
-        "icp_period": icp.get("period_end"),
-        "icp_usd": icp.get("latest_value"),
-        "previous_period": str(__import__("pandas").Period(icp["period_end"], freq="M") - 1)
-        if icp.get("previous_value") is not None
-        else None,
-        "previous_usd": icp.get("previous_value"),
-        "mom_change_pct": icp.get("mom_change_pct"),
-        "brent_usd": brent.get("latest_value"),
-        "brent_period": brent.get("period_end"),
-        "usd_idr": fx.get("latest_value"),
-        "icp_idr": (s.get("icp_idr") or {}).get("icp_idr"),
-        "freshness": icp.get("freshness") or {"status": "unknown"},
-        "source": "Kementerian ESDM (ICP resmi); EIA/World Bank (acuan); Bank Indonesia JISDOR (kurs)",
-        "updated_at": icp.get("updated_at"),
-        "latest_forecast": fc,
-    }
+    return public_market_snapshot(c, c.snapshot_memo)
 
 
 # -- insights ---------------------------------------------------------------------------------------
 @router.get("/insights", response_model=InsightsResponse, dependencies=[DEFAULT_RL])
-def insights(request: Request, _: Principal = Depends(require_feature("insights"))) -> dict[str, Any]:
-    return container(request).insights.generate()
+def insights(
+    request: Request,
+    lang: Literal["id", "en"] = Query("id", description="Language of every text field"),
+    principal: Principal = Depends(require_feature("insights")),
+) -> dict[str, Any]:
+    audience = "operator" if principal.is_operator else "customer"
+    return container(request).insights.generate(lang, audience)
 
 
 # -- scenarios --------------------------------------------------------------------------------------
@@ -116,12 +114,8 @@ def list_scenarios(
 def create_scenario(
     request: Request,
     body: ScenarioCreateRequest,
-    principal: Principal = Depends(require_user("analyst", allow_operator=False)),
+    principal: Principal = SCENARIO_WRITER,
 ) -> dict[str, Any]:
-    if principal.is_user and not principal.plan.scenarios:
-        raise ApiError(
-            403, "FEATURE_NOT_IN_PLAN", "Skenario tidak termasuk dalam paket Anda.", {"feature": "scenarios"}
-        )
     return container(request).scenarios.create(
         _org(principal, request),
         _actor(principal),
@@ -141,7 +135,7 @@ def create_scenario(
 def compare_scenarios(
     request: Request,
     body: ScenarioCompareRequest,
-    principal: Principal = Depends(require_user("analyst", allow_operator=False)),
+    principal: Principal = SCENARIO_WRITER,
 ) -> dict[str, Any]:
     return container(request).scenarios.compare(
         _org(principal, request),
@@ -167,7 +161,7 @@ def update_scenario(
     request: Request,
     scenario_id: str,
     body: ScenarioUpdateRequest,
-    principal: Principal = Depends(require_user("analyst", allow_operator=False)),
+    principal: Principal = SCENARIO_WRITER,
 ) -> dict[str, Any]:
     return container(request).scenarios.update(
         _org(principal, request),
@@ -185,7 +179,7 @@ def update_scenario(
 def archive_scenario(
     request: Request,
     scenario_id: str,
-    principal: Principal = Depends(require_user("analyst", allow_operator=False)),
+    principal: Principal = SCENARIO_WRITER,
 ) -> None:
     container(request).scenarios.archive(
         _org(principal, request), _actor(principal), scenario_id, request_id_var.get()
@@ -201,17 +195,16 @@ def archive_scenario(
 def run_scenario(
     request: Request,
     scenario_id: str,
-    principal: Principal = Depends(require_user("analyst", allow_operator=False)),
+    principal: Principal = SCENARIO_WRITER,
 ) -> ForecastRun:
-    return to_model(
-        container(request).scenarios.run(
-            _org(principal, request),
-            principal.name,
-            scenario_id,
-            request_id_var.get(),
-            horizon_max=principal.horizon_max,
-        )
+    row = container(request).scenarios.run(
+        _org(principal, request),
+        principal.name,
+        scenario_id,
+        request_id_var.get(),
+        horizon_max=principal.horizon_max,
     )
+    return present_one(request, principal, row)
 
 
 # -- alerts -----------------------------------------------------------------------------------------
@@ -221,9 +214,7 @@ def alert_kinds(request: Request, _: Principal = Depends(require_user("viewer"))
 
 
 @router.get("/alerts/rules", response_model=list[AlertRule], dependencies=[DEFAULT_RL])
-def alert_rules(
-    request: Request, principal: Principal = Depends(require_feature("alerts", allow_operator=False))
-) -> list[dict[str, Any]]:
+def alert_rules(request: Request, principal: Principal = ALERT_READER) -> list[dict[str, Any]]:
     return container(request).alerts.list_rules(_org(principal, request))
 
 
@@ -231,12 +222,8 @@ def alert_rules(
 def create_alert_rule(
     request: Request,
     body: AlertRuleCreateRequest,
-    principal: Principal = Depends(require_user("analyst", allow_operator=False)),
+    principal: Principal = ALERT_WRITER,
 ) -> dict[str, Any]:
-    if principal.is_user and not principal.plan.alerts:
-        raise ApiError(
-            403, "FEATURE_NOT_IN_PLAN", "Peringatan tidak termasuk dalam paket Anda.", {"feature": "alerts"}
-        )
     rule = container(request).alerts.create_rule(
         _org(principal, request), _actor(principal), body.kind, body.params, request_id_var.get()
     )
@@ -248,7 +235,7 @@ def update_alert_rule(
     request: Request,
     rule_id: str,
     body: AlertRuleUpdateRequest,
-    principal: Principal = Depends(require_user("analyst", allow_operator=False)),
+    principal: Principal = ALERT_WRITER,
 ) -> dict[str, Any]:
     rule = container(request).alerts.update_rule(
         _org(principal, request), _actor(principal), rule_id, body.params, body.enabled, request_id_var.get()
@@ -260,7 +247,7 @@ def update_alert_rule(
 def delete_alert_rule(
     request: Request,
     rule_id: str,
-    principal: Principal = Depends(require_user("analyst", allow_operator=False)),
+    principal: Principal = ALERT_WRITER,
 ) -> None:
     container(request).alerts.delete_rule(
         _org(principal, request), _actor(principal), rule_id, request_id_var.get()
@@ -273,7 +260,7 @@ def alert_events(
     limit: int = LimitQuery,
     cursor: str | None = CursorQuery,
     unread_only: bool = Query(False),
-    principal: Principal = Depends(require_feature("alerts", allow_operator=False)),
+    principal: Principal = ALERT_READER,
 ) -> dict[str, Any]:
     try:
         return container(request).alerts.events(_org(principal, request), limit, cursor, unread_only)
@@ -284,16 +271,14 @@ def alert_events(
 @router.post("/alerts/events/read", dependencies=[DEFAULT_RL])
 def mark_alerts_read(
     request: Request,
-    event_id: str | None = Query(None),
-    principal: Principal = Depends(require_user("viewer", allow_operator=False)),
+    event_id: str | None = Query(None, max_length=64),
+    principal: Principal = ALERT_READER,
 ) -> dict[str, Any]:
     return {"marked": container(request).alerts.mark_read(_org(principal, request), event_id), "at": utcnow()}
 
 
 @router.post("/alerts/evaluate", dependencies=[DEFAULT_RL])
-def evaluate_alerts(
-    request: Request, principal: Principal = Depends(require_user("analyst", allow_operator=False))
-) -> dict[str, Any]:
+def evaluate_alerts(request: Request, principal: Principal = ALERT_WRITER) -> dict[str, Any]:
     return {"created": container(request).alerts.evaluate(org_id=_org(principal, request))}
 
 
@@ -320,7 +305,19 @@ def list_reports(
     dependencies=[Depends(rate_limit("forecast", "rate_limit_forecast_per_minute"))],
 )
 def create_report(
-    request: Request, body: ReportCreateRequest, principal: Principal = Depends(require_user("viewer"))
+    request: Request,
+    response: Response,
+    body: ReportCreateRequest,
+    principal: Principal = Depends(require_user("viewer")),
+    idempotency_key: str | None = Header(
+        None,
+        alias="Idempotency-Key",
+        pattern=IDEMPOTENCY_KEY_PATTERN,
+        description="Optional. Repeating a request with the same key (same caller, same body, within 24 h) returns "
+        "the original successful report instead of generating and counting a new one. While the first request "
+        "with that key is still being generated (for example after its 504), a repeat gets 409 "
+        "IDEMPOTENCY_IN_PROGRESS with Retry-After instead of a second report.",
+    ),
 ) -> dict[str, Any]:
     formats = list(body.formats)
     params = _validated_report_params(body.kind, body.params, principal)
@@ -334,16 +331,49 @@ def create_report(
                 {"feature": "reports_pdf"},
             )
         if "xlsx" in formats and not p.reports_excel:
-            formats.remove("xlsx")  # silently drop rather than fail: CSV remains available on every plan
-    return container(request).reports.generate(
-        body.kind,
-        params,
-        principal.name,
-        None if principal.is_operator else principal.org_id,
-        request_id_var.get(),
-        tuple(formats),
-        horizon_max=principal.horizon_max,
+            # silently drop rather than fail: CSV remains available on every plan, and an Excel-only
+            # request gets CSV instead of a "succeeded" report without any file
+            formats = [f for f in formats if f != "xlsx"] or ["csv"]
+    c = container(request)
+    org_id = None if principal.is_operator else principal.org_id
+    idempotency: dict[str, str] | None = None
+    # A retry while the first request with the same key is still generating: 409 IDEMPOTENCY_IN_PROGRESS.
+    reservation = (
+        c.reports.reserve_idempotency(idempotency_key, principal.name, org_id)
+        if idempotency_key
+        else contextlib.nullcontext()
     )
+    with reservation:
+        if idempotency_key:
+            fingerprint = hashlib.sha256(
+                json.dumps(body.model_dump(mode="json"), sort_keys=True).encode("utf-8")
+            ).hexdigest()
+            since = (datetime.now(timezone.utc) - IDEMPOTENCY_WINDOW).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+            previous = c.reports.find_idempotent(idempotency_key, principal.name, org_id, since)
+            if previous is not None:
+                if (previous.get("params") or {}).get("idempotency_fingerprint") != fingerprint:
+                    raise ApiError(
+                        409,
+                        "IDEMPOTENCY_KEY_REUSED",
+                        "Idempotency-Key ini sudah dipakai untuk permintaan laporan yang berbeda.",
+                    )
+                response.headers["Idempotent-Replayed"] = "true"
+                return previous
+            idempotency = {"idempotency_key": idempotency_key, "idempotency_fingerprint": fingerprint}
+        return c.reports.generate(
+            body.kind,
+            params,
+            principal.name,
+            None if principal.is_operator else principal.org_id,
+            request_id_var.get(),
+            tuple(formats),
+            horizon_max=principal.horizon_max,
+            history_floor=c.datasets.history_floor(principal.plan.history_years)
+            if principal.is_user and principal.plan.history_years
+            else None,
+            include_insights=principal.is_operator or principal.plan.insights,
+            idempotency=idempotency,
+        )
 
 
 def _validation_error(exc: ValidationError) -> ApiError:
@@ -391,6 +421,7 @@ def _validated_report_params(kind: str, params: dict[str, Any], principal: Princ
             raise ApiError(
                 403, "FORBIDDEN", "Perbandingan skenario memerlukan peran analyst atau lebih tinggi."
             )
+        check_feature(principal, "scenarios")
         try:
             cmp = ScenarioCompareRequest.model_validate(params)
         except ValidationError as exc:
@@ -398,7 +429,20 @@ def _validated_report_params(kind: str, params: dict[str, Any], principal: Princ
         if cmp.horizon is not None:
             check_horizon(cmp.horizon, principal.horizon_max, principal.plan_code)
         return cmp.model_dump(exclude_none=True)
-    return params
+    # market_monthly / data_provenance take no parameters: nothing unvalidated is stored with the run.
+    if params:
+        raise ApiError(
+            422,
+            "VALIDATION_ERROR",
+            f"params: report kind {kind} takes no parameters.",
+            {
+                "issues": [
+                    {"loc": ["params", k], "msg": "unexpected field", "type": "extra_forbidden"}
+                    for k in sorted(params)
+                ][:20]
+            },
+        )
+    return {}
 
 
 @router.get("/reports/{report_id}", response_model=ReportRun, dependencies=[DEFAULT_RL])

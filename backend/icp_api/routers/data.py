@@ -21,6 +21,7 @@ from icp_api.schemas import (
     HistoryResponse,
     ImportResponse,
     IngestionRunList,
+    VerificationResponse,
 )
 from icp_api.security import Principal, rate_limit, require_admin, require_user
 from icp_api.storage.repository import InvalidCursor
@@ -80,6 +81,23 @@ def evidence(
 ) -> EvidenceResponse:
     items = container(request).datasets.evidence(_dataset(dataset), period)
     return EvidenceResponse.model_validate({"dataset": dataset, "period": period, "items": items})
+
+
+@router.get(
+    "/data/verification", response_model=VerificationResponse, tags=["data"], dependencies=[SIGNED_IN]
+)
+def verification(
+    request: Request,
+    dataset: str = DatasetQuery,
+    principal: Principal = Depends(require_user("viewer")),
+) -> VerificationResponse:
+    """Per-month status and basis with plain-language labels; clipped to the plan's history."""
+    c = container(request)
+    years = principal.plan.history_years if principal.is_user else 0
+    floor = c.datasets.history_floor(years) if years else None
+    return VerificationResponse.model_validate(
+        c.verification.summary(_dataset(dataset), floor, years or None, include_urls=principal.is_operator)
+    )
 
 
 @router.get("/datasets/active", response_model=ActiveDatasets, tags=["datasets"], dependencies=[SIGNED_IN])
@@ -142,15 +160,22 @@ def get_version(request: Request, version_id: str) -> DatasetVersion:
 def download(
     request: Request, version_id: str, principal: Principal = Depends(require_user("viewer"))
 ) -> Response:
-    """Members may download the active version of each dataset; operators any version."""
-    row, data = container(request).datasets.download(version_id, active_only=not principal.is_operator)
-    filename = f"{row['dataset']}_v{row['version']}_{row['sha256'][:12]}.csv"
+    """Members may download the active version of each dataset, clipped to their plan's
+    ``history_years`` (same rule as ``/data/history``); operators any version, unclipped."""
+    c = container(request)
+    floor = None
+    if principal.is_user and principal.plan.history_years:
+        floor = c.datasets.history_floor(principal.plan.history_years)
+    row, data = c.datasets.download(version_id, active_only=not principal.is_operator, floor=floor)
+    filename = f"{row['dataset']}_v{row['version']}_{row['sha256'][:12]}"
+    filename += f"_from-{floor}.csv" if floor else ".csv"
     return Response(
         data,
         media_type="text/csv",
         headers={
             "Content-Disposition": f'attachment; filename="{filename}"',
-            "Cache-Control": "private, max-age=86400, immutable",
+            # Licensed tenant data: never kept in browser or shared caches after the session.
+            "Cache-Control": "private, no-store",
         },
     )
 

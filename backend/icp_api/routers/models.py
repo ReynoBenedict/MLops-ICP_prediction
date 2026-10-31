@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import re
+from typing import Any
+
 from fastapi import APIRouter, Depends, Query, Request
 
 from icp_api.errors import ApiError
@@ -32,21 +35,43 @@ OPERATOR_ONLY = Depends(require_admin)  # experiment, promotion and drift intern
 VERSION_PATTERN = r"^[0-9]{1,6}$"
 
 
-@router.get("", response_model=ModelList, dependencies=[SIGNED_IN])
-def list_models(request: Request) -> ModelList:
+INTERNAL_FIELDS = ("git_commit", "config_sha256", "training_job_id")
+
+
+def customer_view(d: dict[str, Any]) -> dict[str, Any]:
+    """Model card for organisation members: build internals (code commit, config hash, training job)
+    are operator-only."""
+    out = {**d, **dict.fromkeys(INTERNAL_FIELDS)}
+    card = out.get("model_card")
+    if isinstance(card, str):
+        out["model_card"] = "\n".join(
+            line
+            for line in card.splitlines()
+            if not re.match(r"^\*\*(Code commit|Training job)", line.strip())
+        )
+    return out
+
+
+@router.get("", response_model=ModelList)
+def list_models(request: Request, principal: Principal = Depends(require_user("viewer"))) -> ModelList:
     m = container(request).models
     versions = m.list_versions()
+    if not principal.is_operator:
+        versions = [customer_view(v) for v in versions]
     production = next((v["version"] for v in versions if m.alias in v["aliases"]), None)
     return ModelList.model_validate(
         {"model_name": m.model_name, "alias": m.alias, "production_version": production, "versions": versions}
     )
 
 
-@router.get("/versions/{version}", response_model=ModelVersionDetail, dependencies=[SIGNED_IN])
-def version_detail(request: Request, version: str) -> ModelVersionDetail:
+@router.get("/versions/{version}", response_model=ModelVersionDetail)
+def version_detail(
+    request: Request, version: str, principal: Principal = Depends(require_user("viewer"))
+) -> ModelVersionDetail:
     if not version.isdigit():
         raise ApiError(422, "VALIDATION_ERROR", "version must be numeric")
-    return ModelVersionDetail.model_validate(container(request).models.version_detail(version))
+    d = container(request).models.version_detail(version)
+    return ModelVersionDetail.model_validate(d if principal.is_operator else customer_view(d))
 
 
 @router.get("/compare", response_model=list[ModelVersionDetail], dependencies=[OPERATOR_ONLY])

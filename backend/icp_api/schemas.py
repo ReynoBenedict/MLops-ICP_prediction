@@ -41,13 +41,19 @@ class DependencyStatus(BaseModel):
 
 
 class ReadinessResponse(BaseModel):
+    """``environment``, ``version`` and ``checks`` are null unless the caller is a platform operator."""
+
     status: Literal["ready", "degraded", "not_ready"]
-    environment: str
-    version: str
-    checks: list[DependencyStatus]
+    environment: str | None = None
+    version: str | None = None
+    checks: list[DependencyStatus] | None = None
 
 
 class SystemStatus(ReadinessResponse):
+    environment: str
+    version: str
+    checks: list[DependencyStatus]
+    request_id: str | None = None  # of this status call, for correlating server logs
     metadata_backend: str
     object_store_backend: str
     schema_version: int | None
@@ -347,6 +353,103 @@ class BenchmarkInput(BaseModel):
 ForecastKind = Literal["estimate_awaiting_publication", "future_forecast", "legacy_record"]
 
 
+class Localized(BaseModel):
+    id: str
+    en: str
+
+
+class EvaluationBaseline(BaseModel):
+    method: Literal["naive_last"]
+    label: Localized
+    mae: float | None
+    n: int | None
+
+
+class CoveragePeriod(BaseModel):
+    origin_start: str
+    origin_end: str
+
+
+class PointEvaluation(BaseModel):
+    mode: Literal["observed", "hold_last"]
+    horizon: int
+    n: int
+    mae: float | None
+    mase: float | None
+    dir_acc: float | None = Field(description="Share of backtest cases where the up/down direction was right")
+    coverage: dict[str, float] | None = Field(
+        description="Interval level ('0.5','0.8','0.95') -> share of backtest actuals inside the range"
+    )
+    coverage_n: int | None
+    coverage_embargoed: dict[str, float] | None = Field(
+        None,
+        description="Out-of-sample coverage recomputed from the stored backtest predictions with a fit/test "
+        "embargo (no fit case targets a month after the first test origin); null when not derivable",
+    )
+    coverage_embargoed_n: int | None = None
+    coverage_check: Literal["embargoed", "without_embargo"] | None = Field(
+        None,
+        description="embargoed: the stored coverage equals the embargoed recomputation; without_embargo: the stored "
+        "figure predates the embargo (models exported before 2026-10-20) and differs; null: not derivable",
+    )
+    origin_start: str | None = Field(
+        None, description="First backtest forecast origin (evaluation period start)"
+    )
+    origin_end: str | None = Field(None, description="Last backtest forecast origin (evaluation period end)")
+    baseline: EvaluationBaseline | None = Field(
+        None, description="Naive persistence on exactly the same backtest cases (null if not stored)"
+    )
+    beats_baseline: bool | None = None
+    coverage_period: CoveragePeriod | None = Field(
+        None, description="Origins of the out-of-sample interval coverage check"
+    )
+    under_coverage: list[str] = Field(
+        default_factory=list,
+        description="Levels whose measured coverage (stricter of stored and embargoed) is >= 0.10 below nominal "
+        "or whose miss rate exceeds 1.5x the nominal miss rate (95 % level: below 0.925)",
+    )
+    coverage_warning: Localized | None = None
+    summary: Localized | None = Field(
+        None, description="Plain sentence: period, n, horizon, mode, error vs baseline"
+    )
+
+
+class PointActual(BaseModel):
+    period: str
+    value: float
+    basis: str
+    label: Localized
+
+
+class InputUsage(BaseModel):
+    input: Literal["brent", "dubai", "wti", "usd_idr"]
+    used_by_method: bool
+    scenario_months: list[str]
+    note: Localized
+    effect: Literal["used", "ignored", "rupiah_only"] | None = Field(
+        None,
+        description="used: changes the ICP forecast; ignored: the active method does not read it; "
+        "rupiah_only: only the rupiah equivalent changes",
+    )
+
+
+class ForecastNotes(BaseModel):
+    method: Localized
+    interval: Localized
+    evaluation: Localized
+    coverage_warning: Localized | None = Field(
+        None,
+        description="Set when a shown point's interval under-covered in backtests (or was checked on few cases)",
+    )
+    ignored_inputs: Localized | None = None
+
+
+class PlanClip(BaseModel):
+    horizon_max: int
+    stored_horizon: int
+    clipped: bool
+
+
 class ForecastPoint(BaseModel):
     period: str
     step: int
@@ -365,6 +468,16 @@ class ForecastPoint(BaseModel):
     prediction_idr: float | None
     fx_rate: float | None
     fx_source: Literal["observed", "scenario", "assumed_hold_last"] | None
+    evaluation: PointEvaluation | None = Field(
+        None, description="Backtest facts for this step and input situation (read time)"
+    )
+    actual: PointActual | None = Field(
+        None, description="Official ICP for this month once published (read time)"
+    )
+    kind_now: (
+        Literal["estimate_awaiting_publication", "future_forecast", "legacy_record", "official_published"]
+        | None
+    ) = None
 
 
 class ForecastModelInfo(BaseModel):
@@ -385,6 +498,12 @@ class ForecastResult(BaseModel):
     interval_levels: list[float]
     interval_note: str
     model: ForecastModelInfo | None = None
+    notes: ForecastNotes | None = None
+    input_usage: list[InputUsage] = Field(default_factory=list)
+    ignored_inputs: list[str] = Field(
+        default_factory=list,
+        description="Scenario inputs the active method does not read (flagged, not rejected)",
+    )
 
 
 class ForecastRun(BaseModel):
@@ -414,6 +533,9 @@ class ForecastRun(BaseModel):
     error_message: str | None
     duration_ms: int | None
     export_available: bool
+    plan_clip: PlanClip | None = Field(
+        None, description="Customers: points beyond the plan horizon are removed at read time"
+    )
 
 
 class ForecastRunList(BaseModel):
@@ -505,6 +627,43 @@ class BacktestMetricRow(BaseModel):
     q95: float | None = None
 
 
+class DisclosureRow(BaseModel):
+    mode: Literal["observed", "hold_last"]
+    horizon: int
+    n: int
+    mae: float | None
+    baseline_mae: float | None
+    beats_baseline: bool | None
+    coverage: dict[str, float] | None
+    coverage_n: int | None
+    coverage_embargoed: dict[str, float] | None = Field(
+        None,
+        description="Out-of-sample coverage recomputed from the stored backtest predictions with a fit/test "
+        "embargo (no fit case targets a month after the first test origin); null when not derivable",
+    )
+    coverage_embargoed_n: int | None = None
+    coverage_check: Literal["embargoed", "without_embargo"] | None = Field(
+        None,
+        description="embargoed: the stored coverage equals the embargoed recomputation; without_embargo: the stored "
+        "figure predates the embargo (models exported before 2026-10-20) and differs; null: not derivable",
+    )
+    under_coverage: list[str]
+    coverage_warning: Localized | None
+
+
+class EvaluationDisclosure(BaseModel):
+    origin_start: str | None
+    origin_end: str | None
+    baseline_method: Literal["naive_last"]
+    baseline_label: Localized
+    calibrated: Literal[False] = Field(
+        description="Always false: ranges are empirical backtest quantiles; see measured coverage per row"
+    )
+    coverage_period: CoveragePeriod | None
+    rows: list[DisclosureRow]
+    note: Localized
+
+
 class ModelVersionDetail(ModelVersion):
     holdout_predictions: list[HoldoutPoint] = Field(
         description="1-month-ahead backtest pairs with observed benchmarks."
@@ -514,6 +673,10 @@ class ModelVersionDetail(ModelVersion):
     interval_coverage: dict[str, dict[str, dict[str, float]]] | None = None
     model_card: str | None = None
     backtest_metrics: list[BacktestMetricRow] = Field(default_factory=list)
+    evaluation_disclosure: EvaluationDisclosure | None = Field(
+        None,
+        description="Backtest period, n, mode, horizon, naive baseline and measured coverage (Agent D v6)",
+    )
 
 
 class ModelList(BaseModel):
@@ -710,9 +873,13 @@ class AuditList(BaseModel):
 
 
 # --- accounts & organisations -------------------------------------------------------------------
+# Deliberately simple: one "@", no whitespace, a dot in the domain (deliverability is not checked).
+EMAIL_PATTERN = r"^[^@\s]+@[^@\s]+\.[^@\s]+$"
+
+
 class RegisterRequest(Strict):
     organization_name: str = Field(..., min_length=2, max_length=120)
-    email: str = Field(..., min_length=5, max_length=200)
+    email: str = Field(..., min_length=5, max_length=200, pattern=EMAIL_PATTERN)
     name: str = Field(..., min_length=1, max_length=120)
     password: str = Field(..., min_length=10, max_length=200)
     accept_terms: bool = Field(
@@ -739,6 +906,7 @@ class PlanInfo(BaseModel):
     label_id: str
     label_en: str
     price_note_id: str
+    price_note_en: str = ""
     seats: int
     forecast_horizon_max: int
     scenarios: bool
@@ -763,6 +931,11 @@ class UserPublic(BaseModel):
     must_change_password: bool
     created_at: str
     last_login_at: str | None
+    temporary_login_expires_at: str | None = Field(
+        None,
+        description="Set while a temporary password (invitation/reset) is pending; sign-in fails after it.",
+    )
+    email_verified: bool = Field(False, description="True once the address was confirmed by an e-mail link.")
 
 
 class OrganizationPublic(BaseModel):
@@ -813,7 +986,7 @@ class OrgRenameRequest(Strict):
 
 
 class InviteRequest(Strict):
-    email: str = Field(..., min_length=5, max_length=200)
+    email: str = Field(..., min_length=5, max_length=200, pattern=EMAIL_PATTERN)
     name: str = Field(..., min_length=1, max_length=120)
     role: Literal["admin", "analyst", "viewer"] = "analyst"
 
@@ -831,6 +1004,44 @@ class MemberUpdateRequest(Strict):
 
 class TemporaryPasswordResponse(BaseModel):
     temporary_password: str
+    expires_at: str | None = Field(None, description="The temporary password stops working after this time.")
+
+
+# --- identity lifecycle (v7 Wave B) ---------------------------------------------------------------
+class ActiveSession(BaseModel):
+    """One active session of the signed-in user. No token material, no raw user agent."""
+
+    id: str
+    device: str = Field(..., description="Short device label derived from the user agent")
+    created_at: str
+    last_seen_at: str | None
+    expires_at: str = Field(..., description="Absolute expiry (30 days after sign-in)")
+    idle_expires_at: str | None = Field(
+        None, description="The session ends if unused until this time (SESSION_IDLE_TIMEOUT_HOURS)"
+    )
+    current: bool = Field(..., description="True for the session making this request")
+
+
+class RevokedSessions(BaseModel):
+    revoked: int
+
+
+class PasswordResetRequest(Strict):
+    email: str = Field(..., min_length=5, max_length=200, pattern=EMAIL_PATTERN)
+
+
+class PasswordResetConfirm(Strict):
+    token: str = Field(..., min_length=10, max_length=200)
+    new_password: str = Field(..., min_length=10, max_length=200)
+
+
+class EmailTokenConfirm(Strict):
+    token: str = Field(..., min_length=10, max_length=200)
+
+
+class EmailRequestAccepted(BaseModel):
+    status: Literal["accepted"] = "accepted"
+    note: str
 
 
 class ApiKeyCreateRequest(Strict):
@@ -861,6 +1072,74 @@ class OperatorPlanRequest(Strict):
     reason: str = Field(..., min_length=5, max_length=500)
 
 
+PlanCode = Literal["trial", "starter", "professional", "enterprise"]
+
+
+class PlanChangeRequestCreate(Strict):
+    requested_plan: PlanCode
+    note: str | None = Field(None, max_length=500)
+
+
+class PlanChangeResolveRequest(Strict):
+    decision: Literal["approve", "decline"]
+    note: str | None = Field(None, max_length=500)
+
+
+class PlanChangeRequest(BaseModel):
+    id: str
+    org_id: str
+    org_name: str | None
+    requested_by: str
+    requested_by_name: str | None
+    previous_plan: str
+    requested_plan: PlanCode
+    note: str | None
+    status: Literal["pending", "approved", "declined", "withdrawn"]
+    created_at: str
+    resolved_at: str | None
+    resolved_by: str | None
+    resolution_note: str | None
+
+
+class PlanChangeRequestList(BaseModel):
+    items: list[PlanChangeRequest]
+    next_cursor: str | None
+
+
+class DeletionRequestCreate(Strict):
+    """``account``: delete the caller's own account; ``organization``: the owner deletes the organisation."""
+
+    scope: Literal["account", "organization"]
+    reason: str | None = Field(None, max_length=500)
+
+
+class DeletionResolveRequest(Strict):
+    decision: Literal["execute", "decline"]
+    note: str | None = Field(None, max_length=500)
+
+
+class DeletionRequest(BaseModel):
+    id: str
+    org_id: str
+    org_name: str | None
+    scope: Literal["account", "organization"]
+    user_id: str | None
+    user_name: str | None
+    requested_by: str
+    requested_by_name: str | None
+    reason: str | None
+    status: Literal["pending", "executed", "declined", "withdrawn"]
+    created_at: str
+    resolved_at: str | None
+    resolved_by: str | None
+    resolution_note: str | None
+
+
+class DeletionRequestList(BaseModel):
+    items: list[DeletionRequest]
+    next_cursor: str | None
+
+
 class OperatorStatusRequest(Strict):
     status: Literal["active", "suspended"]
     reason: str = Field(..., min_length=5, max_length=500)
@@ -872,11 +1151,53 @@ class OrganizationList(BaseModel):
 
 
 # --- product: snapshot, insights, scenarios, alerts, reports -----------------------------------
+class SnapshotMonth(BaseModel):
+    period: str = Field(description="YYYY-MM")
+    icp_usd: float | None = Field(
+        description="Official ICP (USD/bbl) from the active dataset; null when no official value exists "
+        "for the month or its official documents disagree (verification basis conflict); never 0, never an "
+        "estimate"
+    )
+    brent_usd: float | None = Field(description="Brent monthly average (USD/bbl) as stored; null if absent")
+
+
+class SnapshotCoverage(BaseModel):
+    first_period: str
+    last_period: str
+    months: int = Field(description="Months with an official ICP value")
+    confirmed_months: int = Field(
+        description="Months whose verification basis is two_documents or decree_text (same computation "
+        "as GET /data/verification)"
+    )
+
+
+class SnapshotEvidenceDocument(BaseModel):
+    kind: Literal["decree", "announcement"]
+    reference: str | None = Field(
+        description="The decree's own number, only when it is verifiable; always null for announcements"
+    )
+    published_on: str | None = Field(description="YYYY-MM-DD, only when stored")
+    url: str | None = Field(description="Public government page stored as the source, else null")
+
+
+class SnapshotEvidence(BaseModel):
+    period: str
+    basis: VerificationBasis
+    label: Localized
+    documents: list[SnapshotEvidenceDocument]
+
+
 class MarketSnapshot(BaseModel):
     """Public, anonymous market snapshot for the landing page (no account required).
 
     ``latest_forecast`` is a teaser only - ``{available, issue_date, forecast_origin, horizon}`` -
     and never carries predicted values, intervals or method details (those require sign-in).
+    ``recent``, ``coverage``, ``icp_evidence`` and ``generated_at`` (contract C1) are optional for
+    older clients and carry official observations and benchmarks only, never forecast values.
+    A month whose official documents disagree (verification basis ``conflict``) is withheld everywhere:
+    its value is null in ``recent`` and, when it is the latest month, in ``icp_usd``, ``mom_change_pct``
+    and ``icp_idr`` (``icp_evidence`` then names the basis); as the previous month it nulls
+    ``previous_period``, ``previous_usd`` and ``mom_change_pct``.
     """
 
     icp_period: str | None
@@ -892,6 +1213,16 @@ class MarketSnapshot(BaseModel):
     source: str
     updated_at: str | None
     latest_forecast: dict[str, Any] | None = None
+    recent: list[SnapshotMonth] = Field(
+        default_factory=list,
+        description="Last PUBLIC_HISTORY_MONTHS months ending at the latest official ICP month, ascending "
+        "(empty when disabled or without ICP data)",
+    )
+    coverage: SnapshotCoverage | None = None
+    icp_evidence: SnapshotEvidence | None = Field(
+        None, description="Stored official documents for the latest ICP month; null when none exist"
+    )
+    generated_at: str | None = Field(None, description="ISO-8601 UTC time the response was generated")
 
 
 class InsightMetric(BaseModel):
@@ -908,24 +1239,126 @@ class InsightSource(BaseModel):
     period_end: str | None
 
 
+class InsightFact(BaseModel):
+    key: str
+    label: str
+    value: float | int | str | None
+    unit: str
+    display: str = Field(description="Value formatted for the response language; render this.")
+
+
+class InsightPeriods(BaseModel):
+    subject: str | None
+    window_start: str | None
+    window_end: str | None
+    n: int | None
+
+
+class InsightMethod(BaseModel):
+    key: str
+    text: str
+
+
+class InsightModelRef(BaseModel):
+    version: str
+    method: str
+
+
+class InsightEvidence(BaseModel):
+    datasets: list[InsightSource]
+    periods: InsightPeriods
+    inputs: list[InsightFact]
+    outputs: list[InsightFact]
+    method: InsightMethod
+    model: InsightModelRef | None
+    forecast_ids: list[str]
+
+
 class InsightItem(BaseModel):
     id: str
+    rule_id: str
+    rule_version: int
     kind: str
-    severity: Literal["info", "notice", "warning"]
+    importance: Literal["high", "medium", "low"]
+    severity: Literal["info", "notice", "warning"] = Field(
+        description="compat: high=warning, medium=notice, low=info"
+    )
+    audience: Literal["customer", "operator"]
     title: str
     body: str
     period: str | None
-    metrics: list[InsightMetric]
-    sources: list[InsightSource]
     next_step: str | None
+    facts: list[InsightFact]
+    evidence: InsightEvidence
+    metrics: list[InsightMetric] = Field(description="compat: same numbers as facts")
+    sources: list[InsightSource] = Field(description="compat: same as evidence.datasets")
     generated: bool
 
 
 class InsightsResponse(BaseModel):
     generated_at: str
+    lang: Literal["id", "en"]
+    engine_version: str
     basis: dict[str, Any]
     insights: list[InsightItem]
     disclaimer: str
+
+
+VerificationBasis = Literal[
+    "two_documents",
+    "decree_text",
+    "document_plus_legacy",
+    "single_document",
+    "ocr_single",
+    "conflict",
+    "no_evidence",
+    "provider_published",
+]
+
+
+class DissentReading(BaseModel):
+    value: float
+    kind: str
+    kind_label: Localized
+    reference: str | None
+    reason: Localized
+    source_url: str | None = Field(description="Operators only; null for customers")
+
+
+class VerificationMonth(BaseModel):
+    period: str
+    value: float | None
+    status: Literal[
+        "verified", "single_source", "machine_extracted", "conflict", "no_evidence", "provider_published"
+    ]
+    basis: VerificationBasis
+    documents: int = Field(description="Distinct official ESDM documents agreeing with the value")
+    kinds: list[str]
+    reference: str | None
+    label: Localized
+    explanation: Localized
+    dissent: list[DissentReading] = Field(
+        default_factory=list,
+        description="Source readings that differ from the value in use (outvoted or superseded), never silently dropped",
+    )
+    dissent_label: Localized | None = Field(
+        None, description="'Sumber berbeda' summary; null when no dissent"
+    )
+
+
+class VerificationLegendItem(BaseModel):
+    label: Localized
+    explanation: Localized
+
+
+class VerificationResponse(BaseModel):
+    dataset: str
+    history_years: int | None
+    earliest_period: str | None
+    counts: dict[str, int]
+    dissent_months: int = Field(0, description="Months in range with at least one differing source reading")
+    months: list[VerificationMonth]
+    legend: dict[str, VerificationLegendItem]
 
 
 class ScenarioCreateRequest(Strict):
@@ -954,6 +1387,7 @@ class Scenario(BaseModel):
     updated_at: str
     last_forecast_id: str | None
     archived: bool
+    input_usage: list[InputUsage] = Field(default_factory=list)
 
 
 class ScenarioList(BaseModel):
@@ -980,6 +1414,7 @@ class ScenarioCompareResponse(BaseModel):
 class AlertKind(BaseModel):
     kind: str
     label_id: str
+    label_en: str
     params: dict[str, Any]
 
 
@@ -1006,6 +1441,7 @@ class AlertRule(BaseModel):
     created_by: str
     kind: str
     label_id: str | None = None
+    label_en: str | None = None
     params: dict[str, Any]
     enabled: bool
     created_at: str
@@ -1025,6 +1461,14 @@ class AlertEvent(BaseModel):
     body: str
     data: dict[str, Any] | None
     read_at: str | None
+    title_en: str | None = None
+    body_en: str | None = None
+    period: str | None = Field(
+        None, description="Month the event is about (e.g. the newly detected ICP month)"
+    )
+    link: dict[str, Any] | None = Field(
+        None, description="Deep-link target: {kind: period|forecast|dataset, period?, forecast_id?, dataset?}"
+    )
 
 
 class AlertEventList(BaseModel):
@@ -1042,7 +1486,12 @@ class ReportCreateRequest(Strict):
         default_factory=dict,
         description="forecast: {forecast_id | horizon, scenario}; scenario_comparison: {scenario_ids, horizon}",
     )
-    formats: list[Literal["pdf", "xlsx", "csv"]] = Field(default_factory=lambda: list(DEFAULT_REPORT_FORMATS))
+    formats: list[Literal["pdf", "xlsx", "csv"]] = Field(
+        default_factory=lambda: list(DEFAULT_REPORT_FORMATS),
+        min_length=1,
+        description="At least one format. PDF needs a plan with PDF reports (403 otherwise); XLSX is dropped "
+        "on plans without Excel reports, and an XLSX-only request then produces CSV (available on every plan).",
+    )
 
 
 class ReportRun(BaseModel):

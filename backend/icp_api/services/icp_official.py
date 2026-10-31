@@ -30,6 +30,7 @@ ACCEPT_SINGLE_KINDS = {"announcement"}
 # month the archive lists it under *and* the decree number was read - two internal consistency
 # checks on the same official document. It stays flagged until a second source confirms it.
 OCR_KIND = "decree_ocr"
+DISSENT_TOLERANCE = 0.0051  # same as icp_api.services.verification.TOLERANCE
 
 
 class OfficialIcpIngestion:
@@ -92,7 +93,10 @@ class OfficialIcpIngestion:
                 buckets[bucket].append(m.period)
                 for e in esdm_icp.evidence_from(m):
                     d = e.to_dict()
-                    if ocr_ok:
+                    if abs(float(d["value"]) - float(m.value)) > DISSENT_TOLERANCE:
+                        # an outvoted or differing reading never carries the month's status
+                        d["verification_status"] = "dissent"
+                    elif ocr_ok:
                         d["verification_status"] = "machine_extracted"
                     evidence.append(d)
             elif m.status == "single_source":

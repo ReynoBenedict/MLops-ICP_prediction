@@ -23,11 +23,16 @@ from icp_api.schemas import (
     SelftestParams,
     TrainParams,
 )
-from icp_api.security import Principal, require_admin
+from icp_api.security import Principal, rate_limit, require_admin
 from icp_api.services.jobs import JobManager
 from icp_api.storage.repository import InvalidCursor
 
-router = APIRouter(prefix="/api/v1", responses=ERRORS)
+# Per-client default budget in addition to the operator's own admin buckets (also covers /audit).
+router = APIRouter(
+    prefix="/api/v1",
+    responses=ERRORS,
+    dependencies=[Depends(rate_limit("default", "rate_limit_default_per_minute"))],
+)
 PARAMS: dict[str, type[BaseModel]] = {
     "train": TrainParams,
     "ingest_benchmarks": IngestBenchmarksParams,

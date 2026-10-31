@@ -6,6 +6,9 @@ icp-api seed                      import data/raw datasets as first versions whe
 icp-api bootstrap                 migrate + seed + train + promote the first model if valid (local setup)
 icp-api export-openapi --out F    write the OpenAPI contract
 icp-api new-token                 print a random admin token
+icp-api audit-prune [--older-than-days N] [--apply]
+                                  delete audit rows older than N days (default AUDIT_RETENTION_DAYS;
+                                  0 keeps everything); dry run unless --apply; never automatic
 icp-api backup [--out DIR]        local backup: metadata DB, object store, MLflow store
 icp-api export-model [--version N] [--overwrite]
                                   copy a registered model version (default: production alias) from
@@ -17,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import secrets
 import shutil
 import sqlite3
@@ -24,7 +28,87 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from icp_api.settings import PROJECT_ROOT, load_settings
+from icp_api.settings import PROJECT_ROOT, Settings, load_settings
+
+# clone-state: the tables it may copy, each with constant read/count statements (no SQL is built from
+# schema names). A local table missing here stops the command, so a new migration must add its
+# table explicitly. `sessions` / `email_tokens` (credentials) and `app_schema` are never copied.
+_CLONE_SQL: dict[str, tuple[str, str]] = {
+    "alert_events": (
+        "SELECT * FROM alert_events ORDER BY rowid",
+        "SELECT COUNT(*) AS n FROM alert_events",
+    ),
+    "alert_rules": (
+        "SELECT * FROM alert_rules ORDER BY rowid",
+        "SELECT COUNT(*) AS n FROM alert_rules",
+    ),
+    "api_keys": (
+        "SELECT * FROM api_keys ORDER BY rowid",
+        "SELECT COUNT(*) AS n FROM api_keys",
+    ),
+    "audit_events": (
+        "SELECT * FROM audit_events ORDER BY rowid",
+        "SELECT COUNT(*) AS n FROM audit_events",
+    ),
+    "dataset_versions": (
+        "SELECT * FROM dataset_versions ORDER BY rowid",
+        "SELECT COUNT(*) AS n FROM dataset_versions",
+    ),
+    "deletion_requests": (
+        "SELECT * FROM deletion_requests ORDER BY rowid",
+        "SELECT COUNT(*) AS n FROM deletion_requests",
+    ),
+    "forecast_runs": (
+        "SELECT * FROM forecast_runs ORDER BY rowid",
+        "SELECT COUNT(*) AS n FROM forecast_runs",
+    ),
+    "ingestion_runs": (
+        "SELECT * FROM ingestion_runs ORDER BY rowid",
+        "SELECT COUNT(*) AS n FROM ingestion_runs",
+    ),
+    "jobs": (
+        "SELECT * FROM jobs ORDER BY rowid",
+        "SELECT COUNT(*) AS n FROM jobs",
+    ),
+    "model_promotions": (
+        "SELECT * FROM model_promotions ORDER BY rowid",
+        "SELECT COUNT(*) AS n FROM model_promotions",
+    ),
+    "organizations": (
+        "SELECT * FROM organizations ORDER BY rowid",
+        "SELECT COUNT(*) AS n FROM organizations",
+    ),
+    "plan_change_requests": (
+        "SELECT * FROM plan_change_requests ORDER BY rowid",
+        "SELECT COUNT(*) AS n FROM plan_change_requests",
+    ),
+    "report_runs": (
+        "SELECT * FROM report_runs ORDER BY rowid",
+        "SELECT COUNT(*) AS n FROM report_runs",
+    ),
+    "saved_scenarios": (
+        "SELECT * FROM saved_scenarios ORDER BY rowid",
+        "SELECT COUNT(*) AS n FROM saved_scenarios",
+    ),
+    "source_documents": (
+        "SELECT * FROM source_documents ORDER BY rowid",
+        "SELECT COUNT(*) AS n FROM source_documents",
+    ),
+    "source_evidence": (
+        "SELECT * FROM source_evidence ORDER BY rowid",
+        "SELECT COUNT(*) AS n FROM source_evidence",
+    ),
+    "usage_events": (
+        "SELECT * FROM usage_events ORDER BY rowid",
+        "SELECT COUNT(*) AS n FROM usage_events",
+    ),
+    "users": (
+        "SELECT * FROM users ORDER BY rowid",
+        "SELECT COUNT(*) AS n FROM users",
+    ),
+}
+_CLONE_SKIP = frozenset({"app_schema", "sessions", "email_tokens"})
+_IDENTIFIER = re.compile(r"^[a-z_][a-z0-9_]*$")
 
 
 def _serve(args: argparse.Namespace) -> int:
@@ -36,6 +120,9 @@ def _serve(args: argparse.Namespace) -> int:
         host=s.host,
         port=s.port,
         reload=args.reload,
+        # Exactly one process: rate limits, sign-in throttles and quota headers use in-process state.
+        # An explicit value also stops uvicorn from honouring a platform-provided WEB_CONCURRENCY.
+        workers=1,
         proxy_headers=False,
         timeout_graceful_shutdown=5,  # gateway keep-alive connections must not block reloads/shutdown
         log_config=None,
@@ -225,25 +312,33 @@ def _clone_state(args: argparse.Namespace) -> int:
     local_db = SqliteExecutor(Path(args.sqlite))
     objects_root = Path(args.objects)
     max_params = 100  # D1 bound-parameter limit per statement
-    skip = {"app_schema", "sessions"}
     tables = [
         r["name"]
         for r in local_db.query(
             "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY rowid"
         )
-        if r["name"] not in skip
+        if r["name"] not in _CLONE_SKIP
     ]
+    unknown = [t for t in tables if t not in _CLONE_SQL]
+    if unknown:
+        print(f"clone-state does not know the tables {unknown}; add them to cli._CLONE_SQL first")
+        return 1
     for table in tables:
-        rows = local_db.query(f"SELECT * FROM {table} ORDER BY rowid")  # noqa: S608 - identifiers come from the local schema, checked against the remote one
+        select_sql, count_sql = _CLONE_SQL[table]
+        rows = local_db.query(select_sql)
         if not rows:
             continue
         cols = list(rows[0].keys())
-        remote_cols = {c["name"] for c in remote_db.query(f"PRAGMA table_info({table})")}
+        bad = [c for c in cols if not _IDENTIFIER.match(c)]
+        if bad:
+            print(f"{table}: unexpected column names {bad}; refusing to build an INSERT")
+            return 1
+        remote_cols = {c["name"] for c in remote_db.query(f'PRAGMA table_info("{table}")')}
         missing = [c for c in cols if c not in remote_cols]
         if missing:
             print(f"{table}: remote schema lacks columns {missing}; apply migrations first")
             return 1
-        before = remote_db.query(f"SELECT COUNT(*) AS n FROM {table}")[0]["n"]  # noqa: S608 - identifiers come from the local schema, checked against the remote one
+        before = remote_db.query(count_sql)[0]["n"]
         per_stmt = max(1, max_params // len(cols))
         placeholders = "(" + ",".join("?" * len(cols)) + ")"
         for i in range(0, len(rows), per_stmt):
@@ -251,11 +346,12 @@ def _clone_state(args: argparse.Namespace) -> int:
             if args.dry_run:
                 continue
             remote_db.execute(
-                f"INSERT OR IGNORE INTO {table} ({','.join(cols)}) VALUES "  # noqa: S608 - identifiers come from the local schema, checked against the remote one
+                # table: a key of _CLONE_SQL; columns: validated identifiers present in the remote schema
+                f'INSERT OR IGNORE INTO "{table}" ({",".join(cols)}) VALUES '  # noqa: S608
                 + ",".join([placeholders] * len(chunk)),
                 [v for r in chunk for v in r.values()],
             )
-        after = remote_db.query(f"SELECT COUNT(*) AS n FROM {table}")[0]["n"]  # noqa: S608 - identifiers come from the local schema, checked against the remote one
+        after = remote_db.query(count_sql)[0]["n"]
         print(f"{table}: local {len(rows)} rows; remote {before} -> {after}")
     content_types = {
         ".csv": "text/csv",
@@ -287,32 +383,155 @@ def _new_token(_: argparse.Namespace) -> int:
     return 0
 
 
+def _non_negative(value: str) -> int:
+    n = int(value)
+    if n < 0:
+        raise argparse.ArgumentTypeError("must be >= 0")
+    return n
+
+
+def _audit_prune(args: argparse.Namespace) -> int:
+    """Delete audit rows older than the retention period. Dry run unless --apply; never automatic.
+
+    The period is --older-than-days, else AUDIT_RETENTION_DAYS; 0 (the default) keeps everything."""
+    from datetime import timedelta
+
+    from icp_api.container import build_sql
+    from icp_api.storage.product import ProductRepository
+
+    s = load_settings()
+    days = s.audit_retention_days if args.older_than_days is None else args.older_than_days
+    if days == 0:
+        print(json.dumps({"retention_days": 0, "deleted": 0, "note": "retention 0 keeps every audit row"}))
+        return 0
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    repo = ProductRepository(build_sql(s))
+    count = repo.count_audit_before(cutoff)
+    if not args.apply:
+        print(json.dumps({"retention_days": days, "cutoff": cutoff, "dry_run": True, "would_delete": count}))
+        return 0
+    deleted = repo.prune_audit_before(cutoff)
+    repo.audit(
+        "system:cli",
+        "audit.prune",
+        "success",
+        details={"retention_days": days, "cutoff": cutoff, "deleted": deleted},
+    )
+    print(json.dumps({"retention_days": days, "cutoff": cutoff, "dry_run": False, "deleted": deleted}))
+    return 0
+
+
+def is_local_store(s: Settings) -> bool:
+    """True when ``icp-api backup`` can back the store up itself (SQLite metadata, local objects)."""
+    return s.metadata_backend == "sqlite" and s.object_store_backend == "local"
+
+
 def _backup(args: argparse.Namespace) -> int:
     s = load_settings()
-    if s.metadata_backend != "sqlite" or s.object_store_backend != "local":
+    if not is_local_store(s):
         print(
             "Deployed backups use platform tooling; see docs/OPERATIONS.md "
             "(wrangler d1 export / Time Travel, wrangler kv key list+get, R2, Postgres)."
         )
         return 2
+    dest = write_local_backup(s, args.out)
+    print(f"backup written to {dest}")
+    return 0
+
+
+def write_local_backup(s: Settings, out: str | Path | None = None) -> Path:
+    """Write a local backup (metadata DB, MLflow store, objects, MLflow artifacts) into
+    ``<out or var/backups>/<UTC stamp>/`` and return that directory. Local stores only."""
+    if not is_local_store(s):
+        raise ValueError("write_local_backup needs the local SQLite store and local objects")
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    dest = Path(args.out or PROJECT_ROOT / "var" / "backups") / stamp
+    dest = Path(out or PROJECT_ROOT / "var" / "backups") / stamp
     dest.mkdir(parents=True, exist_ok=True)
-    src = sqlite3.connect(str(s.sqlite_path))
-    with sqlite3.connect(str(dest / "metadata.db")) as dst:
-        src.backup(dst)  # consistent online copy
-    src.close()
+    sources = [(Path(s.sqlite_path), dest / "metadata.db")]
     if s.mlflow_tracking_uri.startswith("sqlite:///"):
-        mlsrc = sqlite3.connect(s.mlflow_tracking_uri.removeprefix("sqlite:///"))
-        with sqlite3.connect(str(dest / "mlflow.db")) as dst:
-            mlsrc.backup(dst)
-        mlsrc.close()
+        sources.append((Path(s.mlflow_tracking_uri.removeprefix("sqlite:///")), dest / "mlflow.db"))
+    for source, target in sources:
+        src = sqlite3.connect(str(source))
+        dst = sqlite3.connect(str(target))
+        try:
+            src.backup(dst)  # consistent online copy
+        finally:
+            dst.close()
+            src.close()
     shutil.copytree(s.local_object_dir, dest / "objects", dirs_exist_ok=True)
     artifacts = Path(s.mlflow_artifact_root)
     if artifacts.is_dir():
         shutil.copytree(artifacts, dest / "mlflow-artifacts", dirs_exist_ok=True)
-    print(f"backup written to {dest}")
+    return dest
+
+
+def _backfill_evidence(args: argparse.Namespace) -> int:
+    """Record source evidence for ICP months of the active version that have none (additive and
+    idempotent; dataset values are never changed). Reads the stored ESDM reconciliation state
+    (``reconciliation.json`` in the source state directory); nothing is downloaded."""
+    import pandas as pd
+
+    from icp_api.container import build_container
+    from icp_api.services.icp_official import OfficialIcpIngestion
+    from icp_ml.sources import esdm_backfill, esdm_icp
+
+    s = load_settings()
+    c = build_container(s)
+    ing = OfficialIcpIngestion(c)
+    raw = esdm_backfill._load(ing.state_dir / "reconciliation.json", [])
+    if not raw:
+        print(f"no reconciliation state at {ing.state_dir}; run `icp-api ingest icp` first")
+        return 1
+    months = [esdm_icp.ReconciledMonth(**m) for m in raw]
+    _, evidence, _ = ing.accepted_series(months)
+    active = c.datasets.optional("icp")
+    if active is None:
+        print("no active ICP dataset")
+        return 1
+    series = active.series
+    rows = []
+    skipped = 0
+    for e in evidence:
+        p = pd.Period(e["period"], freq="M")
+        if p not in series.index or abs(float(series[p]) - float(e["value"])) > 0.005:
+            skipped += 1  # only document what the active version actually contains
+            continue
+        rows.append(
+            {
+                "period": e["period"],
+                "value": e["value"],
+                "kind": e["extraction_method"],
+                "verification_status": e["verification_status"],
+                "source_url": e["source_url"],
+                "document_sha256": e.get("document_sha256"),
+                "reference": e.get("reference"),
+                "retrieved_at": e["retrieved_at"],
+                "note": e.get("notes"),
+                "dataset_version_id": active.version["id"],
+            }
+        )
+    if args.dry_run:
+        have = {c.repo.evidence_key(r) for r in c.repo.all_evidence("icp")}
+        new = sum(1 for r in rows if c.repo.evidence_key(r) not in have)
+        print(json.dumps({"candidates": len(rows), "would_insert": new, "skipped_value_mismatch": skipped}))
+        return 0
+    inserted = c.repo.insert_missing_evidence("icp", rows)
+    c.repo.audit("system:cli", "dataset.icp.evidence_backfill", "success", target=active.version["id"])
+    print(json.dumps({"candidates": len(rows), "inserted": inserted, "skipped_value_mismatch": skipped}))
     return 0
+
+
+def _restore_check(args: argparse.Namespace) -> int:
+    """Audit v7 OPS-01: read-only backup verification (see icp_api.restore_check)."""
+    from icp_api.restore_check import restore_check
+
+    report = restore_check(
+        Path(args.backup_dir),
+        Path(args.live_db) if args.live_db else None,
+        Path(args.live_mlflow) if args.live_mlflow else None,
+    )
+    print(json.dumps(report, indent=2, sort_keys=True))
+    return 0 if report["ok"] else 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -341,6 +560,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--news-pages", type=int, default=6)
     p.set_defaults(func=_ingest)
     sub.add_parser("new-token").set_defaults(func=_new_token)
+    p = sub.add_parser(
+        "audit-prune", help="delete audit rows older than the retention period (dry run unless --apply)"
+    )
+    p.add_argument("--older-than-days", type=_non_negative, default=None)
+    p.add_argument("--apply", action="store_true", help="actually delete (default: report only)")
+    p.set_defaults(func=_audit_prune)
     p = sub.add_parser("export-model", help="export a registered model version as a serving bundle")
     p.add_argument("--version", default=None, help="registry version (default: the production alias)")
     p.add_argument("--overwrite", action="store_true", help="rewrite bundle files that already exist")
@@ -355,6 +580,32 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--objects", default=str(PROJECT_ROOT / "var" / "objects"))
     p.add_argument("--dry-run", action="store_true")
     p.set_defaults(func=_clone_state)
+    p = sub.add_parser(
+        "backfill-evidence",
+        help="record missing ICP source evidence from the stored ESDM reconciliation (additive, idempotent)",
+    )
+    p.add_argument("--dry-run", action="store_true", help="report what would be inserted")
+    p.set_defaults(func=_backfill_evidence)
+    p = sub.add_parser(
+        "restore-check",
+        help="verify a local backup read-only (integrity, schema version, row counts, objects); never restores",
+    )
+    p.add_argument("backup_dir")
+    p.add_argument(
+        "--live-db", default=None, help="live metadata.db to compare row counts with (opened read-only)"
+    )
+    p.add_argument(
+        "--live-mlflow", default=None, help="live mlflow.db to compare row counts with (opened read-only)"
+    )
+    p.set_defaults(func=_restore_check)
+    from icp_api.billing.cli import (
+        register_cli as register_billing_cli,
+    )  # Wave E: billing-reconcile (dry run)
+
+    register_billing_cli(sub)
+    from icp_api.services.provenance import register_cli  # Agent D v6: verify-provenance, backfill-dissent
+
+    register_cli(sub)
     args = parser.parse_args(argv)
     return int(args.func(args))
 

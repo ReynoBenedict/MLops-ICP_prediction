@@ -204,12 +204,19 @@ def test_public_snapshot_insights_and_latest_forecast(client, admin, owner):
     ins = client.get("/api/v1/insights", headers=owner["headers"]).json()
     assert ins["disclaimer"].count("Insight dihasilkan") == 1 and "Masuk untuk" not in ins["disclaimer"]
     kinds = {i["kind"] for i in ins["insights"]}
-    assert "material_change" in kinds and all(i["generated"] for i in ins["insights"])
+    # the latest move is described once: month-over-month, or folded into "largest move"
+    assert kinds & {"material_change", "unusual_movement"} and all(i["generated"] for i in ins["insights"])
+    assert ins["lang"] == "id" and ins["engine_version"]
     assert all(
         i["sources"] and i["sources"][0]["version_id"]
         for i in ins["insights"]
-        if i["kind"] != "forecast_change"
+        if i["kind"] not in ("forecast_change", "model_evaluation")
     )
+    assert all(i["evidence"]["method"]["text"] and i["facts"] is not None for i in ins["insights"])
+    en = client.get("/api/v1/insights", params={"lang": "en"}, headers=owner["headers"]).json()
+    assert en["lang"] == "en" and [i["id"] for i in en["insights"]] == [i["id"] for i in ins["insights"]]
+    assert "Insights are generated" in en["disclaimer"]
+    assert client.get("/api/v1/insights", params={"lang": "fr"}, headers=owner["headers"]).status_code == 422
     assert client.get("/api/v1/forecasts/latest").status_code == 401
     before = client.get(
         "/api/v1/forecasts/latest", headers=owner["headers"]

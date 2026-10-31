@@ -8,11 +8,25 @@ startup so a misconfigured deployment fails fast instead of running insecurely.
 from __future__ import annotations
 
 import os
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 VALID_ENVS = ("local", "test", "staging", "production")
+# Serverless platforms (Vercel Functions) mount the deployed code read-only; only the temporary
+# directory is writable. Every writable default lives under this sub-directory there.
+SERVERLESS_RUNTIME_SUBDIR = "icp"
+
+
+def serverless_runtime_dir() -> Path:
+    """Writable root of a serverless process: ``<temp dir>/icp`` (``/tmp/icp`` on Vercel)."""
+    return Path(tempfile.gettempdir()) / SERVERLESS_RUNTIME_SUBDIR
+
+
+# Upper bound of PUBLIC_HISTORY_MONTHS: the public snapshot shows recent context, not the archive
+# (the full history is a signed-in feature, clipped to the plan's history_years).
+MAX_PUBLIC_HISTORY_MONTHS = 36
 
 
 class ConfigError(RuntimeError):
@@ -99,7 +113,8 @@ class Settings:
     training_config_path: Path = PROJECT_ROOT / "pipeline" / "configs" / "training.yaml"
     model_refresh_seconds: int = 30
     seed_icp_path: Path = PROJECT_ROOT / "data" / "raw" / "dataset.csv"
-    seed_wti_path: Path = PROJECT_ROOT / "data" / "raw" / "wti.csv"
+    # The maintained WTI seed (data/seed); data/raw/wti.csv is the stale legacy series (DATA-06).
+    seed_wti_path: Path = PROJECT_ROOT / "data" / "seed" / "wti.csv"
     # Optional seeds for the other datasets (<dataset>.csv); exported from public sources, see docs/DATA_SOURCES.md.
     seed_dir: Path = PROJECT_ROOT / "data" / "seed"
     seed_from_repository: bool = True
@@ -108,6 +123,9 @@ class Settings:
     # security
     admin_tokens: dict[str, str] = field(default_factory=dict, repr=False)
     gateway_shared_secret: str = field(default="", repr=False)
+    # Previous gateway secrets still accepted on inbound requests during a rotation (comma-separated
+    # GATEWAY_ACCEPTED_SECRETS). Outbound calls to the Worker always use GATEWAY_SHARED_SECRET.
+    gateway_accepted_secrets: tuple[str, ...] = field(default=(), repr=False)
     require_gateway_secret: bool = False
     metrics_token: str = field(default="", repr=False)
     cors_allowed_origins: tuple[str, ...] = ()
@@ -115,8 +133,29 @@ class Settings:
     request_timeout_seconds: int = 30
     rate_limit_enabled: bool = True
     rate_limit_forecast_per_minute: int = 30
-    rate_limit_admin_per_minute: int = 30
+    rate_limit_admin_per_minute: int = 30  # operator writes (training, promotion, tenant changes)
+    rate_limit_admin_read_per_minute: int = 240  # operator reads (console pages, status polling)
     rate_limit_default_per_minute: int = 300
+    # sign-in / registration / password change per client IP; failed sign-ins per (email, client IP)
+    # and a much higher per-email ceiling across all IPs (see security.FailureThrottle)
+    rate_limit_auth_per_minute: int = 10
+    login_failures_max: int = 5
+    login_account_failures_max: int = 100
+    login_failure_window_seconds: int = 900
+    # identity lifecycle (v7 Wave B): a session ends after this many hours without use (0 = only the
+    # absolute 30-day expiry); temporary passwords from an admin invitation/reset expire after
+    # TEMP_PASSWORD_TTL_HOURS; e-mail flows stay off until a provider is integrated.
+    session_idle_timeout_hours: int = 168
+    temp_password_ttl_hours: int = 72
+    email_enabled: bool = False
+    email_link_base_url: str = ""
+    # Rate limits, sign-in throttles and API quotas use process-local counters: exactly one API
+    # process may serve traffic. API_INSTANCES != 1 is refused at start-up (no shared counter store).
+    api_instances: int = 1
+    # Audit-log retention in days for `icp-api audit-prune` (0 = keep everything; never automatic).
+    audit_retention_days: int = 0
+    # Months of official ICP (and Brent) history in the public market snapshot (`recent`); 0 disables it.
+    public_history_months: int = 24
     # jobs
     job_max_concurrent: int = 1
     job_timeout_train_seconds: int = 1800
@@ -129,6 +168,10 @@ class Settings:
     source_cache_dir: Path = PROJECT_ROOT / "var" / "cache" / "sources"
     source_state_dir: Path = PROJECT_ROOT / "var" / "sources"
     eia_api_key: str = field(default="", repr=False)
+    # Serverless process (icp_api.serverless, Vercel): the platform calls the ASGI app, so there is
+    # no bind address; there is no background job runner, and writable defaults live under
+    # serverless_runtime_dir(). Set only by load_settings(serverless=True), never from the environment.
+    serverless: bool = False
 
     @property
     def is_deployed(self) -> bool:
@@ -163,6 +206,25 @@ class Settings:
                 )
             if len(self.gateway_shared_secret) < 32:
                 raise ConfigError("the gateway data plane requires a GATEWAY_SHARED_SECRET of >= 32 chars")
+        if self.session_idle_timeout_hours < 0 or not 1 <= self.temp_password_ttl_hours <= 720:
+            raise ConfigError(
+                "SESSION_IDLE_TIMEOUT_HOURS must be >= 0 and TEMP_PASSWORD_TTL_HOURS between 1 and 720"
+            )
+        if self.email_enabled:
+            # Never pretend: no e-mail provider is integrated, so enabling e-mail would make every
+            # e-mail flow fail at send time. Refuse at start-up instead (services/email_tokens.py).
+            raise ConfigError("EMAIL_ENABLED=true is not supported yet: no e-mail provider is integrated")
+        if self.api_instances != 1:
+            raise ConfigError(
+                "API_INSTANCES must be 1: rate limits and sign-in throttles are counted in process memory "
+                "(API quotas are counted in the database); single-instance deployment, see docs/SECURITY.md"
+            )
+        if self.audit_retention_days < 0:
+            raise ConfigError("AUDIT_RETENTION_DAYS must be >= 0 (0 keeps everything)")
+        if not 0 <= self.public_history_months <= MAX_PUBLIC_HISTORY_MONTHS:
+            raise ConfigError(
+                f"PUBLIC_HISTORY_MONTHS must be between 0 and {MAX_PUBLIC_HISTORY_MONTHS} (0 disables the public history)"
+            )
         if self.model_source not in ("mlflow", "bundle"):
             raise ConfigError("MODEL_SOURCE must be mlflow or bundle")
         if self.is_deployed:
@@ -187,11 +249,21 @@ class Settings:
                 problems.append(
                     "REQUIRE_GATEWAY_SECRET=true with a GATEWAY_SHARED_SECRET of >= 32 chars is required"
                 )
+            if self.host in ("127.0.0.1", "localhost", "::1") and not self.serverless:
+                # A serverless platform invokes the ASGI app directly; nothing binds a socket.
+                problems.append(
+                    "API_HOST must be set explicitly (the API image sets it to all interfaces); "
+                    "a loopback bind is unreachable on a container host"
+                )
+            if any(len(s) < 32 for s in self.gateway_accepted_secrets):
+                problems.append("every GATEWAY_ACCEPTED_SECRETS entry must be >= 32 chars")
             if any(len(t) < 32 for t in self.admin_tokens.values()):
                 problems.append("admin tokens must be at least 32 characters")
             if len(self.metrics_token) < 32:
                 # /metrics bypasses the gateway secret (probes) and exposes prediction values.
                 problems.append("METRICS_TOKEN of >= 32 chars is required (protects /metrics)")
+            if self.login_account_failures_max < self.login_failures_max:
+                problems.append("LOGIN_ACCOUNT_FAILURES_MAX must be >= LOGIN_FAILURES_MAX")
             if "*" in self.cors_allowed_origins:
                 problems.append("CORS_ALLOWED_ORIGINS must not contain '*'")
             if problems:
@@ -208,22 +280,21 @@ class Settings:
         return files
 
 
-def load_settings(env_file: Path | None = None) -> Settings:
+def load_settings(env_file: Path | None = None, *, serverless: bool = False) -> Settings:
+    """Read and validate the settings. ``serverless=True`` (icp_api.serverless only) puts every
+    writable default (SQLite file, local objects, source cache/state, MLflow defaults) under
+    serverless_runtime_dir() instead of ``var/``; explicit environment values still win."""
     if os.getenv("APP_ENV", "local") in ("local",) or env_file is not None:
         _load_dotenv(env_file or PROJECT_ROOT / ".env")
     app_env = os.getenv("APP_ENV", "local")
-    var = PROJECT_ROOT / "var"
+    var = serverless_runtime_dir() if serverless else PROJECT_ROOT / "var"
     default_tracking = f"sqlite:///{(var / 'mlflow' / 'mlflow.db').as_posix()}"
     settings = Settings(
         app_env=app_env,
-        # Hosted runtimes (Render sets RENDER, Replit sets REPL_ID) and deployed envs must bind all
-        # interfaces; locally stay on loopback.
-        host=os.getenv(
-            "API_HOST",
-            "0.0.0.0"  # noqa: S104
-            if os.getenv("RENDER") or os.getenv("REPL_ID") or app_env in ("staging", "production")
-            else "127.0.0.1",
-        ),
+        # The bind address is never guessed: loopback unless API_HOST says otherwise. The API image
+        # (infra/docker/api.Dockerfile) sets API_HOST for container hosts; validate() refuses a
+        # loopback bind in deployed environments.
+        host=os.getenv("API_HOST") or "127.0.0.1",
         port=_int("PORT", _int("API_PORT", 8000)),
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         log_format=os.getenv("LOG_FORMAT", "json" if app_env in ("staging", "production") else "console"),
@@ -250,12 +321,13 @@ def load_settings(env_file: Path | None = None) -> Settings:
         ),
         model_refresh_seconds=_int("MODEL_REFRESH_SECONDS", 30),
         seed_icp_path=_path("SEED_ICP_PATH", PROJECT_ROOT / "data" / "raw" / "dataset.csv"),
-        seed_wti_path=_path("SEED_WTI_PATH", PROJECT_ROOT / "data" / "raw" / "wti.csv"),
+        seed_wti_path=_path("SEED_WTI_PATH", PROJECT_ROOT / "data" / "seed" / "wti.csv"),
         seed_dir=_path("SEED_DIR", PROJECT_ROOT / "data" / "seed"),
         seed_from_repository=_bool("SEED_FROM_REPOSITORY", True),
         public_registration_enabled=_bool("PUBLIC_REGISTRATION_ENABLED", True),
         admin_tokens=_parse_admin_tokens(os.getenv("ADMIN_API_TOKENS", "")),
         gateway_shared_secret=os.getenv("GATEWAY_SHARED_SECRET", ""),
+        gateway_accepted_secrets=tuple(_list("GATEWAY_ACCEPTED_SECRETS")),
         require_gateway_secret=_bool("REQUIRE_GATEWAY_SECRET", False),
         metrics_token=os.getenv("METRICS_TOKEN", ""),
         cors_allowed_origins=tuple(
@@ -269,7 +341,19 @@ def load_settings(env_file: Path | None = None) -> Settings:
         rate_limit_enabled=_bool("RATE_LIMIT_ENABLED", True),
         rate_limit_forecast_per_minute=_int("RATE_LIMIT_FORECAST_PER_MINUTE", 30),
         rate_limit_admin_per_minute=_int("RATE_LIMIT_ADMIN_PER_MINUTE", 30),
+        rate_limit_admin_read_per_minute=_int("RATE_LIMIT_ADMIN_READ_PER_MINUTE", 240),
         rate_limit_default_per_minute=_int("RATE_LIMIT_DEFAULT_PER_MINUTE", 300),
+        rate_limit_auth_per_minute=_int("RATE_LIMIT_AUTH_PER_MINUTE", 10),
+        login_failures_max=_int("LOGIN_FAILURES_MAX", 5),
+        login_account_failures_max=_int("LOGIN_ACCOUNT_FAILURES_MAX", 100),
+        api_instances=_int("API_INSTANCES", 1),
+        audit_retention_days=_int("AUDIT_RETENTION_DAYS", 0),
+        public_history_months=_int("PUBLIC_HISTORY_MONTHS", 24),
+        login_failure_window_seconds=_int("LOGIN_FAILURE_WINDOW_SECONDS", 900),
+        session_idle_timeout_hours=_int("SESSION_IDLE_TIMEOUT_HOURS", 168),
+        temp_password_ttl_hours=_int("TEMP_PASSWORD_TTL_HOURS", 72),
+        email_enabled=_bool("EMAIL_ENABLED", False),
+        email_link_base_url=os.getenv("EMAIL_LINK_BASE_URL", "").strip(),
         job_max_concurrent=_int("JOB_MAX_CONCURRENT", 1),
         job_timeout_train_seconds=_int("JOB_TIMEOUT_TRAIN_SECONDS", 1800),
         job_timeout_ingest_seconds=_int("JOB_TIMEOUT_INGEST_SECONDS", 300),
@@ -280,6 +364,7 @@ def load_settings(env_file: Path | None = None) -> Settings:
         source_state_dir=_path("SOURCE_STATE_DIR", var / "sources"),
         eia_api_key=os.getenv("EIA_API_KEY", ""),
         expose_api_docs=_bool("EXPOSE_API_DOCS", app_env != "production"),
+        serverless=serverless,
     )
     settings.validate()
     return settings

@@ -26,6 +26,7 @@ import pandas as pd
 
 from icp_api.errors import ApiError
 from icp_api.services.datasets import DatasetService
+from icp_api.services.explain import evaluation_disclosure, evaluation_extras
 from icp_api.storage.repository import MetadataRepository, Page, new_id, utcnow
 from icp_ml.config import PromotionPolicy, load_config
 from icp_ml.drift import drift_report
@@ -181,9 +182,14 @@ class ModelService:
         self.model_source = model_source
         self.objects = objects
         self._registry: RegistryLike | None = None
+        self._registry_lock = threading.Lock()
         self._loaded: LoadedModel | None = None
         self._checked_at = 0.0
         self._lock = threading.Lock()
+        self._eval_cache: dict[str, dict[str, Any] | None] = {}
+        self._warming = threading.Event()
+        self._warm_up_thread: threading.Thread | None = None
+        self._warm_up_lock = threading.Lock()
 
     @classmethod
     def from_config(
@@ -219,17 +225,58 @@ class ModelService:
     @property
     def registry(self) -> RegistryLike:
         if self._registry is None:
-            if self.bundle_mode:
-                from icp_ml.bundle import BundleRegistry
-
-                assert self.objects is not None
-                self._registry = BundleRegistry(self.objects, self.model_name, self.alias)
-            else:
-                # Imported lazily: MLflow is heavy and is never needed in bundle mode.
-                from icp_ml.registry import ModelRegistry
-
-                self._registry = ModelRegistry(self.tracking_uri, self.model_name, self.alias)
+            with self._registry_lock:  # built once even when the warm-up and a request race
+                if self._registry is None:
+                    self._registry = self._build_registry()
         return self._registry
+
+    def _build_registry(self) -> RegistryLike:
+        if self.bundle_mode:
+            from icp_ml.bundle import BundleRegistry
+
+            assert self.objects is not None
+            return BundleRegistry(self.objects, self.model_name, self.alias)
+        # Imported lazily: MLflow is heavy and is never needed in bundle mode.
+        from icp_ml.registry import ModelRegistry
+
+        return ModelRegistry(self.tracking_uri, self.model_name, self.alias)
+
+    # -- start-up warm-up ---------------------------------------------------------------------
+    @property
+    def warming(self) -> bool:
+        """True while the start-up warm-up is still building the registry client / loading the model."""
+        return self._warming.is_set()
+
+    def start_warm_up(self) -> threading.Thread:
+        """Build the registry client and load the production model in the background, so neither the
+        first request nor the first readiness probe pays the MLflow import (~4-6 s) and model load
+        (~3 s) on a cold process. Failures are logged; the model is then loaded on demand as before.
+
+        Idempotent while a warm-up runs: a second call (the serverless app starts one when it is built
+        and again from the lifespan, which a platform may or may not run) returns the running thread."""
+        with self._warm_up_lock:
+            running = self._warm_up_thread
+            if running is not None and running.is_alive():
+                return running
+            self._warming.set()
+            thread = threading.Thread(target=self._warm_up, name="model-warm-up", daemon=True)
+            self._warm_up_thread = thread
+            thread.start()
+            return thread
+
+    def _warm_up(self) -> None:
+        started = time.perf_counter()
+        try:
+            loaded = self.production()
+            logger.info(
+                "model warm-up: production v%s loaded in %.1fs", loaded.version, time.perf_counter() - started
+            )
+        except ApiError as exc:
+            logger.info("model warm-up: no production model loaded (%s)", exc.code)
+        except Exception as exc:  # noqa: BLE001 - a warm-up never takes the API down
+            logger.warning("model warm-up failed (%s); the model loads on first use", type(exc).__name__)
+        finally:
+            self._warming.clear()
 
     def _require_registry_writes(self) -> None:
         if self.bundle_mode:
@@ -342,6 +389,7 @@ class ModelService:
             if bt is not None
             else []
         )
+        out["evaluation_disclosure"] = evaluation_disclosure(self.evaluation_facts(version))  # Agent D v6
         return out
 
     def experiment_runs(self, limit: int, page_token: str | None) -> tuple[list[dict[str, Any]], str | None]:
@@ -479,6 +527,46 @@ class ModelService:
         except ValueError as exc:
             raise ApiError(409, "DRIFT_UNAVAILABLE", str(exc)) from exc
         return {"model_version": loaded.version, "method": loaded.spec.name, **asdict(report)}
+
+    def evaluation_facts(self, version: str | None) -> dict[str, Any] | None:
+        """Stored backtest facts of one model version (cached; registry versions are immutable).
+
+        ``by_horizon``: rows {mode, horizon, n, mae, mase, dir_acc, ...};
+        ``coverage``: mode -> horizon -> {"0.5", "0.8", "0.95", "n"} (empirical interval coverage).
+        Returns None when the version or its metrics cannot be read."""
+        if not version:
+            return None
+        if version in self._eval_cache:
+            return self._eval_cache[version]
+        try:
+            info = self.registry.get_version(version)
+            summary = version_summary(info)
+            coverage = self.registry.interval_coverage(info.run_id) if info.run_id else None
+        except Exception:  # noqa: BLE001 - evaluation facts are optional context, never fatal
+            logger.warning("evaluation facts unavailable for model version %s", version)
+            return None
+        facts = {
+            "version": str(version),
+            "method": summary["method"],
+            "method_family": summary["method_family"],
+            "description": summary["description"],
+            "benchmarks_used": list(summary["benchmarks_used"] or []),
+            "by_horizon": summary["metrics"]["by_horizon"],
+            "hold_last_h1_mae": summary["metrics"]["hold_last_h1_mae"],
+            "naive_hold_last_h1_mae": summary["metrics"]["baseline_naive_hold_last_h1_mae"],
+            "coverage": coverage or {},
+            "backtest_origins": summary["backtest_origins"],
+        }
+        # Agent D v6: naive baseline per step + coverage-check window from the stored backtest predictions
+        facts.update(evaluation_extras(self.registry, info.run_id, summary))
+        self._eval_cache[version] = facts
+        return facts
+
+    def production_version_or_none(self) -> str | None:
+        try:
+            return self.production().version
+        except ApiError:
+            return None
 
     def describe_production(self) -> dict[str, Any]:
         """Compact description for forecast responses and the business UI."""

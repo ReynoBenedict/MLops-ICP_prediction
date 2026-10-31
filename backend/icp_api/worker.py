@@ -26,6 +26,12 @@ def _write(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, default=str), encoding="utf-8")
 
 
+def refusal(job: dict[str, Any]) -> str | None:
+    """Error code when the job must not run: only a job the runner marked ``running`` may execute,
+    so a job that was reaped, cancelled or finished meanwhile never starts a second worker (JOB-01)."""
+    return None if job.get("status") == "running" else "JOB_NOT_RUNNING"
+
+
 def main(argv: list[str]) -> int:
     job_id, result_path = argv[0], Path(argv[1])
     settings = load_settings()
@@ -34,6 +40,13 @@ def main(argv: list[str]) -> int:
     job = container.repo.get_job(job_id)
     if job is None:
         _write(result_path, {"status": "failed", "error_code": "NOT_FOUND", "error_message": "job not found"})
+        return 1
+    refused = refusal(job)
+    if refused:
+        _write(
+            result_path,
+            {"status": "failed", "error_code": refused, "error_message": f"job is {job.get('status')}"},
+        )
         return 1
     request_id_var.set(job.get("request_id"))
     task = TASKS.get(job["job_type"])

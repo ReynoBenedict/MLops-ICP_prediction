@@ -33,6 +33,7 @@ class Plan:
     api_requests_per_month: int
     history_years: int  # price-explorer depth (0 = unlimited)
     insights: bool
+    price_note_en: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -56,6 +57,7 @@ PLANS: dict[str, Plan] = {
         0,
         3,
         True,
+        price_note_en="Free, limited features",
     ),
     "starter": Plan(
         "starter",
@@ -74,6 +76,7 @@ PLANS: dict[str, Plan] = {
         0,
         0,
         True,
+        price_note_en="For small teams",
     ),
     "professional": Plan(
         "professional",
@@ -92,6 +95,7 @@ PLANS: dict[str, Plan] = {
         20000,
         0,
         True,
+        price_note_en="For analyst teams",
     ),
     "enterprise": Plan(
         "enterprise",
@@ -110,6 +114,7 @@ PLANS: dict[str, Plan] = {
         500000,
         0,
         True,
+        price_note_en="Custom contract",
     ),
 }
 

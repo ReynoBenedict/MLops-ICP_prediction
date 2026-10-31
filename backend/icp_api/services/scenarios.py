@@ -12,6 +12,7 @@ from typing import Any
 from icp_api.entitlements import plan
 from icp_api.errors import ApiError
 from icp_api.security import check_horizon
+from icp_api.services.explain import ignored_inputs, input_usage
 from icp_api.services.forecasts import ForecastService
 from icp_api.storage.product import ProductRepository
 from icp_api.storage.repository import Page, new_id
@@ -28,8 +29,24 @@ class ScenarioService:
         org = self.repo.get_organization(org_id)
         return plan(org["plan"] if org else None).forecast_horizon_max
 
+    def _used_benchmarks(self) -> set[str]:
+        try:
+            return set(self.forecasts.models.production().spec.benchmarks_used)
+        except ApiError:
+            return set()
+
+    @staticmethod
+    def _run_used(fc: dict[str, Any]) -> set[str]:
+        points = (fc.get("result") or {}).get("points") or []
+        return {b for p in points for b, v in (p.get("benchmarks") or {}).items() if v.get("used_by_model")}
+
     def _shape(self, row: dict[str, Any]) -> dict[str, Any]:
-        return {**row, "archived": bool(row.get("archived_at"))}
+        # which assumptions the current production method actually reads (read time; F-5)
+        return {
+            **row,
+            "archived": bool(row.get("archived_at")),
+            "input_usage": input_usage(row.get("inputs"), self._used_benchmarks()),
+        }
 
     def create(
         self,
@@ -209,6 +226,11 @@ class ScenarioService:
                     "name": r["scenario"]["name"],
                     "forecast_id": r["forecast"]["id"],
                     "inputs": r["scenario"]["inputs"],
+                    # inputs the method of *this run* ignores are flagged, never a silent no-op
+                    "input_usage": (
+                        usage := input_usage(r["scenario"]["inputs"], self._run_used(r["forecast"]))
+                    ),
+                    "ignored_inputs": ignored_inputs(usage),
                 }
                 for r in runs
             ],

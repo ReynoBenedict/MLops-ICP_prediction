@@ -13,12 +13,14 @@ from fastapi.responses import PlainTextResponse
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from icp_api import __version__
+from icp_api.billing.router import router as billing_router
 from icp_api.container import Container, build_container
 from icp_api.errors import ApiError, install_error_handlers
 from icp_api.logging_setup import configure_logging
 from icp_api.middleware import RequestContextMiddleware
 from icp_api.routers import accounts, data, forecasts, health, jobs, models, product
-from icp_api.security import RateLimiter
+from icp_api.security import AuthFailureAudit, FailureThrottle, RateLimiter
+from icp_api.services.email_tokens import EmailTokenService, NullEmailSender
 from icp_api.services.jobs import JobManager
 from icp_api.settings import Settings, load_settings
 from icp_api.storage.migrations import apply_local
@@ -59,6 +61,10 @@ def create_app(
                 logger.exception("job runner failed to start")
                 manager = None
         app.state.jobs = manager
+        # Load the production model in the background: a cold process otherwise spends ~6-10 s on the
+        # first forecast or readiness probe (MLflow import + model load). Readiness reports the model
+        # as "degraded" (still loading) until it is ready.
+        c.models.start_warm_up()
         logger.info(
             "icp-api started",
             extra={
@@ -83,7 +89,15 @@ def create_app(
         openapi_url="/openapi.json" if settings.expose_api_docs else None,
     )
     app.state.container = c
+    c.accounts.configure(settings.session_idle_timeout_hours, settings.temp_password_ttl_hours)
+    # E-mail flows: disabled (NullEmailSender) until a provider exists; see services/email_tokens.py.
+    app.state.email_tokens = EmailTokenService(
+        c.repo, NullEmailSender(), enabled=settings.email_enabled, link_base_url=settings.email_link_base_url
+    )
     app.state.rate_limiter = RateLimiter()
+    app.state.login_failures = FailureThrottle()
+    app.state.password_failures = FailureThrottle()
+    app.state.auth_failure_audit = AuthFailureAudit()
     app.state.jobs = None
     install_error_handlers(app)
 
@@ -92,8 +106,16 @@ def create_app(
             CORSMiddleware,
             allow_origins=list(settings.cors_allowed_origins),
             allow_methods=["GET", "POST"],
-            allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
-            expose_headers=["X-Request-ID", "Retry-After", "Content-Disposition"],
+            allow_headers=["Authorization", "Content-Type", "X-Request-ID", "Idempotency-Key"],
+            expose_headers=[
+                "X-Request-ID",
+                "Idempotent-Replayed",
+                "Retry-After",
+                "Content-Disposition",
+                "X-Quota-Limit",
+                "X-Quota-Remaining",
+                "X-Quota-Reset",
+            ],
             allow_credentials=False,
             max_age=600,
         )
@@ -107,6 +129,7 @@ def create_app(
         jobs.router,
         accounts.router,
         product.router,
+        billing_router,  # sandbox only; every endpoint answers 503 BILLING_DISABLED unless BILLING_ENABLED
     ):
         app.include_router(r)
 

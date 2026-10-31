@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from icp_api.services.accounts import AccountService
+from icp_api.services.accounts import AccountService, PlanRequestService
 from icp_api.services.alerts import AlertService
 from icp_api.services.datasets import DatasetService
 from icp_api.services.forecasts import ForecastService
 from icp_api.services.insights import InsightService
 from icp_api.services.models import ModelService
+from icp_api.services.privacy import PrivacyService
+from icp_api.services.public_snapshot import SnapshotMemo
 from icp_api.services.reports import ReportService
 from icp_api.services.scenarios import ScenarioService
+from icp_api.services.verification import VerificationService
 from icp_api.settings import Settings
 from icp_api.storage.objects import GatewayObjectStore, LocalObjectStore, ObjectStore, S3ObjectStore
 from icp_api.storage.product import ProductRepository
@@ -32,6 +35,11 @@ class Container:
     alerts: AlertService
     scenarios: ScenarioService
     reports: ReportService
+    verification: VerificationService
+    plan_requests: PlanRequestService
+    privacy: PrivacyService
+    # the public market snapshot, memoised per container (SEC-C-01)
+    snapshot_memo: SnapshotMemo = field(default_factory=SnapshotMemo)
 
 
 def build_sql(settings: Settings) -> SqlExecutor:
@@ -76,7 +84,10 @@ def build_container(
     )
     forecasts = ForecastService(repo, datasets, models, objects)
     accounts = AccountService(repo)
-    insights = InsightService(repo, datasets)
+    plan_requests = PlanRequestService(repo, accounts)
+    privacy = PrivacyService(repo)
+    verification = VerificationService(repo, datasets)
+    insights = InsightService(repo, datasets, verification, models)
     alerts = AlertService(repo, datasets)
     scenarios = ScenarioService(repo, forecasts)
     reports = ReportService(repo, datasets, forecasts, models, insights, scenarios, objects)
@@ -93,4 +104,7 @@ def build_container(
         alerts,
         scenarios,
         reports,
+        verification,
+        plan_requests,
+        privacy,
     )

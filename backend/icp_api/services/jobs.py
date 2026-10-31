@@ -6,8 +6,13 @@ Design
 * Each attempt runs in a **separate Python process** (``python -m icp_api.worker``), so the
   runner can enforce timeouts and cancellation by terminating it, and a crashing training run
   cannot take the API down.
-* The runner heartbeats while the process runs; a reaper fails jobs whose heartbeat is stale
-  (e.g. the instance restarted), so nothing stays "running" forever.
+* The runner heartbeats while the process runs, and a job that is queued behind the runner's
+  concurrency slot heartbeats while it waits; a reaper fails jobs whose heartbeat is stale (e.g.
+  the instance restarted), so nothing stays "queued"/"running" forever (audit v7 JOB-02).
+* If the metadata store stops accepting heartbeats for half the stale window, the worker process
+  is terminated *before* the reaper could declare the job stale, so a reaped job never has a live
+  worker and two jobs of one type never run at once (audit v7 JOB-01). Any unexpected runner
+  error still records a terminal state when the store allows it.
 * Transient failures (worker exit code 75, e.g. network errors while fetching WTI) are retried
   with exponential backoff up to ``max_attempts``; other failures are final. Manual retries
   create a new job linked through ``retry_of``.
@@ -40,10 +45,11 @@ from icp_api.storage.repository import (
     MetadataRepository,
     Page,
     new_id,
+    snapshot_data_changed,
     utc_before,
     utcnow,
 )
-from icp_api.storage.sql import IntegrityError
+from icp_api.storage.sql import IntegrityError, StorageError
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +99,7 @@ class JobManager:
                 logger.exception("job reaper failed")
 
     def reap(self) -> int:
+        self._touch_waiting()
         n = self.repo.fail_stale_jobs(
             utc_before(self.settings.job_stale_after_seconds),
             "The job runner stopped (backend restart or crash) before the job finished. Retry the job.",
@@ -100,6 +107,26 @@ class JobManager:
         if n:
             logger.warning("marked %d stale job(s) as failed", n)
         return n
+
+    def _waiting_ids(self) -> list[str]:
+        return [jid for jid, t in list(self._threads.items()) if t.is_alive()]
+
+    def _touch_waiting(self, job_ids: list[str] | None = None) -> None:
+        """Refresh the liveness of queued jobs whose runner thread is alive in this process.
+
+        A queued job only waits for a free slot; without this its NULL heartbeat would make the
+        reaper fail it after ``job_stale_after_seconds`` (JOB-02). Jobs queued by a previous process
+        have no live thread here and are still reaped. Status-guarded, so it never revives a job.
+        """
+        ids = self._waiting_ids() if job_ids is None else job_ids
+        for job_id in ids:
+            try:
+                self.repo.db.execute(
+                    "UPDATE jobs SET heartbeat_at = ? WHERE id = ? AND status = 'queued'", (utcnow(), job_id)
+                )
+            except StorageError:
+                logger.warning("could not refresh queued job liveness", exc_info=True)
+                return
 
     # -- API operations -----------------------------------------------------------------------
     def submit(
@@ -129,8 +156,9 @@ class JobManager:
                         409, "IDEMPOTENCY_KEY_REUSED", "Idempotency key was used for another job type."
                     )
                 return existing
+        job_id = new_id("job")
         row = {
-            "id": new_id("job"),
+            "id": job_id,
             "job_type": job_type,
             "params": params,
             "retry_of": retry_of,
@@ -142,13 +170,21 @@ class JobManager:
         }
         try:
             job = self.repo.create_job(row)
-        except DuplicateActiveJob as exc:
-            active = self.repo.find_active_job(job_type)
-            raise ApiError(
-                409, "JOB_ALREADY_ACTIVE", str(exc), {"active_job_id": active["id"] if active else None}
-            ) from exc
-        except IntegrityError as exc:
-            raise ApiError(409, "IDEMPOTENCY_KEY_REUSED", "Idempotency key already used.") from exc
+        except (DuplicateActiveJob, IntegrityError) as exc:
+            # An ambiguous write (e.g. a transport retry after the first INSERT was applied) can
+            # report a conflict with the row this very call created; that job is ours (DATA-01).
+            own = self.repo.get_job(job_id)
+            if own is None:
+                if isinstance(exc, DuplicateActiveJob):
+                    active = self.repo.find_active_job(job_type)
+                    raise ApiError(
+                        409,
+                        "JOB_ALREADY_ACTIVE",
+                        str(exc),
+                        {"active_job_id": active["id"] if active else None},
+                    ) from exc
+                raise ApiError(409, "IDEMPOTENCY_KEY_REUSED", "Idempotency key already used.") from exc
+            job = own
         thread = threading.Thread(target=self._run, args=(job["id"],), name=f"job-{job['id']}", daemon=True)
         self._threads[job["id"]] = thread
         thread.start()
@@ -188,49 +224,82 @@ class JobManager:
         return self.get(job_id)
 
     # -- execution ----------------------------------------------------------------------------
+    def _acquire_slot(self, job_id: str) -> None:
+        """Wait for a runner slot, keeping the queued job visibly alive meanwhile (JOB-02)."""
+        interval = max(
+            0.2, min(float(self.settings.job_heartbeat_seconds), self.settings.job_stale_after_seconds / 3)
+        )
+        while not self._slots.acquire(timeout=interval):
+            self._touch_waiting([job_id])
+
     def _run(self, job_id: str) -> None:
-        with self._slots:
-            if not self.repo.mark_job_running(job_id, self.runner_id):
-                return  # cancelled while queued
-            job = self.get(job_id)
-            status, payload = "failed", {"error_code": "JOB_FAILED", "error_message": "Job did not run."}
-            for attempt in range(1, int(job["max_attempts"]) + 1):
-                self.repo.job_attempt(job_id, attempt)
-                status, payload = self._attempt(job)
-                logger.info(
-                    "job attempt finished", extra={"job_id": job_id, "attempt": attempt, "outcome": status}
-                )
-                if status != "transient" or attempt == job["max_attempts"]:
-                    break
-                if self._sleep_cancellable(job_id, min(60, 2**attempt)):
-                    status, payload = "cancelled", {"error_code": "CANCELLED", "error_message": "Cancelled."}
-                    break
-            if status == "succeeded":
-                self.repo.finish_job(job_id, "succeeded", result=payload.get("result"))
-            elif status == "cancelled":
-                self.repo.finish_job(
-                    job_id,
-                    "cancelled",
-                    error_code="CANCELLED",
-                    error_message=payload.get("error_message", "Cancelled."),
-                )
-            else:
+        self._acquire_slot(job_id)
+        try:
+            self._run_in_slot(job_id)
+        except Exception:
+            logger.exception("job runner failed", extra={"job_id": job_id})
+            try:
                 self.repo.finish_job(
                     job_id,
                     "failed",
-                    error_code=payload.get("error_code", "JOB_FAILED"),
-                    error_message=str(payload.get("error_message", "Job failed."))[:1000],
+                    error_code="RUNNER_ERROR",
+                    error_message="The job runner hit an unexpected error; the worker was stopped. Retry the job.",
                 )
-            final = self.get(job_id)["status"]
-            JOBS.labels(job_type=job["job_type"], status=final).inc()
-            self.repo.audit(
-                f"job:{job_id}",
-                f"job.{job['job_type']}.finished",
-                "success" if final == "succeeded" else "failure",
-                target=job_id,
-                request_id=job.get("request_id"),
-                details={"status": final},
+            except Exception:
+                # The store is unavailable; the reaper fails the job once its heartbeat is stale,
+                # and no worker process is left running (``_attempt`` stops it before re-raising).
+                logger.exception("could not record the job failure", extra={"job_id": job_id})
+        finally:
+            self._slots.release()
+
+    def _run_in_slot(self, job_id: str) -> None:
+        if not self.repo.mark_job_running(job_id, self.runner_id):
+            return  # cancelled while queued (or reaped)
+        job = self.get(job_id)
+        status, payload = "failed", {"error_code": "JOB_FAILED", "error_message": "Job did not run."}
+        for attempt in range(1, int(job["max_attempts"]) + 1):
+            self.repo.job_attempt(job_id, attempt)
+            try:
+                status, payload = self._attempt(job)
+            finally:
+                # The worker process may have written what the public snapshot shows (a new dataset
+                # version, evidence, a system forecast); its in-process memo learns it here, before the
+                # job is reported as finished (services/public_snapshot.py, SEC-C-01).
+                snapshot_data_changed()
+            logger.info(
+                "job attempt finished", extra={"job_id": job_id, "attempt": attempt, "outcome": status}
             )
+            if status != "transient" or attempt == job["max_attempts"]:
+                break
+            if self._sleep_cancellable(job_id, min(60, 2**attempt)):
+                status, payload = "cancelled", {"error_code": "CANCELLED", "error_message": "Cancelled."}
+                break
+        if status == "succeeded":
+            self.repo.finish_job(job_id, "succeeded", result=payload.get("result"))
+        elif status == "cancelled":
+            self.repo.finish_job(
+                job_id,
+                "cancelled",
+                error_code="CANCELLED",
+                error_message=payload.get("error_message", "Cancelled."),
+            )
+        else:
+            self.repo.finish_job(
+                job_id,
+                "failed",
+                error_code=payload.get("error_code", "JOB_FAILED"),
+                error_message=str(payload.get("error_message", "Job failed."))[:1000],
+            )
+        final = self.get(job_id)["status"]
+        JOBS.labels(job_type=job["job_type"], status=final).inc()
+        self.repo.audit(
+            f"job:{job_id}",
+            f"job.{job['job_type']}.finished",
+            "success" if final == "succeeded" else "failure",
+            target=job_id,
+            request_id=job.get("request_id"),
+            details={"status": final},
+        )
 
     def _sleep_cancellable(self, job_id: str, seconds: float) -> bool:
         deadline = time.monotonic() + seconds
@@ -247,8 +316,12 @@ class JobManager:
         python = self.settings.job_python or sys.executable
         cmd = [python, "-m", "icp_api.worker", job["id"], result_path]
         deadline = time.monotonic() + int(job["timeout_seconds"])
+        # Stop the attempt well before the reaper may call the job stale (JOB-01).
+        storage_grace = max(1.0, self.settings.job_stale_after_seconds / 2)
         next_beat = 0.0
+        last_beat_ok = time.monotonic()
         outcome: str | None = None
+        proc: subprocess.Popen[bytes] | None = None
         try:
             proc = subprocess.Popen(cmd, env=os.environ.copy())  # noqa: S603
             while proc.poll() is None:
@@ -258,21 +331,33 @@ class JobManager:
                     break
                 if now >= next_beat:
                     next_beat = now + self.settings.job_heartbeat_seconds
-                    if self.repo.heartbeat_job(job["id"]):
+                    cancel = False
+                    try:
+                        cancel = self.repo.heartbeat_job(job["id"])
+                    except Exception:
+                        logger.warning("job heartbeat failed", exc_info=True, extra={"job_id": job["id"]})
+                        if now - last_beat_ok >= storage_grace:
+                            outcome = "storage"
+                            break
+                        next_beat = now + min(1.0, float(self.settings.job_heartbeat_seconds))
+                    else:
+                        last_beat_ok = now
+                    if cancel:
                         outcome = "cancelled"
                         break
                 time.sleep(0.25)
             if outcome is not None:
-                proc.terminate()
-                try:
-                    proc.wait(10)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait(10)
+                _stop(proc)
                 if outcome == "timeout":
                     return "failed", {
                         "error_code": "TIMEOUT",
                         "error_message": f"Job exceeded its {job['timeout_seconds']}s timeout.",
+                    }
+                if outcome == "storage":
+                    return "failed", {
+                        "error_code": "RUNNER_STORAGE_ERROR",
+                        "error_message": "The metadata store stopped responding; the worker was stopped. "
+                        "Retry the job.",
                     }
                 return "cancelled", {"error_message": "Cancelled while running."}
             text = Path(result_path).read_text(encoding="utf-8").strip()
@@ -285,5 +370,21 @@ class JobManager:
                 "error_code": payload.get("error_code", "WORKER_CRASHED"),
                 "error_message": payload.get("error_message", f"Worker exited with code {proc.returncode}."),
             }
+        except BaseException:
+            if proc is not None:
+                _stop(proc)
+            raise
         finally:
             Path(result_path).unlink(missing_ok=True)
+
+
+def _stop(proc: subprocess.Popen[bytes]) -> None:
+    """Terminate the worker process and wait for it (kill it if it ignores the request)."""
+    if proc.poll() is not None:
+        return
+    proc.terminate()
+    try:
+        proc.wait(10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(10)
